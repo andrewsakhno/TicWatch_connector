@@ -21,6 +21,12 @@
          On a non-system app this still surfaces the standard Android "install unknown
          apps" confirmation on the watch; it does not enable silent installs. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Install-confirmation prompt (InstallConfirmationPrompt) when a direct activity launch is blocked. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Exempts the install-confirmation launch from background-activity-start limits. Wear has
+         no settings UI for it: grant via `adb shell appops set org.sand.ticwatch.watch SYSTEM_ALERT_WINDOW allow`. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"

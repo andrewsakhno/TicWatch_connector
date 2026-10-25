@@ -39,7 +39,7 @@ class WatchMessageRouter(
                 val packageName = String(payload, Charsets.UTF_8)
                 scope.launch {
                     val result = apkInstaller.uninstall(packageName)
-                    sendResult(DataLayerPaths.MESSAGE_UNINSTALL_APP_RESULT, result.isSuccess)
+                    sendResult(DataLayerPaths.MESSAGE_UNINSTALL_APP_RESULT, result)
                 }
             }
 
@@ -58,13 +58,27 @@ class WatchMessageRouter(
         val packageName = pendingInstallPackage.getAndSet(null) ?: "unknown"
         val stagedFile = PackageInstallerApkInstaller.stagedApkFile(context, "$packageName.apk")
 
-        val result = runCatching {
+        val staged = runCatching {
             stagedFile.parentFile?.mkdirs()
             stagedFile.outputStream().use { output -> input.copyTo(output) }
-            apkInstaller.install(stagedFile).getOrThrow()
         }
-        sendResult(DataLayerPaths.MESSAGE_INSTALL_APP_RESULT, result.isSuccess)
-        stagedFile.delete()
+        if (staged.isFailure) {
+            Log.w(TAG, "Failed to stage incoming APK", staged.exceptionOrNull())
+            sendResult(DataLayerPaths.MESSAGE_INSTALL_APP_RESULT, staged)
+            stagedFile.delete()
+            return
+        }
+        Log.i(TAG, "Staged incoming APK for $packageName (${stagedFile.length()} bytes)")
+
+        // Install outside the caller's transport session: the install waits for the user to
+        // confirm on-screen (unbounded), and holding the sender's socket open that long makes
+        // it time out and re-send the whole APK.
+        scope.launch {
+            val result = apkInstaller.install(stagedFile)
+            result.onFailure { Log.w(TAG, "Install of $packageName failed", it) }
+            sendResult(DataLayerPaths.MESSAGE_INSTALL_APP_RESULT, result)
+            stagedFile.delete()
+        }
     }
 
     private suspend fun replyWithSensorSnapshot() {
@@ -88,12 +102,16 @@ class WatchMessageRouter(
             .onFailure { Log.w(TAG, "Sensor snapshot reply failed", it) }
     }
 
-    private suspend fun sendResult(path: String, success: Boolean) {
-        replyTransport.sendMessage(path, (if (success) "OK" else "FAILED").toByteArray(Charsets.UTF_8))
+    /** Replies "OK", or "FAILED: <reason>" so the phone's log shows why without watch-side adb. */
+    private suspend fun sendResult(path: String, result: Result<*>) {
+        val text = result.exceptionOrNull()?.let { "$RESULT_FAILED: ${it.message ?: it}" } ?: RESULT_OK
+        replyTransport.sendMessage(path, text.toByteArray(Charsets.UTF_8))
     }
 
     companion object {
         private const val SENSOR_SNAPSHOT_TIMEOUT_MS = 5_000L
+        private const val RESULT_OK = "OK"
+        private const val RESULT_FAILED = "FAILED"
         private const val TAG = "WatchMessageRouter"
     }
 }
