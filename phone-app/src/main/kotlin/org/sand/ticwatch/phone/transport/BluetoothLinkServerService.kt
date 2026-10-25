@@ -33,7 +33,14 @@ class BluetoothLinkServerService : Service() {
     private var serverSocket: BluetoothServerSocket? = null
 
     private val appContainer by lazy { AppContainer(applicationContext) }
-    private val router by lazy { PhoneMessageRouter(appContainer.sensorDataSyncWorker, SyncStatusRepository, scope) }
+    private val router by lazy {
+        PhoneMessageRouter(
+            appContainer.sensorDataSyncWorker,
+            appContainer.workoutRouteRecorder,
+            appContainer.exerciseRouteLog,
+            SyncStatusRepository,
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -62,16 +69,17 @@ class BluetoothLinkServerService : Service() {
         }
     }
 
-    private fun handleConnection(socket: BluetoothSocket) {
+    private suspend fun handleConnection(socket: BluetoothSocket) {
         runCatching {
             socket.use {
                 val input = DataInputStream(it.inputStream)
                 val path = input.readUTF()
                 val length = input.readLong()
                 val payload = BoundedInputStream(input, length)
-                router.handleMessage(path, payload.readBytes())
-                // Ack so the sender knows it's safe to close its end of the socket.
-                it.outputStream.write(1)
+                val handled = router.handleMessage(path, payload.readBytes())
+                // ACK only once handled, so the watch keeps (and later resends) anything
+                // that didn't make it into Health Connect instead of deleting it.
+                it.outputStream.write(if (handled) TransportProtocol.ACK else TransportProtocol.NACK)
                 it.outputStream.flush()
             }
         }.onFailure { Log.w(TAG, "Failed to handle incoming Bluetooth connection", it) }

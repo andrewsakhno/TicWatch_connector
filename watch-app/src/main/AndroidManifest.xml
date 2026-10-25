@@ -3,6 +3,9 @@
     <uses-feature android:name="android.hardware.type.watch" />
 
     <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <!-- Lets SensorCollectionService read heart rate when started from the background
+         (AutoStartReceiver after reboot/update), not only when started from MainActivity. -->
+    <uses-permission android:name="android.permission.BODY_SENSORS_BACKGROUND" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="com.google.android.gms.permission.WEARABLE" />
 
@@ -15,6 +18,7 @@
          the phone (e.g. no official Wear OS by Google pairing). -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <!-- Required to install the APK bytes pushed over the channel via PackageInstaller.
@@ -27,6 +31,16 @@
     <!-- Exempts the install-confirmation launch from background-activity-start limits. Wear has
          no settings UI for it: grant via `adb shell appops set org.sand.ticwatch.watch SYSTEM_ALERT_WINDOW allow`. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Debug capability probe only: lists vendor (Mobvoi) packages' content providers. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Keeps the CPU up during the periodic vendor-sensor measurement window. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Mobvoi's own health/fitness data; granted only if Mobvoi declared them non-signature. -->
+    <uses-permission android:name="com.mobvoi.wear.permission.HEALTH_DATA_NORMAL" />
+    <uses-permission android:name="com.mobvoi.ticwear.permission.HEALTH" />
+    <uses-permission android:name="com.mobvoi.ticwear.permission.FITNESS_DATA" />
+    <!-- TicWatchFaceService: lets the face run as the always-visible wallpaper. -->
+    <uses-permission android:name="com.google.android.permission.PROVIDE_BACKGROUND" />
 
     <application
         android:allowBackup="true"
@@ -85,6 +99,52 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Watch face with live heart rate and ambient temperature from SensorCollectionService. -->
+        <service
+            android:name=".watchface.TicWatchFaceService"
+            android:directBootAware="false"
+            android:exported="true"
+            android:label="@string/watch_face_name"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+                <category android:name="com.google.android.wearable.watchface.category.WATCH_FACE" />
+            </intent-filter>
+            <meta-data
+                android:name="com.google.android.wearable.watchface.preview"
+                android:resource="@drawable/watch_face_preview" />
+            <meta-data
+                android:name="com.google.android.wearable.watchface.preview_circular"
+                android:resource="@drawable/watch_face_preview" />
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/watch_face" />
+        </service>
+
+        <!-- Tile with live heart rate and ambient temperature, read from SensorCollectionService. -->
+        <service
+            android:name=".tile.TicWatchTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_heart"
+            android:label="@string/tile_name"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview" />
+        </service>
+
+        <!-- Restarts the long-running services after reboot / app update. -->
+        <receiver
+            android:name=".AutoStartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

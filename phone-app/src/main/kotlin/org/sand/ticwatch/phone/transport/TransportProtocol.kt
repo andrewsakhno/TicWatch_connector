@@ -12,11 +12,21 @@ import java.util.UUID
  *
  * Each send opens a fresh RFCOMM socket, writes `path` (UTF), then `length` (unused by
  * the reader - the payload simply runs to end-of-stream when the sender closes the
- * socket), then the payload bytes, and closes. One socket carries exactly one payload.
+ * socket), then the payload bytes, then waits for the receiver's one-byte [ACK]/[NACK]
+ * reply before closing. One socket carries exactly one payload.
  */
 object TransportProtocol {
     val SERVICE_UUID: UUID = UUID.fromString("7b1e6b9e-6e0a-4c9b-9e2e-6a2a2f7a9b10")
     const val SERVICE_NAME = "TicWatchConnectorLink"
+
+    /** Receiver's one-byte reply: the payload was fully handled; the sender may drop it. */
+    const val ACK: Int = 1
+
+    /**
+     * Receiver's one-byte reply: the payload arrived but wasn't durably handled (e.g. the
+     * Health Connect write failed); the sender must keep it and retry later.
+     */
+    const val NACK: Int = 0
 
     /**
      * Major device classes a bonded watch may advertise, in preference order. The

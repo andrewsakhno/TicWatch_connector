@@ -54,12 +54,12 @@ class SensorSyncSender(
     private fun toPayload(batch: List<BufferedSample>): ByteArray {
         val entries = JSONArray()
         batch.forEach { buffered ->
-            entries.put(
-                JSONObject()
-                    .put("type", buffered.sample.type.name)
-                    .put("value", buffered.sample.value)
-                    .put("recordedAtEpochMs", buffered.sample.recordedAt.toEpochMilli()),
-            )
+            val entry = JSONObject()
+                .put("type", buffered.sample.type.name)
+                .put("value", buffered.sample.value)
+                .put("recordedAtEpochMs", buffered.sample.recordedAt.toEpochMilli())
+            buffered.sample.endedAt?.let { entry.put("endedAtEpochMs", it.toEpochMilli()) }
+            entries.put(entry)
         }
         return entries.toString().toByteArray(Charsets.UTF_8)
     }

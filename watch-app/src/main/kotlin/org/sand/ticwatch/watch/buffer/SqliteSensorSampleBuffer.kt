@@ -22,15 +22,18 @@ class SqliteSensorSampleBuffer(context: Context) : SensorSampleBuffer {
                     $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
                     $COL_TYPE TEXT NOT NULL,
                     $COL_VALUE REAL NOT NULL,
-                    $COL_RECORDED_AT INTEGER NOT NULL
+                    $COL_RECORDED_AT INTEGER NOT NULL,
+                    $COL_ENDED_AT INTEGER
                 )
                 """.trimIndent(),
             )
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            db.execSQL("DROP TABLE IF EXISTS $TABLE")
-            onCreate(db)
+            // Additive migration keeps any not-yet-delivered samples queued across app updates.
+            if (oldVersion < VERSION_WITH_ENDED_AT) {
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_ENDED_AT INTEGER")
+            }
         }
     }
 
@@ -39,6 +42,7 @@ class SqliteSensorSampleBuffer(context: Context) : SensorSampleBuffer {
             put(COL_TYPE, sample.type.name)
             put(COL_VALUE, sample.value)
             put(COL_RECORDED_AT, sample.recordedAt.toEpochMilli())
+            put(COL_ENDED_AT, sample.endedAt?.toEpochMilli())
         }
         helper.writableDatabase.insert(TABLE, null, values)
         Unit
@@ -47,7 +51,7 @@ class SqliteSensorSampleBuffer(context: Context) : SensorSampleBuffer {
     override suspend fun peek(limit: Int): List<BufferedSample> = withContext(Dispatchers.IO) {
         helper.readableDatabase.query(
             TABLE,
-            arrayOf(COL_ID, COL_TYPE, COL_VALUE, COL_RECORDED_AT),
+            arrayOf(COL_ID, COL_TYPE, COL_VALUE, COL_RECORDED_AT, COL_ENDED_AT),
             null,
             null,
             null,
@@ -64,6 +68,7 @@ class SqliteSensorSampleBuffer(context: Context) : SensorSampleBuffer {
                                 type = SensorType.valueOf(cursor.getString(1)),
                                 value = cursor.getDouble(2),
                                 recordedAt = Instant.ofEpochMilli(cursor.getLong(3)),
+                                endedAt = if (cursor.isNull(4)) null else Instant.ofEpochMilli(cursor.getLong(4)),
                             ),
                         ),
                     )
@@ -81,11 +86,13 @@ class SqliteSensorSampleBuffer(context: Context) : SensorSampleBuffer {
 
     private companion object {
         const val DB_NAME = "pending_sensor_samples.db"
-        const val DB_VERSION = 1
+        const val VERSION_WITH_ENDED_AT = 2
+        const val DB_VERSION = VERSION_WITH_ENDED_AT
         const val TABLE = "pending_samples"
         const val COL_ID = "id"
         const val COL_TYPE = "type"
         const val COL_VALUE = "value"
         const val COL_RECORDED_AT = "recorded_at_epoch_ms"
+        const val COL_ENDED_AT = "ended_at_epoch_ms"
     }
 }

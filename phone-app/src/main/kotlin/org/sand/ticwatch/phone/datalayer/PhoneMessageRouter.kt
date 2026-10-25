@@ -1,12 +1,12 @@
 package org.sand.ticwatch.phone.datalayer
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.health.SensorDataSyncWorker
+import org.sand.ticwatch.phone.route.ExerciseRouteLog
+import org.sand.ticwatch.phone.route.WorkoutPayloads
+import org.sand.ticwatch.phone.route.WorkoutRouteRecorder
 import org.sand.ticwatch.phone.sync.SyncDirection
 import org.sand.ticwatch.phone.sync.SyncStatusReporter
-import org.sand.ticwatch.phone.sync.describeSyncPath
 
 /**
  * Business logic for requests arriving from the watch, independent of which transport
@@ -20,41 +20,67 @@ import org.sand.ticwatch.phone.sync.describeSyncPath
  */
 class PhoneMessageRouter(
     private val sensorDataSyncWorker: SensorDataSyncWorker,
+    private val workoutRouteRecorder: WorkoutRouteRecorder,
+    private val exerciseRouteLog: ExerciseRouteLog,
     private val syncStatusReporter: SyncStatusReporter,
-    private val scope: CoroutineScope,
 ) {
-    fun handleMessage(path: String, payload: ByteArray) {
-        syncStatusReporter.begin(SyncDirection.FROM_WATCH, describeSyncPath(path, SyncDirection.FROM_WATCH), payload.size.toLong())
-        syncStatusReporter.updateProgress(payload.size.toLong())
+    /**
+     * Handles one incoming message to completion. Returns false when the payload was received
+     * but not durably handled, so the transport can tell the sender to keep it and retry
+     * rather than drop it (the watch only deletes buffered samples on an acknowledged send).
+     */
+    suspend fun handleMessage(path: String, payload: ByteArray): Boolean {
+        val progress = syncStatusReporter.begin(path, SyncDirection.FROM_WATCH, payload.size.toLong())
+        progress.update(payload.size.toLong())
+        var handled = true
 
         when (path) {
             DataLayerPaths.MESSAGE_INSTALL_APP_RESULT,
             DataLayerPaths.MESSAGE_UNINSTALL_APP_RESULT -> {
                 Log.i(TAG, "Watch app-management result on $path: ${String(payload, Charsets.UTF_8)}")
-                syncStatusReporter.end()
             }
 
             DataLayerPaths.MESSAGE_DEBUG_SENSOR_SNAPSHOT_RESPONSE -> {
                 Log.i(TAG, "Watch sensor snapshot: ${String(payload, Charsets.UTF_8)}")
-                syncStatusReporter.end()
             }
 
-            DataLayerPaths.MESSAGE_SENSOR_DATA_PUSH ->
-                scope.launch {
-                    sensorDataSyncWorker.onSensorDataPush(payload)
-                        .onSuccess { count -> Log.i(TAG, "Wrote $count sensor sample(s) to Health Connect") }
-                        .onFailure { Log.w(TAG, "Failed to write sensor data to Health Connect", it) }
-                    syncStatusReporter.end()
+            DataLayerPaths.MESSAGE_DEBUG_CAPABILITIES_RESPONSE,
+            DataLayerPaths.MESSAGE_DEBUG_VENDOR_DATA_RESPONSE,
+            DataLayerPaths.MESSAGE_DEBUG_SLEEP_LOG_RESPONSE -> {
+                // Logcat truncates long lines (~4KB); probe reports are larger.
+                String(payload, Charsets.UTF_8).chunked(LOG_CHUNK_LENGTH).forEachIndexed { index, chunk ->
+                    Log.i(TAG, "Watch probe $path [$index]: $chunk")
                 }
-
-            else -> {
-                Log.d(TAG, "Unhandled message path: $path")
-                syncStatusReporter.end()
             }
+
+            DataLayerPaths.MESSAGE_SENSOR_DATA_PUSH -> {
+                handled = sensorDataSyncWorker.onSensorDataPush(payload)
+                    .onSuccess { count -> Log.i(TAG, "Wrote $count sensor sample(s) to Health Connect") }
+                    .onFailure { Log.w(TAG, "Failed to write sensor data to Health Connect; watch will retry", it) }
+                    .isSuccess
+            }
+
+            DataLayerPaths.MESSAGE_WORKOUT_STATE -> {
+                runCatching { WorkoutPayloads.isWorkoutActive(payload) }
+                    .onSuccess { active -> if (active) workoutRouteRecorder.onWorkoutStarted() else workoutRouteRecorder.onWorkoutEnded() }
+                    .onFailure { Log.w(TAG, "Malformed workout state: ${String(payload, Charsets.UTF_8)}", it) }
+            }
+
+            // Route the watch tracked on its own GPS; stored like phone fixes and joined to the session by time.
+            DataLayerPaths.MESSAGE_EXERCISE_ROUTE_PUSH -> {
+                handled = runCatching { exerciseRouteLog.insert(WorkoutPayloads.watchRoutePoints(payload)) }
+                    .onFailure { Log.w(TAG, "Failed to store the watch's route points; watch will retry", it) }
+                    .isSuccess
+            }
+
+            else -> Log.d(TAG, "Unhandled message path: $path")
         }
+        progress.end()
+        return handled
     }
 
     companion object {
         private const val TAG = "PhoneMessageRouter"
+        private const val LOG_CHUNK_LENGTH = 3_000
     }
 }

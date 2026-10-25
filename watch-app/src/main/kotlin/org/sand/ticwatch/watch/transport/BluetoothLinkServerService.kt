@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
 import org.sand.ticwatch.watch.datalayer.WatchMessageRouter
 import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
+import org.sand.ticwatch.watch.datalayer.defaultDebugProbeRoutes
 import org.sand.ticwatch.watch.sensors.HealthServicesSensorCollector
 import java.io.DataInputStream
 
@@ -38,6 +39,7 @@ class BluetoothLinkServerService : Service() {
             context = applicationContext,
             apkInstaller = PackageInstallerApkInstaller(applicationContext),
             sensorCollector = HealthServicesSensorCollector(applicationContext),
+            debugProbes = defaultDebugProbeRoutes(applicationContext),
             replyTransport = TransportFactory.create(applicationContext),
             scope = scope,
         )
@@ -83,7 +85,7 @@ class BluetoothLinkServerService : Service() {
                     router.handleMessage(path, payload.readBytes())
                 }
                 // Ack so the sender knows it's safe to close its end of the socket.
-                it.outputStream.write(1)
+                it.outputStream.write(TransportProtocol.ACK)
                 it.outputStream.flush()
             }
         }.onFailure { Log.w(TAG, "Failed to handle incoming Bluetooth connection", it) }

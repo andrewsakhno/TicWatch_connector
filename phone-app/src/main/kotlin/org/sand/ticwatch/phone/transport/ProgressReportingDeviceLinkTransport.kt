@@ -2,7 +2,6 @@ package org.sand.ticwatch.phone.transport
 
 import org.sand.ticwatch.phone.sync.SyncDirection
 import org.sand.ticwatch.phone.sync.SyncStatusReporter
-import org.sand.ticwatch.phone.sync.describeSyncPath
 
 /**
  * Decorates any [DeviceLinkTransport] to report begin/progress/end into [reporter]
@@ -17,12 +16,12 @@ class ProgressReportingDeviceLinkTransport(
 ) : DeviceLinkTransport {
 
     override suspend fun send(path: String, length: Long, source: PayloadSource): Result<Unit> {
-        reporter.begin(SyncDirection.TO_WATCH, describeSyncPath(path, SyncDirection.TO_WATCH), length.takeIf { it > 0 })
-        val countingSource = PayloadSource { CountingInputStream(source.open()) { reporter.updateProgress(it) } }
+        val progress = reporter.begin(path, SyncDirection.TO_WATCH, length.takeIf { it > 0 })
+        val countingSource = PayloadSource { CountingInputStream(source.open(), progress::update) }
         return try {
             delegate.send(path, length, countingSource)
         } finally {
-            reporter.end()
+            progress.end()
         }
     }
 }

@@ -25,6 +25,7 @@ class WatchMessageRouter(
     private val context: Context,
     private val apkInstaller: ApkInstaller,
     private val sensorCollector: SensorCollector,
+    private val debugProbes: List<DebugProbeRoute>,
     private val replyTransport: DeviceLinkTransport,
     private val scope: CoroutineScope,
 ) {
@@ -49,6 +50,11 @@ class WatchMessageRouter(
                     runCatching { replyWithSensorSnapshot() }
                         .onFailure { Log.w(TAG, "replyWithSensorSnapshot failed", it) }
                 }
+            }
+
+            else -> debugProbes.firstOrNull { it.requestPath == path }?.let { route ->
+                Log.i(TAG, "Debug probe requested: $path")
+                scope.launch { replyWithProbe(route) }
             }
         }
     }
@@ -100,6 +106,14 @@ class WatchMessageRouter(
             payload.toByteArray(Charsets.UTF_8),
         ).onSuccess { Log.i(TAG, "Sensor snapshot reply sent") }
             .onFailure { Log.w(TAG, "Sensor snapshot reply failed", it) }
+    }
+
+    private suspend fun replyWithProbe(route: DebugProbeRoute) {
+        val payload = runCatching { route.probe.describe() }
+            .getOrElse { error -> JSONObject().put("error", error.toString()) }
+            .toString()
+        replyTransport.sendMessage(route.responsePath, payload.toByteArray(Charsets.UTF_8))
+            .onFailure { Log.w(TAG, "Debug probe reply on ${route.responsePath} failed", it) }
     }
 
     /** Replies "OK", or "FAILED: <reason>" so the phone's log shows why without watch-side adb. */

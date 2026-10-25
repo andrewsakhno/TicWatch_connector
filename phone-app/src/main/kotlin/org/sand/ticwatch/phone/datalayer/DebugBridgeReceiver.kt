@@ -7,12 +7,16 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import org.sand.ticwatch.phone.AppContainer
+import org.sand.ticwatch.phone.health.LegacyRecordCleanup
+import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
+import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
 import org.sand.ticwatch.phone.transport.TransportFactory
 import org.sand.ticwatch.phone.transport.sendMessage
 
 /**
- * adb-triggerable entry point into the watch debug bridge for [ACTION_PING_WATCH_SENSORS]:
- * forwards a sensor-snapshot request to the watch through the standard fallback transport
+ * adb-triggerable entry point into the watch debug bridge for [ACTION_PING_WATCH_SENSORS]
+ * and [ACTION_PROBE_WATCH_CAPABILITIES]: forwards the matching request to the watch through the standard fallback transport
  * (Wear Data Layer, falling back to direct Bluetooth). Works whenever phone and watch are
  * bonded, regardless of whether the watch is reachable by adb - the response comes back to
  * [PhoneDataLayerListenerService]/`BluetoothLinkServerService` and lands in this app's own
@@ -41,23 +45,55 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         // pendingResult.finish() is called right after launching the work below, not
         // after it completes: goAsync() only extends the receiver's execution window by
         // a few seconds, not by however long sending a message can take under retry.
-        when (intent.action) {
-            ACTION_PING_WATCH_SENSORS -> {
-                CoroutineScope(Dispatchers.IO).launch {
-                    TransportFactory.create(appContext)
-                        .sendMessage(DataLayerPaths.MESSAGE_DEBUG_SENSOR_SNAPSHOT_REQUEST, ByteArray(0))
-                        .onSuccess { Log.i(TAG, "Sent sensor-snapshot request to the watch") }
-                        .onFailure { error -> Log.w(TAG, "Failed to send sensor-snapshot request", error) }
-                }
-                pendingResult.finish()
+        REQUEST_PATHS[intent.action]?.let { path ->
+            CoroutineScope(Dispatchers.IO).launch {
+                TransportFactory.create(appContext)
+                    .sendMessage(path, ByteArray(0))
+                    .onSuccess { Log.i(TAG, "Sent $path to the watch") }
+                    .onFailure { error -> Log.w(TAG, "Failed to send $path", error) }
             }
-
-            else -> pendingResult.finish()
         }
+        LEGACY_CLEANUPS[intent.action]?.let { cleanupOf ->
+            CoroutineScope(Dispatchers.IO).launch { cleanupOf(AppContainer(appContext)).run() }
+        }
+        if (intent.action == ACTION_RUN_HISTORY_MAINTENANCE) {
+            SensorHistoryPurgeWorker.runNow(appContext)
+        }
+        if (intent.action == ACTION_BACKFILL_BODY_TEMPERATURE) {
+            BodyTemperatureBackfillWorker.enqueue(appContext, force = true)
+        }
+        pendingResult.finish()
     }
 
     companion object {
         const val ACTION_PING_WATCH_SENSORS = "org.sand.ticwatch.phone.action.DEBUG_PING_WATCH_SENSORS"
+        const val ACTION_PROBE_WATCH_CAPABILITIES = "org.sand.ticwatch.phone.action.DEBUG_PROBE_WATCH_CAPABILITIES"
+        const val ACTION_PROBE_WATCH_VENDOR_DATA = "org.sand.ticwatch.phone.action.DEBUG_PROBE_WATCH_VENDOR_DATA"
+        const val ACTION_PULL_WATCH_SLEEP_LOG = "org.sand.ticwatch.phone.action.DEBUG_PULL_WATCH_SLEEP_LOG"
+
+        /** Phone-local maintenance: deletes the per-sample resting-HR records older builds wrote. */
+        const val ACTION_CLEANUP_LEGACY_RESTING_HR = "org.sand.ticwatch.phone.action.DEBUG_CLEANUP_LEGACY_RESTING_HR"
+
+        /** Phone-local maintenance: deletes the active-only calories older builds wrote as total calories. */
+        const val ACTION_CLEANUP_LEGACY_TOTAL_CALORIES = "org.sand.ticwatch.phone.action.DEBUG_CLEANUP_LEGACY_TOTAL_CALORIES"
+
+        private val LEGACY_CLEANUPS: Map<String, (AppContainer) -> LegacyRecordCleanup> = mapOf(
+            ACTION_CLEANUP_LEGACY_RESTING_HR to AppContainer::legacyRestingHeartRateCleanup,
+            ACTION_CLEANUP_LEGACY_TOTAL_CALORIES to AppContainer::legacyTotalCaloriesCleanup,
+        )
+
+        /** Phone-local maintenance: runs the daily history purge + failed-delivery retry now. */
+        const val ACTION_RUN_HISTORY_MAINTENANCE = "org.sand.ticwatch.phone.action.DEBUG_RUN_HISTORY_MAINTENANCE"
+
+        /** Phone-local maintenance: re-runs the body-temperature backfill over the retained history. */
+        const val ACTION_BACKFILL_BODY_TEMPERATURE = "org.sand.ticwatch.phone.action.DEBUG_BACKFILL_BODY_TEMPERATURE"
+
+        private val REQUEST_PATHS = mapOf(
+            ACTION_PING_WATCH_SENSORS to DataLayerPaths.MESSAGE_DEBUG_SENSOR_SNAPSHOT_REQUEST,
+            ACTION_PROBE_WATCH_CAPABILITIES to DataLayerPaths.MESSAGE_DEBUG_CAPABILITIES_REQUEST,
+            ACTION_PROBE_WATCH_VENDOR_DATA to DataLayerPaths.MESSAGE_DEBUG_VENDOR_DATA_REQUEST,
+            ACTION_PULL_WATCH_SLEEP_LOG to DataLayerPaths.MESSAGE_DEBUG_SLEEP_LOG_REQUEST,
+        )
         private const val TAG = "DebugBridgeReceiver"
     }
 }

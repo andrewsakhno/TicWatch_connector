@@ -21,9 +21,6 @@ class HealthServicesSensorCollector(context: Context) : SensorCollector {
     override fun heartRateSamples(): Flow<SensorSample> =
         measure(DataType.HEART_RATE_BPM, SensorType.HEART_RATE)
 
-    override fun stepSamples(): Flow<SensorSample> =
-        measure(DataType.STEPS_PER_MINUTE, SensorType.STEPS)
-
     private fun <T : Number> measure(
         dataType: DeltaDataType<T, SampleDataPoint<T>>,
         sensorType: SensorType,

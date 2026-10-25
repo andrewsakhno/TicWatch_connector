@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -63,7 +65,7 @@ fun SettingsScreen(appContainer: AppContainer) {
         statusMessage = null
     }
 
-    Column(modifier = Modifier.padding(16.dp)) {
+    Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text(text = "Settings", style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -134,6 +136,12 @@ fun SettingsScreen(appContainer: AppContainer) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = it)
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        ProfileSettingsSection(appContainer)
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HistorySettingsSection(appContainer)
     }
 }
 
