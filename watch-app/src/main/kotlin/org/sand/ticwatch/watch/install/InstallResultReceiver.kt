@@ -17,9 +17,8 @@ class InstallResultReceiver : BroadcastReceiver() {
 
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             val confirmationIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-            confirmationIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            runCatching { confirmationIntent?.let { context.startActivity(it) } }
-                .onFailure { Log.w(TAG, "Failed to launch install-confirmation activity", it) }
+            Log.i(TAG, "Install session $sessionId awaiting user confirmation")
+            if (confirmationIntent != null) InstallConfirmationPrompt(context).show(sessionId, confirmationIntent)
             return
         }
 
