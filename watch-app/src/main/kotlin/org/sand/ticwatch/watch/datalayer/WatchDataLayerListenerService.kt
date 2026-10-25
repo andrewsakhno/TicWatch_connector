@@ -27,6 +27,7 @@ class WatchDataLayerListenerService : WearableListenerService() {
             context = applicationContext,
             apkInstaller = PackageInstallerApkInstaller(applicationContext),
             sensorCollector = HealthServicesSensorCollector(applicationContext),
+            debugProbes = defaultDebugProbeRoutes(applicationContext),
             replyTransport = TransportFactory.create(applicationContext),
             scope = scope,
         )

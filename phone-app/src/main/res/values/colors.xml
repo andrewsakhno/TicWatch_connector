@@ -1,3 +1,5 @@
 <resources>
     <color name="ic_launcher_background">#1B1B1F</color>
+    <!-- Tint of the MCP agent notification's action button ("Turn off"). -->
+    <color name="mcp_agent_notification_accent">#FF1E88E5</color>
 </resources>

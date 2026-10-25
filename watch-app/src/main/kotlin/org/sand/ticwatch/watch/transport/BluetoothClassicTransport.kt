@@ -5,6 +5,7 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.DataOutputStream
+import java.io.IOException
 
 /**
  * [DeviceLinkTransport] that talks directly to the bonded phone over classic Bluetooth
@@ -28,10 +29,12 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                     out.writeLong(length)
                     source.open().use { it.copyTo(out) }
                     out.flush()
-                    // Wait for the receiver's one-byte ack before closing - otherwise
-                    // the socket can tear down before the payload is fully delivered.
-                    socket.inputStream.read()
-                    Unit
+                    // Wait for the receiver's one-byte reply before closing - otherwise
+                    // the socket can tear down before the payload is fully delivered. Anything
+                    // but ACK (NACK, or -1 on a closed socket) fails the send so the caller keeps
+                    // the payload buffered for a retry instead of dropping it.
+                    val reply = socket.inputStream.read()
+                    if (reply != TransportProtocol.ACK) throw IOException("Phone did not accept $path (reply=$reply)")
                 }
             }
         }

@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -39,8 +40,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.datalayer.WatchNode
+import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
+import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
 import org.sand.ticwatch.phone.sync.SyncDirection
-import org.sand.ticwatch.phone.sync.SyncStatus
+import org.sand.ticwatch.phone.sync.SyncTransfer
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
 import org.sand.ticwatch.phone.transport.BluetoothLinkServerService
 import kotlin.math.roundToInt
@@ -48,6 +51,7 @@ import kotlin.math.roundToInt
 private enum class Screen(val label: String) {
     Dashboard("Dashboard"),
     Settings("Settings"),
+    McpAgent("MCP agent"),
 }
 
 class MainActivity : ComponentActivity() {
@@ -79,17 +83,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         appContainer = AppContainer(applicationContext)
+        SensorHistoryPurgeWorker.schedule(applicationContext)
+        BodyTemperatureBackfillWorker.enqueue(applicationContext)
 
         val startupPermissions = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)
+            // Without it the MCP agent's foreground notification (and its "Turn off" action) is hidden.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+            // Phone GPS track of watch workouts; background location can't be asked for in the same dialog.
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
             addAll(appContainer.healthRecordWriter.requiredPermissions)
         }
         requestStartupPermissions.launch(startupPermissions.toTypedArray())
 
+        val initialScreen = intent.getStringExtra(EXTRA_SCREEN)
+            ?.let { name -> Screen.entries.firstOrNull { it.name == name } }
+            ?: Screen.Dashboard
+
         setContent {
             MaterialTheme {
                 Surface {
-                    AppScaffold(appContainer)
+                    AppScaffold(appContainer, initialScreen)
                 }
             }
         }
@@ -99,15 +114,20 @@ class MainActivity : ComponentActivity() {
         startForegroundService(Intent(this, BluetoothLinkServerService::class.java))
     }
 
-    private companion object {
-        const val TAG = "MainActivity"
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val EXTRA_SCREEN = "org.sand.ticwatch.phone.extra.SCREEN"
+
+        /** Opens the app straight on the MCP agent screen (the agent notification's tap target). */
+        fun mcpAgentIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java).putExtra(EXTRA_SCREEN, Screen.McpAgent.name)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppScaffold(appContainer: AppContainer) {
-    var currentScreen by remember { mutableStateOf(Screen.Dashboard) }
+private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen) {
+    var currentScreen by remember { mutableStateOf(initialScreen) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
 
@@ -144,6 +164,7 @@ private fun AppScaffold(appContainer: AppContainer) {
                 when (currentScreen) {
                     Screen.Dashboard -> PairedWatchesScreen(appContainer)
                     Screen.Settings -> SettingsScreen(appContainer)
+                    Screen.McpAgent -> McpAgentScreen(appContainer)
                 }
             }
         }
@@ -153,7 +174,7 @@ private fun AppScaffold(appContainer: AppContainer) {
 @Composable
 private fun PairedWatchesScreen(appContainer: AppContainer) {
     var watches by remember { mutableStateOf<List<WatchNode>>(emptyList()) }
-    val syncStatus by SyncStatusRepository.status.collectAsState()
+    val transfers by SyncStatusRepository.transfers.collectAsState()
 
     LaunchedEffect(Unit) {
         watches = appContainer.watchAppManager.listPairedWatches()
@@ -161,7 +182,7 @@ private fun PairedWatchesScreen(appContainer: AppContainer) {
 
     Column(modifier = Modifier.padding(16.dp)) {
         Text(text = "TicWatch Connector", style = MaterialTheme.typography.headlineSmall)
-        (syncStatus as? SyncStatus.InProgress)?.let { SyncProgressIndicator(it) }
+        transfers.forEach { SyncProgressIndicator(it) }
         if (watches.isEmpty()) {
             Text(text = "No paired watches found.")
         } else {
@@ -175,18 +196,18 @@ private fun PairedWatchesScreen(appContainer: AppContainer) {
 /**
  * Shows what's currently moving over the phone<->watch link and where it's headed, so
  * a multi-minute APK transfer or a sensor-data push isn't silently invisible on the
- * Dashboard. Determinate when [SyncStatus.InProgress.totalBytes] is known (Bluetooth
+ * Dashboard. Determinate when [SyncTransfer.totalBytes] is known (Bluetooth
  * sends know the payload size upfront), indeterminate otherwise.
  */
 @Composable
-private fun SyncProgressIndicator(status: SyncStatus.InProgress) {
+private fun SyncProgressIndicator(status: SyncTransfer) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         val arrow = if (status.direction == SyncDirection.TO_WATCH) "Phone -> Watch" else "Watch -> Phone"
         Text(text = "$arrow: ${status.description}", style = MaterialTheme.typography.bodyMedium)
 
         val total = status.totalBytes
-        if (total != null && total > 0) {
-            val fraction = (status.bytesTransferred.toFloat() / total).coerceIn(0f, 1f)
+        val fraction = status.fraction
+        if (total != null && fraction != null) {
             LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             Text(
                 text = "${formatBytes(status.bytesTransferred)} / ${formatBytes(total)} (${(fraction * 100).roundToInt()}%)",
@@ -198,7 +219,7 @@ private fun SyncProgressIndicator(status: SyncStatus.InProgress) {
     }
 }
 
-private fun formatBytes(bytes: Long): String = when {
+internal fun formatBytes(bytes: Long): String = when {
     bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
     bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
     else -> "$bytes B"

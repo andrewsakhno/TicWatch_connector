@@ -44,6 +44,15 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.4.0")
     implementation("androidx.wear:wear-tooling-preview:1.0.0")
 
+    // TicWatchFaceService: digital face with live heart rate and ambient temperature.
+    implementation("androidx.wear.watchface:watchface:1.2.1")
+
+    // TicWatchTileService: tile with the same readings in the carousel left of the face.
+    implementation("androidx.wear.tiles:tiles:1.4.1")
+    implementation("androidx.wear.protolayout:protolayout:1.2.1")
+    implementation("androidx.wear.protolayout:protolayout-material:1.2.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
+
     // Talks to the phone-app companion over the Wear OS Data Layer.
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
@@ -71,9 +80,11 @@ tasks.register("pushApkToPhoneDownloads") {
     group = "install"
     description = "Builds the watch-app debug APK and adb-pushes it to Downloads/ticWatch-connector on the phone."
     dependsOn("assembleDebug")
+    // Resolved at configuration time: the configuration cache forbids Project access in doLast.
+    val apkFile = layout.buildDirectory.file("outputs/apk/debug/watch-app-debug.apk")
 
     doLast {
-        val apk = layout.buildDirectory.file("outputs/apk/debug/watch-app-debug.apk").get().asFile
+        val apk = apkFile.get().asFile
         check(apk.exists()) { "APK not found at ${apk.absolutePath}, did assembleDebug run?" }
 
         fun adb(vararg args: String): String {

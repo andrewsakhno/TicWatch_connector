@@ -1,14 +1,14 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("com.android.application") version "8.7.0"
+    id("com.android.application") version "8.11.1"
     kotlin("android") version "2.3.21"
     kotlin("plugin.compose") version "2.3.21"
 }
 
 android {
     namespace = "org.sand.ticwatch.phone"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.sand.ticwatch.phone"
@@ -46,10 +46,14 @@ dependencies {
 
     // Talks to the watch-app companion over the Wear OS Data Layer.
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     // Reads sensor/activity data synced from the watch and writes it into Google Health.
-    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
+    implementation("androidx.health.connect:connect-client:1.1.0")
+
+    // Daily purge of the transfer-history database.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // REST client for the backend module.
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
@@ -71,9 +75,11 @@ tasks.register("installAppToPhone") {
     group = "install"
     description = "Installs the debug APK only onto the phone, skipping any Wear OS device also visible to adb."
     dependsOn("assembleDebug")
+    // Resolved at configuration time: the configuration cache forbids Project access in doLast.
+    val apkFile = layout.buildDirectory.file("outputs/apk/debug/phone-app-debug.apk")
 
     doLast {
-        val apk = layout.buildDirectory.file("outputs/apk/debug/phone-app-debug.apk").get().asFile
+        val apk = apkFile.get().asFile
         check(apk.exists()) { "APK not found at ${apk.absolutePath}, did assembleDebug run?" }
 
         fun adb(vararg args: String): String {

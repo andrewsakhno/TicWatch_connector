@@ -44,16 +44,18 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                         // PayloadSource exists precisely so a failed attempt can be redone
                         // without re-buffering the payload. Retry a few times before giving
                         // up instead of failing the whole install on one transient hiccup.
+                        // Back off exponentially: a watch waking from sniff mode or restarting
+                        // its listener needs seconds, not the half-second a fixed delay gave.
                         if (attempt >= MAX_ATTEMPTS) throw e
+                        delay(INITIAL_RETRY_DELAY_MS shl (attempt - 1))
                         attempt++
-                        delay(RETRY_DELAY_MS)
                     }
                 }
             }
         }
 
     companion object {
-        private const val MAX_ATTEMPTS = 3
-        private const val RETRY_DELAY_MS = 500L
+        private const val MAX_ATTEMPTS = 5
+        private const val INITIAL_RETRY_DELAY_MS = 1_000L
     }
 }

@@ -7,18 +7,19 @@ enum class SyncDirection {
 }
 
 /**
- * Live state of the phone<->watch data exchange, observed by the Dashboard to render
- * a progress indicator. [InProgress.totalBytes] is null when the size isn't known
- * upfront (e.g. a Data Layer message read in one shot), in which case the UI falls
- * back to an indeterminate indicator instead of a percentage.
+ * One in-flight phone<->watch transfer, observed by the Dashboard and the install
+ * notification to render progress. [totalBytes] is null when the size isn't known
+ * upfront, in which case the UI falls back to an indeterminate indicator.
  */
-sealed interface SyncStatus {
-    data object Idle : SyncStatus
-
-    data class InProgress(
-        val direction: SyncDirection,
-        val description: String,
-        val bytesTransferred: Long,
-        val totalBytes: Long?,
-    ) : SyncStatus
+data class SyncTransfer(
+    val id: Long,
+    val path: String,
+    val direction: SyncDirection,
+    val description: String,
+    val bytesTransferred: Long,
+    val totalBytes: Long?,
+) {
+    /** Completed fraction in 0..1, or null when [totalBytes] is unknown. */
+    val fraction: Float?
+        get() = totalBytes?.takeIf { it > 0 }?.let { (bytesTransferred.toFloat() / it).coerceIn(0f, 1f) }
 }

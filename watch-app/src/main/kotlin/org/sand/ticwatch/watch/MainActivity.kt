@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,6 +28,7 @@ import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
 import kotlinx.coroutines.flow.StateFlow
 import org.sand.ticwatch.watch.sensors.SensorCollectionService
+import org.sand.ticwatch.watch.sensors.SensorType
 import org.sand.ticwatch.watch.transport.BluetoothLinkServerService
 
 class MainActivity : ComponentActivity() {
@@ -36,7 +38,7 @@ class MainActivity : ComponentActivity() {
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            lastHeartRateFlow = (binder as? SensorCollectionService.LocalBinder)?.lastHeartRate
+            lastHeartRateFlow = (binder as? SensorCollectionService.LocalBinder)?.readings?.latest(SensorType.HEART_RATE)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -49,6 +51,15 @@ class MainActivity : ComponentActivity() {
     private val requestStartupPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { onStartupPermissionsResolved() }
+
+    // BODY_SENSORS_BACKGROUND can only be requested on its own, after BODY_SENSORS is
+    // granted. Without it, a SensorCollectionService started from the background
+    // (AutoStartReceiver after reboot/update) runs but never receives heart rate,
+    // because the FGS isn't given while-in-use sensor access. Launched from the
+    // first request's result, so the two dialogs are sequential, not concurrent.
+    private val requestBackgroundSensors = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (!granted) Log.w(TAG, "Background body-sensor access denied") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,6 +81,8 @@ class MainActivity : ComponentActivity() {
     private fun startupPermissions(): List<String> = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)
         add(Manifest.permission.BODY_SENSORS)
+        // Health Services' user-activity state (asleep/awake), the source of sleep sessions.
+        add(Manifest.permission.ACTIVITY_RECOGNITION)
     }
 
     private fun isGranted(permission: String): Boolean =
@@ -79,7 +92,16 @@ class MainActivity : ComponentActivity() {
     // before); sensor collection needs BODY_SENSORS.
     private fun onStartupPermissionsResolved() {
         startBluetoothLinkService()
-        if (isGranted(Manifest.permission.BODY_SENSORS)) startAndBindSensorCollectionService()
+        if (isGranted(Manifest.permission.BODY_SENSORS)) {
+            startAndBindSensorCollectionService()
+            requestBackgroundSensorsIfNeeded()
+        }
+    }
+
+    private fun requestBackgroundSensorsIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (isGranted(Manifest.permission.BODY_SENSORS_BACKGROUND)) return
+        requestBackgroundSensors.launch(Manifest.permission.BODY_SENSORS_BACKGROUND)
     }
 
     private fun startBluetoothLinkService() {
@@ -97,6 +119,10 @@ class MainActivity : ComponentActivity() {
             unbindService(serviceConnection)
         }
         super.onDestroy()
+    }
+
+    private companion object {
+        const val TAG = "WatchMainActivity"
     }
 }
 

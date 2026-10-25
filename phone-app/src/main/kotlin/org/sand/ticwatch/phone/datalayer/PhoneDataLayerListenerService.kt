@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.AppContainer
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
 
@@ -20,10 +21,18 @@ class PhoneDataLayerListenerService : WearableListenerService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val appContainer by lazy { AppContainer(applicationContext) }
-    private val router by lazy { PhoneMessageRouter(appContainer.sensorDataSyncWorker, SyncStatusRepository, serviceScope) }
+    private val router by lazy {
+        PhoneMessageRouter(
+            appContainer.sensorDataSyncWorker,
+            appContainer.workoutRouteRecorder,
+            appContainer.exerciseRouteLog,
+            SyncStatusRepository,
+        )
+    }
 
     override fun onMessageReceived(event: MessageEvent) {
-        router.handleMessage(event.path, event.data)
+        // The Data Layer has no reply channel for a NACK, so the handled flag is unused here.
+        serviceScope.launch { router.handleMessage(event.path, event.data) }
     }
 
     override fun onDestroy() {
