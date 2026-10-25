@@ -1,0 +1,1 @@
+E:\projects\TicWatch_connector\phone-app\gradlew.bat -p phone-app installAppToPhone

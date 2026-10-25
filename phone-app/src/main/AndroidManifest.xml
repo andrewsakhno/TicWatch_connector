@@ -1,0 +1,102 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Needed to push the watch-app APK to the paired watch over the Data Layer. -->
+    <uses-permission android:name="com.google.android.gms.permission.WEARABLE" />
+
+    <!-- Direct-Bluetooth fallback transport, used when the Wear Data Layer can't reach
+         the watch (e.g. no official Wear OS by Google pairing). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Health Connect write permissions for the sensor data synced from the watch. -->
+    <uses-permission android:name="android.permission.health.WRITE_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.WRITE_STEPS" />
+    <uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.TicWatchConnector">
+
+        <uses-library android:name="com.google.android.wearable" android:required="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Health Connect auto-denies permission requests unless the app exposes a
+             privacy-policy/rationale screen: this filter on Android 13 and lower... -->
+        <activity
+            android:name=".health.HealthPermissionsRationaleActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <!-- ...and this alias on Android 14+. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".health.HealthPermissionsRationaleActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Listens for status/sensor messages pushed up from the watch-app. -->
+        <service
+            android:name=".datalayer.PhoneDataLayerListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Debug-only entry point: lets `adb shell am broadcast` ask the watch for a
+             live sensor snapshot over the Wear Data Layer, without needing adb access
+             to the watch itself. -->
+        <receiver
+            android:name=".datalayer.DebugBridgeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.sand.ticwatch.phone.action.DEBUG_PING_WATCH_SENSORS" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Accepts direct-Bluetooth connections from the watch's BluetoothClassicTransport
+             fallback, when the Wear Data Layer path isn't usable. -->
+        <service
+            android:name=".transport.BluetoothLinkServerService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Debug-only entry point: `adb shell am start-foreground-service` deploys a
+             watch-app build over the bridge without needing adb access to the watch
+             itself. Exported (and started directly, not via a broadcast) because a
+             BroadcastReceiver-triggered startForegroundService() call is blocked by
+             Android 12+'s background-FGS-start restriction - see DebugBridgeReceiver's
+             KDoc. -->
+        <service
+            android:name=".datalayer.WatchAppInstallService"
+            android:exported="true"
+            android:foregroundServiceType="connectedDevice" />
+
+    </application>
+
+</manifest>

@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.TicWatchConnectorWatch" parent="android:Theme.DeviceDefault" />
+</resources>
