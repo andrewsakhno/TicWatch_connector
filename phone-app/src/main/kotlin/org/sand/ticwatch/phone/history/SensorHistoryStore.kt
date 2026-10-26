@@ -53,6 +53,12 @@ interface SensorHistoryMaintenance : SensorHistoryStorageSize {
     suspend fun clear()
 }
 
+/** Drops a stored night so it can be re-imported. */
+fun interface SleepHistoryEraser {
+    /** Deletes sleep sessions, sleep stages and their raw rows starting in [from, to); returns the deleted sessions. */
+    suspend fun eraseSleep(from: Instant, to: Instant): Int
+}
+
 /** Aggregate of one rollup bucket (or of a whole range when summarised). */
 data class RollupPoint(
     val bucketStart: Instant,

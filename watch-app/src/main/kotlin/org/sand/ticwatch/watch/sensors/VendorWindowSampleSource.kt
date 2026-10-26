@@ -109,8 +109,17 @@ class AggregatorGroup(
     val qualifiers: List<() -> WindowQualifier> = emptyList(),
 )
 
-/** Converts [SensorEvent.timestamp] (elapsed-realtime nanos) to wall-clock time. */
+/**
+ * Converts [SensorEvent.timestamp] (elapsed-realtime nanos) to wall-clock time. Some vendor sensors
+ * (`mobvoi_sleep`) stamp events with a near-constant value instead of the measurement time, which
+ * would date them weeks back; an event older than [MAX_PLAUSIBLE_EVENT_AGE] (well past any batching
+ * latency) or from the future is dated by its arrival instead.
+ */
 internal fun SensorEvent.wallClockTime(): Instant {
     val ageNanos = SystemClock.elapsedRealtimeNanos() - timestamp
-    return Instant.now().minusNanos(ageNanos)
+    val now = Instant.now()
+    if (ageNanos < 0 || ageNanos > MAX_PLAUSIBLE_EVENT_AGE.toNanos()) return now
+    return now.minusNanos(ageNanos)
 }
+
+private val MAX_PLAUSIBLE_EVENT_AGE: Duration = Duration.ofMinutes(15)

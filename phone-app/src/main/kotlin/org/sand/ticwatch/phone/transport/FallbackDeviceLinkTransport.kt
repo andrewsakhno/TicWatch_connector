@@ -14,8 +14,13 @@ class FallbackDeviceLinkTransport(
     override suspend fun send(path: String, length: Long, source: PayloadSource): Result<Unit> {
         val primaryResult = primary.send(path, length, source)
         if (primaryResult.isSuccess) return primaryResult
-        Log.w(TAG, "Primary transport failed for $path, falling back", primaryResult.exceptionOrNull())
-        return fallback.send(path, length, source)
+        val primaryError = primaryResult.exceptionOrNull()
+        Log.w(TAG, "Primary transport failed for $path, falling back", primaryError)
+        // Keep the primary cause on the final failure: callers only log what they get back, and
+        // the fallback's error alone hides why the preferred link failed in the first place.
+        return fallback.send(path, length, source).onFailure { fallbackError ->
+            if (primaryError != null && primaryError !== fallbackError) fallbackError.addSuppressed(primaryError)
+        }
     }
 
     companion object {

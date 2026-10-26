@@ -10,6 +10,7 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import org.sand.ticwatch.phone.health.LegacyRecordCleanup
+import org.sand.ticwatch.phone.health.SleepNightReplacement
 import org.sand.ticwatch.phone.health.CircadianOffset
 import org.sand.ticwatch.phone.health.CorrelatedBodyTemperatureEstimator
 import org.sand.ticwatch.phone.health.DualHeatFluxCoreModel
@@ -144,6 +145,12 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
 
     val bodyTemperatureBackfill = BodyTemperatureBackfill(
         sensorHistoryStore, bodyTemperatureEstimator, acknowledgingHealthRecordWriter, SensorHistoryModule.clock,
+    )
+
+    val sleepNightReplacement = SleepNightReplacement(
+        client = HealthConnectClient.getOrCreate(context),
+        eraser = sensorHistoryStore,
+        ingest = sensorDataSyncWorker,
     )
 
     val legacyRestingHeartRateCleanup = LegacyRecordCleanup(

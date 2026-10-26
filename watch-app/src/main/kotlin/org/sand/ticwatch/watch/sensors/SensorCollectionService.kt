@@ -19,15 +19,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.watch.buffer.SqliteSensorSampleBuffer
 import org.sand.ticwatch.watch.datalayer.SensorSyncSender
 import org.sand.ticwatch.watch.datalayer.WorkoutStateNotifier
+import org.sand.ticwatch.watch.power.WakeLockAwakeRunner
 import org.sand.ticwatch.watch.transport.BluetoothClassicTransport
 import java.io.File
 import java.time.Duration
@@ -40,7 +38,8 @@ import java.time.Duration
  * MainActivity, so it silently stopped the moment the screen turned off or the app was
  * swiped away. Owning it here instead is what makes a full day of samples reach the
  * phone (and from there, Health Connect) rather than only whatever happened to be
- * collected while the activity was on screen.
+ * collected while the activity was on screen. Background heart rate now comes from the
+ * passive listener (sensor-hub batched); the Measure API runs only on [LocalBinder.liveHeartRate] demand.
  */
 class SensorCollectionService : Service() {
 
@@ -50,6 +49,16 @@ class SensorCollectionService : Service() {
 
     inner class LocalBinder : Binder() {
         val readings: LiveReadings get() = liveReadings
+
+        /** Hold while a screen shows the reading: switches heart rate from passive batches to live Measure updates. */
+        val liveHeartRate: LiveMeasurementDemand get() = liveHeartRateDemand
+    }
+
+    // Measure API keeps the PPG lit and wakes the CPU every second, so it only runs while a
+    // screen asks for it; background heart rate comes batched from the passive listener.
+    private val liveHeartRateDemand by lazy {
+        val sensorCollector: SensorCollector = HealthServicesSensorCollector(applicationContext)
+        OnDemandCollection(serviceScope) { sensorCollector.heartRateSamples().collect(liveReadings::record) }
     }
 
     private val vendorSensorRecorders by lazy {
@@ -83,21 +92,20 @@ class SensorCollectionService : Service() {
         vendorSensorRecorders.forEach { it.start() }
         offBodyDetector.start()
 
-        val sensorCollector: SensorCollector = HealthServicesSensorCollector(applicationContext)
         val backgroundSources: List<SampleSource> =
             listOf(buildPassiveSampleSource(), buildVendorWindowSampleSource(), buildSleepStageSampleSource())
         val sensorSyncSender = SensorSyncSender(
             transport = transport,
             pendingSamples = SqliteSensorSampleBuffer(applicationContext),
+            scheduler = AlarmWindowScheduler(
+                getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), SYNC_ALARM_TAG,
+            ),
+            awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), SYNC_WAKE_LOCK_TAG),
+            flushInterval = SYNC_FLUSH_INTERVAL,
+            flushThreshold = SYNC_FLUSH_THRESHOLD,
         )
-        // Shared once so the UI-display side and the bridge-sync side don't each open
-        // their own separate MeasureClient registration for the same data type.
-        val heartRateSamples = sensorCollector.heartRateSamples()
-            .shareIn(serviceScope, SharingStarted.Eagerly)
-
-        heartRateSamples.onEach(liveReadings::record).launchIn(serviceScope)
-        val backgroundSamples = backgroundSources.map { source -> source.samples().onEach(liveReadings::record) }
-        serviceScope.launch { sensorSyncSender.sync(merge(heartRateSamples, *backgroundSamples.toTypedArray())) }
+        val samples = backgroundSources.map { source -> source.samples().onEach(liveReadings::record) }
+        serviceScope.launch { sensorSyncSender.sync(merge(*samples.toTypedArray())) }
     }
 
     // mobvoi_sleep first: the TicMotion sensor only fills in while it is silent.
@@ -111,7 +119,9 @@ class SensorCollectionService : Service() {
     private fun buildVendorWindowSampleSource(): SampleSource = VendorWindowSampleSource(
         sensorManager = getSystemService(SensorManager::class.java),
         powerManager = getSystemService(PowerManager::class.java),
-        scheduler = AlarmWindowScheduler(getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java)),
+        scheduler = AlarmWindowScheduler(
+            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), VENDOR_WINDOW_ALARM_TAG,
+        ),
         groups = listOf(
             // Body sensors only read sensibly on the wrist; off it they'd just light the PPG.
             AggregatorGroup(
@@ -148,7 +158,8 @@ class SensorCollectionService : Service() {
         val sessionState = getSharedPreferences(StateSessionTracker.PREFERENCES_NAME, MODE_PRIVATE)
         return HealthServicesPassiveSampleSource(
             context = applicationContext,
-            intervalBindings = listOf(
+            bindings = listOf(
+                SampleBinding(DataType.HEART_RATE_BPM, SensorType.HEART_RATE),
                 IntervalBinding(DataType.STEPS, SensorType.STEPS),
                 IntervalBinding(DataType.DISTANCE, SensorType.DISTANCE),
                 IntervalBinding(DataType.FLOORS, SensorType.FLOORS),
@@ -199,8 +210,11 @@ class SensorCollectionService : Service() {
         private val MIN_SLEEP_SESSION: Duration = Duration.ofMinutes(15)
         private val MIN_EXERCISE_SESSION: Duration = Duration.ofMinutes(3)
 
-        /** Longer sleep-sensor silences (watch off, sensor stopped) end the night at the last event. */
-        private val MAX_SLEEP_EVENT_GAP: Duration = Duration.ofMinutes(45)
+        /**
+         * Longer sleep-sensor silences (watch off, sensor stopped) end the night at the last event. The
+         * vendor sensor only reports stage changes, and single stages ran up to 51 min on the first night.
+         */
+        private val MAX_SLEEP_EVENT_GAP: Duration = Duration.ofHours(2)
 
         /** One all-channel temperature line per minute: ~6.5 h fit the debug pull's tail. */
         private val TEMPERATURE_LOG_INTERVAL: Duration = Duration.ofMinutes(1)
@@ -208,6 +222,13 @@ class SensorCollectionService : Service() {
         /** SpO2 needs ~2 min of PPG to converge, so each window is 3 min, every 30 min. */
         private val VENDOR_WINDOW_INTERVAL: Duration = Duration.ofMinutes(30)
         private val VENDOR_WINDOW: Duration = Duration.ofMinutes(3)
+        private const val VENDOR_WINDOW_ALARM_TAG = "TicWatchConnector:VendorWindowAlarm"
+
+        /** Samples reach the phone within this long at most; a full batch goes out sooner. */
+        private val SYNC_FLUSH_INTERVAL: Duration = Duration.ofMinutes(15)
+        private const val SYNC_FLUSH_THRESHOLD = 50
+        private const val SYNC_ALARM_TAG = "TicWatchConnector:SyncFlushAlarm"
+        private const val SYNC_WAKE_LOCK_TAG = "TicWatchConnector:SyncFlush"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, SensorCollectionService::class.java))

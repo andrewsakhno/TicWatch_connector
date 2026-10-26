@@ -2,6 +2,7 @@ package org.sand.ticwatch.phone.transport
 
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -46,6 +47,7 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                         // up instead of failing the whole install on one transient hiccup.
                         // Back off exponentially: a watch waking from sniff mode or restarting
                         // its listener needs seconds, not the half-second a fixed delay gave.
+                        Log.w(TAG, "RFCOMM attempt $attempt/$MAX_ATTEMPTS for $path failed: $e")
                         if (attempt >= MAX_ATTEMPTS) throw e
                         delay(INITIAL_RETRY_DELAY_MS shl (attempt - 1))
                         attempt++
@@ -55,6 +57,7 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
         }
 
     companion object {
+        private const val TAG = "BluetoothClassicTransport"
         private const val MAX_ATTEMPTS = 5
         private const val INITIAL_RETRY_DELAY_MS = 1_000L
     }

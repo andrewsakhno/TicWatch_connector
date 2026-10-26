@@ -11,6 +11,7 @@ import org.sand.ticwatch.phone.AppContainer
 import org.sand.ticwatch.phone.health.LegacyRecordCleanup
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
 import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
+import org.sand.ticwatch.phone.history.SleepNightReplaceWorker
 import org.sand.ticwatch.phone.transport.TransportFactory
 import org.sand.ticwatch.phone.transport.sendMessage
 
@@ -62,6 +63,16 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         if (intent.action == ACTION_BACKFILL_BODY_TEMPERATURE) {
             BodyTemperatureBackfillWorker.enqueue(appContext, force = true)
         }
+        if (intent.action == ACTION_REPLACE_SLEEP_NIGHT) {
+            val payloadPath = intent.getStringExtra(EXTRA_PAYLOAD_PATH)
+            if (payloadPath == null) {
+                Log.w(TAG, "$ACTION_REPLACE_SLEEP_NIGHT needs --es $EXTRA_PAYLOAD_PATH")
+            } else {
+                SleepNightReplaceWorker.enqueue(
+                    appContext, payloadPath, intent.getLongExtra(EXTRA_FROM, 0L), intent.getLongExtra(EXTRA_TO, 0L),
+                )
+            }
+        }
         pendingResult.finish()
     }
 
@@ -87,6 +98,15 @@ class DebugBridgeReceiver : BroadcastReceiver() {
 
         /** Phone-local maintenance: re-runs the body-temperature backfill over the retained history. */
         const val ACTION_BACKFILL_BODY_TEMPERATURE = "org.sand.ticwatch.phone.action.DEBUG_BACKFILL_BODY_TEMPERATURE"
+
+        /**
+         * Phone-local repair: replaces this app's sleep in [EXTRA_FROM, EXTRA_TO) (epoch ms, `--el`) with the
+         * sensor-push JSON at [EXTRA_PAYLOAD_PATH] (stage it in the app's files dir via `run-as`).
+         */
+        const val ACTION_REPLACE_SLEEP_NIGHT = "org.sand.ticwatch.phone.action.DEBUG_REPLACE_SLEEP_NIGHT"
+        const val EXTRA_PAYLOAD_PATH = "payloadPath"
+        const val EXTRA_FROM = "fromEpochMs"
+        const val EXTRA_TO = "toEpochMs"
 
         private val REQUEST_PATHS = mapOf(
             ACTION_PING_WATCH_SENSORS to DataLayerPaths.MESSAGE_DEBUG_SENSOR_SNAPSHOT_REQUEST,
