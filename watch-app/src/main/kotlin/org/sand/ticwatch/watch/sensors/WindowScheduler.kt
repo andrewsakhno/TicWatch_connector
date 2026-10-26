@@ -9,7 +9,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import java.time.Duration
 import kotlin.coroutines.resume
 
-/** Suspends until the next periodic measurement window is due. */
+/** Suspends until the next periodic run (measurement window, sync flush) is due. */
 fun interface WindowScheduler {
     suspend fun awaitNext(interval: Duration)
 }
@@ -26,6 +26,7 @@ fun interface WindowScheduler {
 class AlarmWindowScheduler(
     private val alarmManager: AlarmManager,
     private val powerManager: PowerManager,
+    private val alarmTag: String,
 ) : WindowScheduler {
 
     private val handler = Handler(Looper.getMainLooper())
@@ -39,7 +40,7 @@ class AlarmWindowScheduler(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
             SystemClock.elapsedRealtime() + interval.toMillis(),
             ALARM_WINDOW.toMillis(),
-            ALARM_TAG,
+            alarmTag,
             listener,
             handler,
         )
@@ -47,8 +48,7 @@ class AlarmWindowScheduler(
     }
 
     private companion object {
-        const val ALARM_TAG = "TicWatchConnector:VendorWindowAlarm"
-        const val WAKE_LOCK_TAG = "TicWatchConnector:VendorWindowHandoff"
+        const val WAKE_LOCK_TAG = "TicWatchConnector:AlarmHandoff"
         val ALARM_WINDOW: Duration = Duration.ofMinutes(1)
         val HANDOFF_WAKE_LOCK: Duration = Duration.ofSeconds(15)
     }

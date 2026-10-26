@@ -16,11 +16,7 @@ enum class SleepStage(val code: Int) {
     AWAKE(1),
     LIGHT(2),
     DEEP(3),
-    REM(4);
-
-    companion object {
-        fun fromCode(code: Int): SleepStage? = entries.firstOrNull { it.code == code }
-    }
+    REM(4),
 }
 
 /** Decodes one sleep-sensor event into a stage, or null when it reports no sleep (Strategy: one layout per decoder). */
@@ -29,17 +25,30 @@ fun interface SleepStageDecoder {
 }
 
 /**
- * Mobvoi `mobvoi_sleep` / TicMotion sleep layout: values[0] is the stage code (1 awake, 2 light,
- * 3 deep, 4 rem). UNCONFIRMED: the daytime probe log only ever showed 0 (no sleep) and 99
- * (presumably not worn / undetermined), which both decode to null - check a night's
- * `sleep_sensor.log` (DEBUG_PULL_WATCH_SLEEP_LOG) before trusting the stage codes.
+ * Mobvoi `mobvoi_sleep` / TicMotion sleep layout: values[0] is a state code, sent only when it
+ * changes. From the first full night (2026-10-26, in bed ~00:10, up ~06:45): 6 before falling
+ * asleep, 7 at sleep onset and on a 3-min wake mid-night, then 9/10/8 cycling until 99 when the
+ * night ended; 0 = no sleep. Inferred, not vendor-documented: 7 awake, 8 REM (longer runs towards
+ * morning, ~90 min apart), 9 light (most of the night), 10 deep (front-loaded). 6, 99 and anything
+ * else (1 was seen while walking) decode to null, i.e. not asleep.
  */
 class MobvoiSleepStageDecoder : SleepStageDecoder {
     override fun decode(values: FloatArray): SleepStage? =
-        values.getOrNull(STAGE_INDEX)?.toInt()?.let(SleepStage::fromCode)
+        values.getOrNull(STAGE_INDEX)?.toInt()?.let(STAGE_BY_VENDOR_CODE::get)
 
     private companion object {
         const val STAGE_INDEX = 0
+        const val VENDOR_AWAKE = 7
+        const val VENDOR_REM = 8
+        const val VENDOR_LIGHT = 9
+        const val VENDOR_DEEP = 10
+
+        val STAGE_BY_VENDOR_CODE: Map<Int, SleepStage> = mapOf(
+            VENDOR_AWAKE to SleepStage.AWAKE,
+            VENDOR_REM to SleepStage.REM,
+            VENDOR_LIGHT to SleepStage.LIGHT,
+            VENDOR_DEEP to SleepStage.DEEP,
+        )
     }
 }
 
@@ -67,6 +76,8 @@ class SleepStageSegmenter(
         lastEventAt = at
         if (next == stage) return completed
         if (next == null) return completed + closeSession(at)
+        // Only a sleep state opens a session; AWAKE outside one is just daytime noise.
+        if (next == SleepStage.AWAKE && sessionStart == null) return completed
 
         closeStage(at)?.let(completed::add)
         stage = next

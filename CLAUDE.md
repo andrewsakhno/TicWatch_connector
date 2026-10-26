@@ -90,10 +90,14 @@ sleep-session retention. The SLEEP mapper puts the stored stages (`SleepStageFac
 on the `SleepSessionRecord`.
 
 Sleep stages: Health Services has no ASLEEP state on this watch, so `VendorSleepStageSource` (watch) listens to
-`mobvoi_sleep` (33171123, preferred) and TicMotion sleep (33171126), decodes values[0] as 1 awake/2 light/3 deep/
-4 rem (`MobvoiSleepStageDecoder` - UNCONFIRMED, the daytime log only showed 0/99 = no sleep) and
-`SleepStageSegmenter` emits SLEEP_STAGE intervals plus the SLEEP session when a non-sleep event or a >45 min
-silence ends the night. Segmenter state is in-memory: a service restart mid-night loses that night's session.
+`mobvoi_sleep` (33171123, preferred) and TicMotion sleep (33171126), decodes values[0] as 7 awake/8 rem/9 light/
+10 deep (`MobvoiSleepStageDecoder` - inferred from the first full night, not vendor-documented; 6 = in bed, not
+yet asleep, 99 = night over) and `SleepStageSegmenter` emits SLEEP_STAGE intervals plus the SLEEP session when a
+non-sleep event or a >2 h silence ends the night (the sensor only reports changes). Segmenter state is in-memory:
+a service restart mid-night loses that night's session. A wrongly recorded night is repaired with the
+`DEBUG_REPLACE_SLEEP_NIGHT` broadcast (`--es payloadPath <sensor-push JSON in the app's files dir> --el
+fromEpochMs --el toEpochMs`): `SleepNightReplaceWorker` deletes this app's HC sleep sessions and stored sleep
+in the range, then ingests the payload through the normal push path.
 
 Phone-derived: `StepsCadenceDeriver` (STEPS intervals of 30 s-10 min at >= 60 steps/min -> STEPS_CADENCE,
 `StepsCadenceRecord`); `BasalMetabolicRateDeriver` (Mifflin-St Jeor from the profile's birth year/sex/height/weight,

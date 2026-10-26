@@ -35,13 +35,20 @@ class MainActivity : ComponentActivity() {
 
     private var lastHeartRateFlow by mutableStateOf<StateFlow<Double?>?>(null)
     private var boundToSensorService = false
+    private var sensorService: SensorCollectionService.LocalBinder? = null
+    private var holdingLiveHeartRate = false
+    private var visible = false
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            lastHeartRateFlow = (binder as? SensorCollectionService.LocalBinder)?.readings?.latest(SensorType.HEART_RATE)
+            sensorService = binder as? SensorCollectionService.LocalBinder
+            lastHeartRateFlow = sensorService?.readings?.latest(SensorType.HEART_RATE)
+            updateLiveHeartRateDemand()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            sensorService = null
+            holdingLiveHeartRate = false
             lastHeartRateFlow = null
         }
     }
@@ -114,7 +121,28 @@ class MainActivity : ComponentActivity() {
         boundToSensorService = true
     }
 
+    override fun onStart() {
+        super.onStart()
+        visible = true
+        updateLiveHeartRateDemand()
+    }
+
+    override fun onStop() {
+        visible = false
+        updateLiveHeartRateDemand()
+        super.onStop()
+    }
+
+    /** Live (per-second) heart rate only while this screen is visible; otherwise the passive batches suffice. */
+    private fun updateLiveHeartRateDemand() {
+        val demand = sensorService?.liveHeartRate ?: return
+        if (visible == holdingLiveHeartRate) return
+        if (visible) demand.acquire() else demand.release()
+        holdingLiveHeartRate = visible
+    }
+
     override fun onDestroy() {
+        if (holdingLiveHeartRate) sensorService?.liveHeartRate?.release()
         if (boundToSensorService) {
             unbindService(serviceConnection)
         }

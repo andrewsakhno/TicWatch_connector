@@ -22,7 +22,7 @@ class SqliteSensorHistoryStore(
     private val database: SensorHistoryDatabase,
     private val projections: List<HistoryProjection>,
     private val zone: ZoneId,
-) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries {
+) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries, SleepHistoryEraser {
 
     override suspend fun recordPending(samples: List<SensorSample>, receivedAt: Instant): List<Long> =
         withContext(Dispatchers.IO) {
@@ -106,6 +106,21 @@ class SqliteSensorHistoryStore(
         try {
             db.delete(SleepStageTable.NAME, "${SleepStageTable.START} < ?", cutoffArgs)
             db.delete(SleepSessionTable.NAME, "${SleepSessionTable.START} < ?", cutoffArgs)
+                .also { db.setTransactionSuccessful() }
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    override suspend fun eraseSleep(from: Instant, to: Instant): Int = withContext(Dispatchers.IO) {
+        val db = database.writableDatabase
+        val range = arrayOf(from.toEpochMilli().toString(), to.toEpochMilli().toString())
+        val sleepTypes = listOf(SensorType.SLEEP, SensorType.SLEEP_STAGE).joinToString { SensorTypeCodes.code(it).toString() }
+        db.beginTransaction()
+        try {
+            db.delete(Table.NAME, "${Table.TYPE} IN ($sleepTypes) AND ${Table.RECORDED_AT} >= ? AND ${Table.RECORDED_AT} < ?", range)
+            db.delete(SleepStageTable.NAME, "${SleepStageTable.START} >= ? AND ${SleepStageTable.START} < ?", range)
+            db.delete(SleepSessionTable.NAME, "${SleepSessionTable.START} >= ? AND ${SleepSessionTable.START} < ?", range)
                 .also { db.setTransactionSuccessful() }
         } finally {
             db.endTransaction()

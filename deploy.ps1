@@ -135,7 +135,9 @@ function Wait-WatchInstallResult([string]$Serial, [string]$Since) {
     $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds $PollIntervalSec
-        $log = Invoke-Checked 'logcat' { adb -s $Serial logcat -d -T $Since -s "${InstallServiceTag}:*" }
+        $log = Invoke-Checked 'logcat' {
+            adb -s $Serial logcat -d -T $Since -s "${InstallServiceTag}:*" BluetoothClassicTransport:W FallbackTransport:W
+        }
         if ($log -match $SuccessMarker) {
             Write-Host 'Watch-app sent. Confirm the install dialog on the watch (tap its notification).' -ForegroundColor Green
             return $true
