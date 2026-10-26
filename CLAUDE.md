@@ -214,7 +214,11 @@ Bluetooth` tunneling to the watch itself.
   This returns immediately; the transfer itself (60-120+s, sometimes several minutes,
   for a ~26MB APK over classic Bluetooth Classic) runs in the background under the
   foreground-service notification, with no progress logging until it finishes — a long
-  silent wait is expected, not a hang. Watch for
+  silent wait is expected, not a hang. Payloads > 256 KB go over the resumable RFCOMM
+  frame (`TransportProtocol`: SHA-256 handshake + resume offset, 64 KB chunks each ACKed,
+  hash verified at the end; watch keeps `noBackupFilesDir/incoming_transfers/<sha>.part`),
+  so a dropped link resumes instead of resending the APK; a watch-app that predates it
+  replies a plain ACK and the phone falls back to the one-shot frame. Watch for
   `WatchAppInstallService: Sent watch-app install request...` /
   `...Failed to install...` in logcat, and cross-check `PhoneMessageRouter`'s
   `Watch app-management result on /app/install/result` line on the phone.

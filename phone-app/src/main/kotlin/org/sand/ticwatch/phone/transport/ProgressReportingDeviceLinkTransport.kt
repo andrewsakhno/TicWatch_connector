@@ -17,7 +17,12 @@ class ProgressReportingDeviceLinkTransport(
 
     override suspend fun send(path: String, length: Long, source: PayloadSource): Result<Unit> {
         val progress = reporter.begin(path, SyncDirection.TO_WATCH, length.takeIf { it > 0 })
-        val countingSource = PayloadSource { CountingInputStream(source.open(), progress::update) }
+        val countingSource = object : PayloadSource {
+            override fun open() = CountingInputStream(source.open(), progress::update)
+
+            // Hashing reads the whole payload up front; counting it would flash 100% progress.
+            override fun contentHash() = source.contentHash()
+        }
         return try {
             delegate.send(path, length, countingSource)
         } finally {
