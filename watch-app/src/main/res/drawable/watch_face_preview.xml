@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picker preview of TicWatchFaceService: dial, seconds arc, heart and thermometer glyphs. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <path android:fillColor="#0B1020" android:pathData="M100,0a100,100 0,1 1,0 200a100,100 0,1 1,0 -200z" />
+    <path
+        android:pathData="M100,17a83,83 0,1 1,-83 83"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeColor="#8A6CFF" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M62,88h76v6h-76z M62,100h76v6h-76z" />
+    <path
+        android:fillColor="#FF4D6D"
+        android:pathData="M70,141c-7,-5 -5,-12 0,-9c5,-3 7,4 0,9z" />
+    <path
+        android:fillColor="#FFB547"
+        android:pathData="M128,126h4v11a4,4 0,1 1,-4 0z" />
+</vector>

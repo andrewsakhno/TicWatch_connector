@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Carousel preview of TicWatchTileService: time label, heart rate | ambient temperature, Open chip. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <path android:fillColor="#000000" android:pathData="M100,0a100,100 0,1 1,0 200a100,100 0,1 1,0 -200z" />
+    <path android:fillColor="#8C9BC8" android:pathData="M84,34h32v6h-32z" />
+    <path
+        android:fillColor="#FF4D6D"
+        android:pathData="M64,74c-9,-7 -7,-16 0,-11c7,-5 9,4 0,11z" />
+    <path
+        android:fillColor="#FFB547"
+        android:pathData="M134,58h5v14a6,6 0,1 1,-5 0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,86h36v18h-36z M118,86h36v18h-36z" />
+    <path android:fillColor="#2E3655" android:pathData="M99.5,66h1v44h-1z" />
+    <path
+        android:fillColor="#3DDCFF"
+        android:pathData="M74,146h52a12,12 0,0 1,0 24h-52a12,12 0,0 1,0 -24z" />
+</vector>
