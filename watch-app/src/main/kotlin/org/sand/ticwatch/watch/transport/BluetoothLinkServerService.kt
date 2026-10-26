@@ -22,6 +22,9 @@ import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
 import org.sand.ticwatch.watch.datalayer.defaultDebugProbeRoutes
 import org.sand.ticwatch.watch.sensors.HealthServicesSensorCollector
 import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
+import java.io.InputStream
 
 /**
  * Long-running counterpart to [BluetoothClassicTransport] on the phone side: listens
@@ -33,6 +36,10 @@ class BluetoothLinkServerService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var serverSocket: BluetoothServerSocket? = null
+
+    private val resumableReceiver: ResumableTransferReceiver by lazy {
+        ResumableTransferReceiver(File(noBackupFilesDir, INCOMING_TRANSFERS_DIR))
+    }
 
     private val router: WatchMessageRouter by lazy {
         WatchMessageRouter(
@@ -78,17 +85,27 @@ class BluetoothLinkServerService : Service() {
                 val input = DataInputStream(it.inputStream)
                 val path = input.readUTF()
                 val length = input.readLong()
-                val payload = BoundedInputStream(input, length)
-                if (path == DataLayerPaths.CHANNEL_APK_TRANSFER) {
-                    router.handleIncomingApk(payload)
-                } else {
-                    router.handleMessage(path, payload.readBytes())
+                if (path == TransportProtocol.RESUMABLE_FRAME_PATH) {
+                    // The receiver writes its own per-chunk and final replies.
+                    resumableReceiver.receive(it, input, DataOutputStream(it.outputStream)) { realPath, file ->
+                        file.inputStream().use { payload -> dispatch(realPath, payload) }
+                    }
+                    return@use
                 }
+                dispatch(path, BoundedInputStream(input, length))
                 // Ack so the sender knows it's safe to close its end of the socket.
                 it.outputStream.write(TransportProtocol.ACK)
                 it.outputStream.flush()
             }
         }.onFailure { Log.w(TAG, "Failed to handle incoming Bluetooth connection", it) }
+    }
+
+    private suspend fun dispatch(path: String, payload: InputStream) {
+        if (path == DataLayerPaths.CHANNEL_APK_TRANSFER) {
+            router.handleIncomingApk(payload)
+        } else {
+            router.handleMessage(path, payload.readBytes())
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -115,5 +132,6 @@ class BluetoothLinkServerService : Service() {
         private const val NOTIFICATION_ID = 42
         private const val CHANNEL_ID = "watch_link_bridge"
         private const val TAG = "BluetoothLinkServer"
+        private const val INCOMING_TRANSFERS_DIR = "incoming_transfers"
     }
 }

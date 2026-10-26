@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone.transport
 
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -24,22 +25,34 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                     ?: error("Bluetooth not supported on this device")
                 val watch = TransportProtocol.findBondedWatch(adapter) ?: error("No bonded watch found")
 
+                val upload = if (length > TransportProtocol.RESUMABLE_THRESHOLD) {
+                    ResumableUpload(path, length, source, source.contentHash())
+                } else {
+                    null
+                }
+                var resumable = upload != null
                 var attempt = 1
                 while (true) {
+                    val offsetBefore = upload?.confirmedOffset
                     try {
-                        watch.createRfcommSocketToServiceRecord(TransportProtocol.SERVICE_UUID).use { socket ->
+                        val completed = watch.createRfcommSocketToServiceRecord(TransportProtocol.SERVICE_UUID).use { socket ->
                             socket.connect()
-                            val out = DataOutputStream(socket.outputStream)
-                            out.writeUTF(path)
-                            out.writeLong(length)
-                            source.open().use { it.copyTo(out) }
-                            out.flush()
-                            // Wait for the receiver's one-byte ack before closing - otherwise
-                            // the socket can tear down before the payload is fully delivered.
-                            socket.inputStream.read()
+                            if (upload != null && resumable) {
+                                upload.runOn(socket) == ResumableUpload.Outcome.COMPLETED
+                            } else {
+                                sendOneShotFrame(socket, path, length, source)
+                                true
+                            }
                         }
-                        break
+                        if (completed) break
+                        Log.i(TAG, "Watch predates resumable transfers, resending $path as one frame")
+                        resumable = false
                     } catch (e: IOException) {
+                        // A resumable attempt that got further than the previous one isn't a
+                        // failure streak: the link is alive, just flaky - keep resuming.
+                        if (upload != null && e !is ContentHashMismatchException && upload.confirmedOffset != offsetBefore) {
+                            attempt = 1
+                        }
                         // RFCOMM connects/acks on this link are observably flaky (a fresh
                         // socket per send, racing against sniff-mode power transitions) -
                         // PayloadSource exists precisely so a failed attempt can be redone
@@ -55,6 +68,17 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                 }
             }
         }
+
+    private fun sendOneShotFrame(socket: BluetoothSocket, path: String, length: Long, source: PayloadSource) {
+        val out = DataOutputStream(socket.outputStream)
+        out.writeUTF(path)
+        out.writeLong(length)
+        source.open().use { it.copyTo(out) }
+        out.flush()
+        // Wait for the receiver's one-byte ack before closing - otherwise
+        // the socket can tear down before the payload is fully delivered.
+        socket.inputStream.read()
+    }
 
     companion object {
         private const val TAG = "BluetoothClassicTransport"

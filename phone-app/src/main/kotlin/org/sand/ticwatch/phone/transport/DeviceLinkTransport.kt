@@ -11,6 +11,9 @@ import java.io.InputStream
  */
 fun interface PayloadSource {
     fun open(): InputStream
+
+    /** SHA-256 hex of the payload; decorators delegate it so hashing isn't seen as a send. */
+    fun contentHash(): String = open().use(ContentHash::sha256Hex)
 }
 
 /**

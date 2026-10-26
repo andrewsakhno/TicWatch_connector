@@ -31,6 +31,9 @@ $InstallServiceComponent = "$PhonePackage/.datalayer.WatchAppInstallService"
 $InstallServiceTag = 'WatchAppInstallService'
 $SuccessMarker = 'Sent watch-app install request'
 $FailureMarker = 'Failed to install watch-app'
+$RetryMarker = 'RFCOMM attempt \d+/\d+'
+# Real log entries start with "MM-DD"; skips logcat's "--------- beginning of" separators.
+$LogLinePattern = '^\d{2}-\d{2} '
 $PollIntervalSec = 5
 $PushAttempts = 3
 $PushRetryDelaySec = 3
@@ -133,17 +136,27 @@ function Start-WatchInstall([string]$Serial) {
 function Wait-WatchInstallResult([string]$Serial, [string]$Since) {
     Write-Host "==> Waiting up to $WaitTimeoutSec s for the transfer (silent for minutes is normal)" -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($WaitTimeoutSec)
+    # The phone's main log ring holds only minutes; accumulate every poll so retry lines
+    # logged early in a long transfer are still shown when it finally fails.
+    $collected = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds $PollIntervalSec
-        $log = Invoke-Checked 'logcat' {
+        $fresh = Invoke-Checked 'logcat' {
             adb -s $Serial logcat -d -T $Since -s "${InstallServiceTag}:*" BluetoothClassicTransport:W FallbackTransport:W
         }
+        foreach ($line in $fresh) {
+            if ($line -notmatch $LogLinePattern -or -not $seen.Add($line)) { continue }
+            $collected.Add($line)
+            if ($line -match $RetryMarker) { Write-Host "`n$line" -ForegroundColor Yellow }
+        }
+        $log = $collected -join "`n"
         if ($log -match $SuccessMarker) {
             Write-Host 'Watch-app sent. Confirm the install dialog on the watch (tap its notification).' -ForegroundColor Green
             return $true
         }
         if ($log -match $FailureMarker) {
-            Write-Host ($log | Out-String) -ForegroundColor Red
+            Write-Host $log -ForegroundColor Red
             return $false
         }
         Write-Host '.' -NoNewline
