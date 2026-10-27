@@ -1,8 +1,16 @@
 package org.sand.ticwatch.phone.health
 
 import android.util.Log
+import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.ActivityIntensityRecord
+import androidx.health.connect.client.records.BasalBodyTemperatureRecord
+import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.HeightRecord
+import androidx.health.connect.client.records.PowerRecord
+import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.units.Mass
 import androidx.health.connect.client.records.BasalMetabolicRateRecord
 import androidx.health.connect.client.records.BodyTemperatureMeasurementLocation
 import androidx.health.connect.client.records.BodyTemperatureRecord
@@ -26,6 +34,7 @@ import androidx.health.connect.client.records.Vo2MaxRecord
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.units.Percentage
+import androidx.health.connect.client.units.Pressure
 import androidx.health.connect.client.units.Temperature
 import androidx.health.connect.client.units.TemperatureDelta
 import androidx.health.connect.client.units.Energy
@@ -46,8 +55,14 @@ interface HealthRecordMapper {
     suspend fun toRecords(samples: List<SensorSample>): List<Record>
 }
 
-/** Bounds and zone offsets of one series record built by [SeriesMapper]. */
-class SeriesSpan(val start: Instant, val startOffset: ZoneOffset, val end: Instant, val endOffset: ZoneOffset)
+/** Bounds, zone offsets and source-device metadata of one series record built by [SeriesMapper]. */
+class SeriesSpan(
+    val start: Instant,
+    val startOffset: ZoneOffset,
+    val end: Instant,
+    val endOffset: ZoneOffset,
+    val metadata: Metadata,
+)
 
 /**
  * Series type: one record per watch push carrying every sample, instead of one record
@@ -64,14 +79,17 @@ class SeriesMapper<S>(
 ) : HealthRecordMapper {
     override val writePermissions = setOf(HealthPermission.getWritePermission(recordType))
 
-    override suspend fun toRecords(samples: List<SensorSample>): List<Record> {
-        val sorted = samples.filter(isValid).sortedBy { it.recordedAt }
-        if (sorted.isEmpty()) return emptyList()
+    // One record per measuring device, so each carries its own Device.
+    override suspend fun toRecords(samples: List<SensorSample>): List<Record> =
+        samples.filter(isValid).groupBy { it.source }.map { (source, group) -> toRecord(source, group) }
+
+    private fun toRecord(source: SampleSource, samples: List<SensorSample>): Record {
+        val sorted = samples.sortedBy { it.recordedAt }
         val start = sorted.first().recordedAt
         // A single-sample series would otherwise have start == end, which Health Connect rejects.
         val end = sorted.last().recordedAt.takeIf { it.isAfter(start) } ?: start.plus(MIN_SERIES_SPAN)
-        val span = SeriesSpan(start, start.offsetIn(zoneId), end, end.offsetIn(zoneId))
-        return listOf(toRecord(span, sorted.map(toSeriesSample)))
+        val span = SeriesSpan(start, start.offsetIn(zoneId), end, end.offsetIn(zoneId), autoRecordedMetadata(source))
+        return toRecord(span, sorted.map(toSeriesSample))
     }
 }
 
@@ -117,6 +135,21 @@ class LatestPerDayMapper(
 }
 
 /**
+ * Decorator for record types only newer Health Connect versions support: maps nothing (the rows stay in
+ * the history only) while [isAvailable] says the installed Health Connect lacks the feature, instead of
+ * failing the insert on every push and every daily retry.
+ */
+class FeatureGatedMapper(
+    private val isAvailable: () -> Boolean,
+    private val delegate: HealthRecordMapper,
+) : HealthRecordMapper {
+    override val writePermissions = delegate.writePermissions
+
+    override suspend fun toRecords(samples: List<SensorSample>): List<Record> =
+        if (isAvailable()) delegate.toRecords(samples) else emptyList()
+}
+
+/**
  * Interval bounds of [this]. Point samples (legacy watch builds) and zero-length intervals
  * (Health Services can report start == end) span [POINT_SAMPLE_SPAN]: Health Connect's
  * interval records require startTime strictly before endTime.
@@ -132,6 +165,35 @@ private class Span(sample: SensorSample, zoneId: ZoneId) {
 private val WATCH_DEVICE = Device(manufacturer = WATCH_MANUFACTURER, model = WATCH_MODEL, type = Device.TYPE_WATCH)
 private val AUTOMATIC_METADATA = Metadata.autoRecorded(device = WATCH_DEVICE)
 
+/** The bonded Bioland upper-arm cuff (`bpm/`); Health Connect has no device type for it. */
+private val BLOOD_PRESSURE_CUFF_DEVICE = Device(manufacturer = CUFF_MANUFACTURER, model = CUFF_MODEL, type = Device.TYPE_UNKNOWN)
+private val SOURCE_DEVICES = mapOf(
+    SampleSource.WATCH to WATCH_DEVICE,
+    SampleSource.BLOOD_PRESSURE_CUFF to BLOOD_PRESSURE_CUFF_DEVICE,
+)
+
+private fun autoRecordedMetadata(source: SampleSource): Metadata = Metadata.autoRecorded(device = SOURCE_DEVICES.getValue(source))
+
+/** Profile values the user typed in, one record per local day (a later change that day replaces it). */
+private fun manualDailyMetadata(recordIdPrefix: String, day: LocalDate): Metadata = Metadata.manualEntry(
+    clientRecordId = "$recordIdPrefix$day",
+    clientRecordVersion = Instant.now().toEpochMilli(),
+)
+
+/** A saved blood pressure reading, keyed by its time so deleting the reading can delete the record. */
+private fun bloodPressureMetadata(measuredAt: Instant, source: SampleSource): Metadata = Metadata.autoRecorded(
+    device = SOURCE_DEVICES.getValue(source),
+    clientRecordId = BloodPressureRecordIds.of(measuredAt),
+    clientRecordVersion = Instant.now().toEpochMilli(),
+)
+
+/** An automatically detected walk/run, keyed by its start so a re-derivation replaces it. */
+private fun autoExerciseMetadata(start: Instant): Metadata = Metadata.autoRecorded(
+    device = WATCH_DEVICE,
+    clientRecordId = "$AUTO_EXERCISE_RECORD_ID_PREFIX${start.toEpochMilli()}",
+    clientRecordVersion = Instant.now().toEpochMilli(),
+)
+
 /**
  * One record per local day for a daily metric: Health Connect upserts by client record id,
  * and the write time as version makes each later daily value replace the earlier one.
@@ -145,6 +207,17 @@ private const val RESTING_HEART_RATE_RECORD_ID_PREFIX = "resting_hr_"
 private const val TOTAL_CALORIES_RECORD_ID_PREFIX = "total_kcal_"
 private const val VO2_MAX_RECORD_ID_PREFIX = "vo2_max_"
 private const val BASAL_METABOLIC_RATE_RECORD_ID_PREFIX = "bmr_"
+private const val RUN_VO2_MAX_RECORD_ID_PREFIX = "vo2_max_run_"
+private const val WEIGHT_RECORD_ID_PREFIX = "weight_"
+private const val HEIGHT_RECORD_ID_PREFIX = "height_"
+private const val AUTO_EXERCISE_RECORD_ID_PREFIX = "auto_exercise_"
+private const val CENTIMETERS_PER_METER = 100.0
+
+/** Blood pressure sources written to Health Connect; see the BLOOD_PRESSURE_SYSTOLIC mapper. */
+private val HEALTH_CONNECT_BLOOD_PRESSURE_SOURCES = setOf(SampleSource.BLOOD_PRESSURE_CUFF)
+
+/** Health Connect's accepted `PowerRecord.Sample.power` range (W). */
+private val VALID_WATTS = 0.0..100_000.0
 
 /** Health Connect's accepted `StepsCadenceRecord.Sample.rate` range (steps/min). */
 private val VALID_STEPS_CADENCE = 0.0..10_000.0
@@ -153,6 +226,8 @@ private val VALID_STEPS_CADENCE = 0.0..10_000.0
 private val VALID_BPM = 1L..300L
 private const val WATCH_MANUFACTURER = "Mobvoi"
 private const val WATCH_MODEL = "TicWatch Pro 5 Enduro"
+private const val CUFF_MANUFACTURER = "Bioland"
+private const val CUFF_MODEL = "Bioland-BPM"
 private val POINT_SAMPLE_SPAN: Duration = Duration.ofMinutes(1)
 private val MIN_SERIES_SPAN: Duration = Duration.ofSeconds(1)
 
@@ -163,6 +238,8 @@ fun defaultHealthRecordMappers(
     zoneId: ZoneId,
     exerciseRoutes: ExerciseRouteFactory,
     sleepStages: SleepStageFactory,
+    storedReadings: SampleWindowReader,
+    isFeatureAvailable: (Int) -> Boolean,
 ): Map<SensorType, HealthRecordMapper> = mapOf(
     // A 0 bpm reading with no skin contact would sink the whole record.
     SensorType.HEART_RATE to SeriesMapper(
@@ -171,7 +248,7 @@ fun defaultHealthRecordMappers(
         isValid = { it.value.toLong() in VALID_BPM },
         toSeriesSample = { HeartRateRecord.Sample(time = it.recordedAt, beatsPerMinute = it.value.toLong()) },
     ) { span, samples ->
-        HeartRateRecord(span.start, span.startOffset, span.end, span.endOffset, samples, AUTOMATIC_METADATA)
+        HeartRateRecord(span.start, span.startOffset, span.end, span.endOffset, samples, span.metadata)
     },
 
     SensorType.SPEED to SeriesMapper(
@@ -180,7 +257,7 @@ fun defaultHealthRecordMappers(
         isValid = { it.value > 0 },
         toSeriesSample = { SpeedRecord.Sample(time = it.recordedAt, speed = Velocity.metersPerSecond(it.value)) },
     ) { span, samples ->
-        SpeedRecord(span.start, span.startOffset, span.end, span.endOffset, samples, AUTOMATIC_METADATA)
+        SpeedRecord(span.start, span.startOffset, span.end, span.endOffset, samples, span.metadata)
     },
 
     // Phone-derived from walking/running step intervals (see StepsCadenceDeriver).
@@ -190,7 +267,7 @@ fun defaultHealthRecordMappers(
         isValid = { it.value in VALID_STEPS_CADENCE },
         toSeriesSample = { StepsCadenceRecord.Sample(time = it.recordedAt, rate = it.value) },
     ) { span, samples ->
-        StepsCadenceRecord(span.start, span.startOffset, span.end, span.endOffset, samples, AUTOMATIC_METADATA)
+        StepsCadenceRecord(span.start, span.startOffset, span.end, span.endOffset, samples, span.metadata)
     },
 
     // Profile-based estimate (see BasalMetabolicRateDeriver), one record per local day.
@@ -287,25 +364,11 @@ fun defaultHealthRecordMappers(
         }
     },
 
-    // The route, when GPS fixes were recorded during the session, rides on the session record itself.
-    SensorType.EXERCISE to PerSampleMapper(
-        recordType = ExerciseSessionRecord::class,
-        additionalPermissions = setOf(HealthPermission.PERMISSION_WRITE_EXERCISE_ROUTE),
-        toRecord = { sample ->
-            sample.endedAt?.let {
-                val span = Span(sample, zoneId)
-                ExerciseSessionRecord(
-                    startTime = span.start,
-                    startZoneOffset = span.startOffset,
-                    endTime = span.end,
-                    endZoneOffset = span.endOffset,
-                    exerciseType = HealthServicesExerciseTypes.toHealthConnect(sample.value.toInt()),
-                    exerciseRoute = exerciseRoutes.routeFor(span.start, span.end),
-                    metadata = AUTOMATIC_METADATA,
-                )
-            }
-        },
-    ),
+    // The route and per-km laps, when GPS fixes were recorded during the session, ride on the session record.
+    SensorType.EXERCISE to exerciseSessionMapper(zoneId, exerciseRoutes) { AUTOMATIC_METADATA },
+
+    // A walk/run detected from step cadence (AutoExerciseDeriver), upserted by its start.
+    SensorType.AUTO_EXERCISE to exerciseSessionMapper(zoneId, exerciseRoutes) { autoExerciseMetadata(it.recordedAt) },
 
     SensorType.SPO2 to PerSampleMapper(OxygenSaturationRecord::class) { sample ->
         OxygenSaturationRecord(
@@ -336,16 +399,20 @@ fun defaultHealthRecordMappers(
         )
     },
 
-    // The watch sends the window's mean absolute skin temperature: it becomes the
-    // record's baseline, with a single zero delta at the window start.
-    SensorType.SKIN_TEMPERATURE to PerSampleMapper(SkinTemperatureRecord::class) { sample ->
+    // One record per night: the personal baseline plus each window's deviation from it, the form Google
+    // Health charts. Per-window SKIN_TEMPERATURE readings stay in the history only.
+    SensorType.SKIN_TEMPERATURE_NIGHTLY to PerSampleMapper(SkinTemperatureRecord::class) { sample ->
+        val end = sample.endedAt ?: return@PerSampleMapper null
         val span = Span(sample, zoneId)
+        val deltas = storedReadings.samples(setOf(SensorType.SKIN_TEMPERATURE), span.start, end, emptyList())
+            .map { SkinTemperatureRecord.Delta(it.recordedAt, TemperatureDelta.celsius(it.value - sample.value)) }
+        if (deltas.isEmpty()) return@PerSampleMapper null
         SkinTemperatureRecord(
             startTime = span.start,
             startZoneOffset = span.startOffset,
             endTime = span.end,
             endZoneOffset = span.endOffset,
-            deltas = listOf(SkinTemperatureRecord.Delta(span.start, TemperatureDelta.celsius(NO_TEMPERATURE_DELTA))),
+            deltas = deltas,
             baseline = Temperature.celsius(sample.value),
             measurementLocation = SkinTemperatureRecord.MEASUREMENT_LOCATION_WRIST,
             metadata = AUTOMATIC_METADATA,
@@ -362,6 +429,113 @@ fun defaultHealthRecordMappers(
             metadata = AUTOMATIC_METADATA,
         )
     },
+
+    SensorType.BASAL_BODY_TEMPERATURE to PerSampleMapper(BasalBodyTemperatureRecord::class) { sample ->
+        BasalBodyTemperatureRecord(
+            time = sample.recordedAt,
+            zoneOffset = sample.recordedAt.offsetIn(zoneId),
+            temperature = Temperature.celsius(sample.value),
+            measurementLocation = BodyTemperatureMeasurementLocation.MEASUREMENT_LOCATION_WRIST,
+            metadata = AUTOMATIC_METADATA,
+        )
+    },
+
+    SensorType.POWER to SeriesMapper(
+        recordType = PowerRecord::class,
+        zoneId = zoneId,
+        isValid = { it.value in VALID_WATTS },
+        toSeriesSample = { PowerRecord.Sample(time = it.recordedAt, power = Power.watts(it.value)) },
+    ) { span, samples ->
+        PowerRecord(span.start, span.startOffset, span.end, span.endOffset, samples, span.metadata)
+    },
+
+    // Only Health Connect builds with the activity-intensity feature accept this record.
+    SensorType.ACTIVITY_INTENSITY to FeatureGatedMapper(
+        isAvailable = { isFeatureAvailable(HealthConnectFeatures.FEATURE_ACTIVITY_INTENSITY) },
+        delegate = PerSampleMapper(ActivityIntensityRecord::class) { sample ->
+            val level = ActivityIntensityLevel.fromCode(sample.value.toInt()) ?: return@PerSampleMapper null
+            val span = Span(sample, zoneId)
+            ActivityIntensityRecord(
+                startTime = span.start,
+                startZoneOffset = span.startOffset,
+                endTime = span.end,
+                endZoneOffset = span.endOffset,
+                metadata = AUTOMATIC_METADATA,
+                activityIntensityType = level.healthConnectType,
+            )
+        },
+    ),
+
+    SensorType.WEIGHT to PerSampleMapper(WeightRecord::class) { sample ->
+        WeightRecord(
+            time = sample.recordedAt,
+            zoneOffset = sample.recordedAt.offsetIn(zoneId),
+            weight = Mass.kilograms(sample.value),
+            metadata = manualDailyMetadata(WEIGHT_RECORD_ID_PREFIX, sample.recordedAt.atZone(zoneId).toLocalDate()),
+        )
+    },
+
+    SensorType.HEIGHT to PerSampleMapper(HeightRecord::class) { sample ->
+        HeightRecord(
+            time = sample.recordedAt,
+            zoneOffset = sample.recordedAt.offsetIn(zoneId),
+            height = Length.meters(sample.value / CENTIMETERS_PER_METER),
+            metadata = manualDailyMetadata(HEIGHT_RECORD_ID_PREFIX, sample.recordedAt.atZone(zoneId).toLocalDate()),
+        )
+    },
+
+    // Cuff readings only - the wrist estimate stays in the history (it's calibrated from them, not a measurement).
+    // The diastolic half is stored in the same write just before, so the systolic sample builds the pair's one
+    // record; the diastolic type has no mapper of its own.
+    SensorType.BLOOD_PRESSURE_SYSTOLIC to PerSampleMapper(BloodPressureRecord::class) { sample ->
+        if (sample.source !in HEALTH_CONNECT_BLOOD_PRESSURE_SOURCES) return@PerSampleMapper null
+        val diastolicType = setOf(SensorType.BLOOD_PRESSURE_DIASTOLIC)
+        val diastolic = storedReadings.samples(diastolicType, sample.recordedAt, sample.recordedAt.plusMillis(1), emptyList())
+            .lastOrNull() ?: return@PerSampleMapper null
+        BloodPressureRecord(
+            time = sample.recordedAt,
+            zoneOffset = sample.recordedAt.offsetIn(zoneId),
+            systolic = Pressure.millimetersOfMercury(sample.value),
+            diastolic = Pressure.millimetersOfMercury(diastolic.value),
+            bodyPosition = BloodPressureRecord.BODY_POSITION_SITTING_DOWN,
+            measurementLocation = BloodPressureRecord.MEASUREMENT_LOCATION_UNKNOWN,
+            metadata = bloodPressureMetadata(sample.recordedAt, sample.source),
+        )
+    },
+
+    // Pace-vs-heart-rate estimate from a run (RunVo2MaxDeriver), one record per local day.
+    SensorType.VO2_MAX_EXERCISE to PerSampleMapper(Vo2MaxRecord::class) { sample ->
+        Vo2MaxRecord(
+            time = sample.recordedAt,
+            zoneOffset = sample.recordedAt.offsetIn(zoneId),
+            vo2MillilitersPerMinuteKilogram = sample.value,
+            measurementMethod = Vo2MaxRecord.MEASUREMENT_METHOD_OTHER,
+            metadata = dailyMetadata(RUN_VO2_MAX_RECORD_ID_PREFIX, sample.recordedAt.atZone(zoneId).toLocalDate()),
+        )
+    },
 )
 
-private const val NO_TEMPERATURE_DELTA = 0.0
+/** Exercise sessions with their GPS route and per-km laps; [metadata] decides identity (plain or upserted). */
+private fun exerciseSessionMapper(
+    zoneId: ZoneId,
+    exerciseRoutes: ExerciseRouteFactory,
+    metadata: (SensorSample) -> Metadata,
+) = PerSampleMapper(
+    recordType = ExerciseSessionRecord::class,
+    additionalPermissions = setOf(HealthPermission.PERMISSION_WRITE_EXERCISE_ROUTE),
+    toRecord = { sample ->
+        sample.endedAt?.let {
+            val span = Span(sample, zoneId)
+            ExerciseSessionRecord(
+                startTime = span.start,
+                startZoneOffset = span.startOffset,
+                endTime = span.end,
+                endZoneOffset = span.endOffset,
+                exerciseType = HealthServicesExerciseTypes.toHealthConnect(sample.value.toInt()),
+                laps = exerciseRoutes.lapsFor(span.start, span.end),
+                exerciseRoute = exerciseRoutes.routeFor(span.start, span.end),
+                metadata = metadata(sample),
+            )
+        }
+    },
+)

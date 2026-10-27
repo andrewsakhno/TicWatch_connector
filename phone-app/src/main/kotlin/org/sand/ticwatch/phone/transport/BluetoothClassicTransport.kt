@@ -30,23 +30,34 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                 } else {
                     null
                 }
+                val preemption = currentLinkPreemption()
                 var resumable = upload != null
                 var attempt = 1
                 while (true) {
+                    if (preemption?.isRequested == true) preemption.yieldLink()
                     val offsetBefore = upload?.confirmedOffset
                     try {
-                        val completed = watch.createRfcommSocketToServiceRecord(TransportProtocol.SERVICE_UUID).use { socket ->
+                        val outcome = watch.createRfcommSocketToServiceRecord(TransportProtocol.SERVICE_UUID).use { socket ->
                             socket.connect()
                             if (upload != null && resumable) {
-                                upload.runOn(socket) == ResumableUpload.Outcome.COMPLETED
+                                upload.runOn(socket) { preemption?.isRequested == true }
                             } else {
                                 sendOneShotFrame(socket, path, length, source)
-                                true
+                                ResumableUpload.Outcome.COMPLETED
                             }
                         }
-                        if (completed) break
-                        Log.i(TAG, "Watch predates resumable transfers, resending $path as one frame")
-                        resumable = false
+                        when (outcome) {
+                            ResumableUpload.Outcome.COMPLETED -> break
+                            ResumableUpload.Outcome.PEER_IS_LEGACY -> {
+                                Log.i(TAG, "Watch predates resumable transfers, resending $path as one frame")
+                                resumable = false
+                            }
+                            // Socket is closed here; the loop head yields, then reconnects and resumes.
+                            ResumableUpload.Outcome.PAUSED -> {
+                                Log.i(TAG, "Pausing $path at ${upload?.confirmedOffset}/$length for interactive sends")
+                                attempt = 1
+                            }
+                        }
                     } catch (e: IOException) {
                         // A resumable attempt that got further than the previous one isn't a
                         // failure streak: the link is alive, just flaky - keep resuming.

@@ -21,6 +21,21 @@ object DataLayerPaths {
     /** Watch -> phone: GPS fixes the watch recorded on its own during a workout (JSON array). */
     const val MESSAGE_EXERCISE_ROUTE_PUSH = "/workout/route"
 
+    /** Phone -> watch: today's derived scores (sleep score, HRV status, load, stress, light) as JSON. */
+    const val MESSAGE_HEALTH_SCORES = "/insights/scores"
+
+    /** Phone -> watch: NOAA geomagnetic (Kp) and solar activity, today + forecast days, as JSON. */
+    const val MESSAGE_SPACE_WEATHER = "/insights/space-weather"
+
+    /** Watch -> phone: estimate and save blood pressure now (`{"heart_rate": bpm, "heart_rate_at": epochMs}`, optional). */
+    const val MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST = "/blood-pressure/measure"
+
+    /** Phone -> watch: outcome of a measure request (`{"success", "status", "at"}`). */
+    const val MESSAGE_BLOOD_PRESSURE_MEASURE_RESULT = "/blood-pressure/measure/result"
+
+    /** Phone -> watch: the latest saved readings, cuff and wrist estimates, newest first (JSON). */
+    const val MESSAGE_BLOOD_PRESSURE_HISTORY = "/blood-pressure/history"
+
     /** Debug bridge: phone asks for a one-shot sensor reading, watch replies with one.
      *  Goes over the same Wear Data Layer session as everything else, so it works
      *  whenever the watch and phone are paired - independent of either being reachable
@@ -39,4 +54,8 @@ object DataLayerPaths {
     /** Debug bridge: phone pulls the tail of the watch's raw sleep-sensor log. */
     const val MESSAGE_DEBUG_SLEEP_LOG_REQUEST = "/debug/sleep-log/request"
     const val MESSAGE_DEBUG_SLEEP_LOG_RESPONSE = "/debug/sleep-log/response"
+
+    /** Debug bridge: phone queries the watch app's own rotating logcat files (JSON filter in, JSON lines out). */
+    const val MESSAGE_DEBUG_LOGS_REQUEST = "/debug/logs/request"
+    const val MESSAGE_DEBUG_LOGS_RESPONSE = "/debug/logs/response"
 }

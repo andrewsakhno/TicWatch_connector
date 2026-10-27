@@ -38,11 +38,19 @@ object VendorSensorTypes {
     const val TICMOTION_SLEEP = 33171126
     const val RESPIRATION_RATE = 33171205
     const val TEMPERATURE = 33171602
+
+    /**
+     * `psp_lphr`: low-power heart rate; reports at 1 Hz and keeps the PPG lit while registered, so it is only
+     * recorded raw by the night monitor, whose SpO2/RRI sensors light the PPG anyway.
+     */
+    const val LOW_POWER_HEART_RATE = 33171109
+
+    /** `mobvoi_hr_alert` ("Mobvoi Inactive HR Sensor"): wake-up only, layout undecoded, see [HeartRateAlertSampleSource]. */
+    const val HEART_RATE_ALERT = 33171609
 }
 
 /**
- * `psp_spo2`: values[0] is SpO2 %, values[1] a status that reaches [MIN_VALID_STATUS]
- * once the algorithm has converged (earlier events read 0). Produces the median of the converged
+ * `psp_spo2` (decoded by [Spo2Reading]): produces the median of the converged
  * readings, so a single motion-artifact dip doesn't become the window's value; fewer than
  * [MIN_READINGS] converged readings yield nothing.
  */
@@ -52,12 +60,9 @@ class Spo2Aggregator : VendorReadingAggregator {
     private var lastReadingAt: Instant? = null
 
     override fun onEvent(values: FloatArray, at: Instant) {
-        val percent = values.getOrNull(PERCENT_INDEX)?.toDouble() ?: return
-        val status = values.getOrNull(STATUS_INDEX) ?: return
-        if (status >= MIN_VALID_STATUS && percent in VALID_PERCENT) {
-            readings += percent
-            lastReadingAt = at
-        }
+        val percent = Spo2Reading.decode(values) ?: return
+        readings += percent
+        lastReadingAt = at
     }
 
     override fun result(windowStart: Instant, windowEnd: Instant): SensorSample? {
@@ -67,17 +72,29 @@ class Spo2Aggregator : VendorReadingAggregator {
     }
 
     private companion object {
-        const val PERCENT_INDEX = 0
-        const val STATUS_INDEX = 1
-        const val MIN_VALID_STATUS = 2f
         const val MIN_READINGS = 5
-        val VALID_PERCENT = 70.0..100.0
     }
 }
 
 /**
- * `psp_rri`: values[0] is one beat-to-beat interval (ms), values[1] its quality
- * ([GOOD_QUALITY] = clean). Produces RMSSD over consecutive clean intervals, skipping
+ * Decodes one `psp_spo2` event: values[0] is SpO2 %, values[1] a status that reaches [MIN_VALID_STATUS]
+ * once the algorithm has converged (earlier events read 0); unconverged events decode to null.
+ */
+object Spo2Reading {
+    private const val PERCENT_INDEX = 0
+    private const val STATUS_INDEX = 1
+    private const val MIN_VALID_STATUS = 2f
+    private val VALID_PERCENT = 70.0..100.0
+
+    fun decode(values: FloatArray): Double? {
+        val percent = values.getOrNull(PERCENT_INDEX)?.toDouble() ?: return null
+        val status = values.getOrNull(STATUS_INDEX) ?: return null
+        return percent.takeIf { status >= MIN_VALID_STATUS && it in VALID_PERCENT }
+    }
+}
+
+/**
+ * `psp_rri` (decoded by [RrIntervalReading]): produces RMSSD over consecutive clean intervals, skipping
  * jumps larger than [MAX_SUCCESSIVE_DIFF_MS] (ectopic beats / motion artifacts).
  */
 class RmssdAggregator : VendorReadingAggregator {
@@ -85,9 +102,8 @@ class RmssdAggregator : VendorReadingAggregator {
     private val intervals = mutableListOf<Double>()
 
     override fun onEvent(values: FloatArray, at: Instant) {
-        val interval = values.getOrNull(INTERVAL_INDEX)?.toDouble() ?: return
-        val quality = values.getOrNull(QUALITY_INDEX) ?: return
-        if (quality == GOOD_QUALITY && interval in VALID_INTERVAL_MS) intervals += interval
+        val interval = RrIntervalReading.decode(values) ?: return
+        if (interval.clean) intervals += interval.millis
     }
 
     override fun result(windowStart: Instant, windowEnd: Instant): SensorSample? {
@@ -98,12 +114,52 @@ class RmssdAggregator : VendorReadingAggregator {
     }
 
     private companion object {
-        const val INTERVAL_INDEX = 0
-        const val QUALITY_INDEX = 1
-        const val GOOD_QUALITY = 3f
         const val MAX_SUCCESSIVE_DIFF_MS = 250.0
         const val MIN_DIFFS = 30
-        val VALID_INTERVAL_MS = 300.0..2000.0
+    }
+}
+
+/** One `psp_rri` beat: values[0] the interval (ms), values[1] its quality ([GOOD_QUALITY] = clean). */
+data class RrIntervalReading(val millis: Double, val clean: Boolean) {
+    companion object {
+        private const val INTERVAL_INDEX = 0
+        private const val QUALITY_INDEX = 1
+        private const val GOOD_QUALITY = 3f
+        private val VALID_INTERVAL_MS = 300.0..2000.0
+
+        /** Null when the event carries no physiologically possible interval. */
+        fun decode(values: FloatArray): RrIntervalReading? {
+            val interval = values.getOrNull(INTERVAL_INDEX)?.toDouble() ?: return null
+            val quality = values.getOrNull(QUALITY_INDEX) ?: return null
+            if (interval !in VALID_INTERVAL_MS) return null
+            return RrIntervalReading(interval, quality == GOOD_QUALITY)
+        }
+    }
+}
+
+/**
+ * Breathing rate from `psp_rri` via [RespiratorySinusArrhythmiaEstimator]. Beat times are the running
+ * sum of every plausible interval (clean or not), so a rejected beat doesn't shift the ones after it;
+ * only clean intervals become values of the tachogram.
+ */
+class RriRespirationRateAggregator(
+    private val estimator: RespiratorySinusArrhythmiaEstimator = RespiratorySinusArrhythmiaEstimator(),
+) : VendorReadingAggregator {
+    override val sensorType = VendorSensorTypes.RR_INTERVAL
+    private val beats = mutableListOf<Beat>()
+    private var elapsedSeconds = 0.0
+
+    override fun onEvent(values: FloatArray, at: Instant) {
+        val interval = RrIntervalReading.decode(values) ?: return
+        elapsedSeconds += interval.millis / MILLIS_PER_SECOND
+        if (interval.clean) beats += Beat(elapsedSeconds, interval.millis)
+    }
+
+    override fun result(windowStart: Instant, windowEnd: Instant): SensorSample? =
+        estimator.breathsPerMinute(beats)?.let { SensorSample(SensorType.RESPIRATION_RATE, it, windowStart, windowEnd) }
+
+    private companion object {
+        const val MILLIS_PER_SECOND = 1000.0
     }
 }
 
@@ -215,33 +271,23 @@ class AmbientLightAggregator : TimeWeightedMeanAggregator(
 }
 
 /**
- * `psp_rr`: values[0] read as breaths/min. The layout is not confirmed - an early probe saw
- * ~64 there, closer to a heart rate - so only physiologically plausible rates
- * ([VALID_BREATHS_PER_MINUTE]) count, and the window median resists stray events. Every raw
- * event goes to [rawEvents] so the real layout can be decoded.
+ * Logs every raw event of [sensorType] in the window to [rawEvents] so its layout can be decoded; produces
+ * no sample. Used for `psp_rr` (probes saw all-zero channels in resting windows and once ~64 in values[0],
+ * closer to a heart rate, so the breathing rate comes from [RriRespirationRateAggregator] instead) and for
+ * `psp_lphr` during the night.
  */
-class RespirationRateAggregator(
+class RawEventRecorder(
+    override val sensorType: Int,
     private val rawEvents: RawWindowEventSink,
 ) : VendorReadingAggregator {
-    override val sensorType = VendorSensorTypes.RESPIRATION_RATE
-    private val rates = mutableListOf<Double>()
     private val events = mutableListOf<RawSensorEvent>()
 
     override fun onEvent(values: FloatArray, at: Instant) {
         events += RawSensorEvent(at, values.copyOf())
-        val rate = values.getOrNull(RATE_INDEX)?.toDouble() ?: return
-        if (rate in VALID_BREATHS_PER_MINUTE) rates += rate
     }
 
     override fun result(windowStart: Instant, windowEnd: Instant): SensorSample? {
         rawEvents.record(sensorType, windowStart, windowEnd, events)
-        if (rates.size < MIN_READINGS) return null
-        return SensorSample(SensorType.RESPIRATION_RATE, rates.median(), windowStart, windowEnd)
-    }
-
-    private companion object {
-        const val RATE_INDEX = 0
-        const val MIN_READINGS = 3
-        val VALID_BREATHS_PER_MINUTE = 4.0..40.0
+        return null
     }
 }

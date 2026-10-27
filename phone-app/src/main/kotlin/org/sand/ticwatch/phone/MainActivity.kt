@@ -23,8 +23,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
@@ -42,6 +44,7 @@ import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.datalayer.WatchNode
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
 import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
+import org.sand.ticwatch.phone.spaceweather.SpaceWeatherRefreshWorker
 import org.sand.ticwatch.phone.sync.SyncDirection
 import org.sand.ticwatch.phone.sync.SyncTransfer
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
@@ -84,6 +87,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         appContainer = AppContainer(applicationContext)
         SensorHistoryPurgeWorker.schedule(applicationContext)
+        SpaceWeatherRefreshWorker.schedule(applicationContext)
         BodyTemperatureBackfillWorker.enqueue(applicationContext)
 
         val startupPermissions = buildList {
@@ -162,11 +166,40 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen) {
         ) { innerPadding ->
             Surface(modifier = Modifier.padding(innerPadding)) {
                 when (currentScreen) {
-                    Screen.Dashboard -> PairedWatchesScreen(appContainer)
+                    Screen.Dashboard -> DashboardScreen(appContainer)
                     Screen.Settings -> SettingsScreen(appContainer)
                     Screen.McpAgent -> McpAgentScreen(appContainer)
                 }
             }
+        }
+    }
+}
+
+private enum class DashboardTab(val label: String) {
+    METRICS("Metrics"),
+    BLOOD_PRESSURE("Blood Pressure"),
+    SYSTEM("System"),
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DashboardScreen(appContainer: AppContainer) {
+    var selectedTab by remember { mutableStateOf(DashboardTab.METRICS) }
+
+    Column {
+        PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
+            DashboardTab.entries.forEach { tab ->
+                Tab(
+                    selected = tab == selectedTab,
+                    onClick = { selectedTab = tab },
+                    text = { Text(text = tab.label) },
+                )
+            }
+        }
+        when (selectedTab) {
+            DashboardTab.METRICS -> HealthInsightsScreen(appContainer)
+            DashboardTab.BLOOD_PRESSURE -> BloodPressureScreen(appContainer.bloodPressureMonitor, appContainer.cuffStatusStore)
+            DashboardTab.SYSTEM -> PairedWatchesScreen(appContainer)
         }
     }
 }

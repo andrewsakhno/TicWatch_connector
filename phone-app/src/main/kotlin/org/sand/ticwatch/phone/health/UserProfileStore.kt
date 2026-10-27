@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
 /** Biological sex as the metabolic formulas distinguish it; [key] is the stored value. */
 enum class BiologicalSex(val key: String) {
@@ -30,14 +31,39 @@ interface UserProfileStore {
     suspend fun setWeightKg(weightKg: Double?)
 }
 
+/**
+ * A cuff reading the user typed in, with the wrist signals at that moment: the reference point
+ * [BloodPressureEstimator] extrapolates from. RMSSD and skin temperature are null when the history had none.
+ */
+data class BloodPressureCalibration(
+    val systolic: Double,
+    val diastolic: Double,
+    val heartRate: Double,
+    val rmssdMs: Double?,
+    val skinTemperatureCelsius: Double?,
+    val calibratedAt: Instant,
+)
+
+/** Persists the single current [BloodPressureCalibration] (ISP: kept apart from [UserProfileStore]). */
+interface BloodPressureCalibrationStore {
+    suspend fun bloodPressureCalibration(): BloodPressureCalibration?
+    suspend fun setBloodPressureCalibration(calibration: BloodPressureCalibration?)
+}
+
 private const val PREFS_NAME = "user_profile"
 private const val BIRTH_YEAR_KEY = "birth_year"
 private const val SEX_KEY = "sex"
 private const val HEIGHT_CM_KEY = "height_cm"
 private const val WEIGHT_KG_KEY = "weight_kg"
+private const val BP_SYSTOLIC_KEY = "bp_baseline_systolic"
+private const val BP_DIASTOLIC_KEY = "bp_baseline_diastolic"
+private const val BP_HEART_RATE_KEY = "bp_calibrated_heart_rate"
+private const val BP_RMSSD_KEY = "bp_calibrated_rmssd"
+private const val BP_SKIN_TEMPERATURE_KEY = "bp_calibrated_skin_temperature"
+private const val BP_CALIBRATED_AT_KEY = "bp_calibrated_at_epoch_ms"
 
 /** [UserProfileStore] over SharedPreferences; every access hops to [Dispatchers.IO] (first read hits disk). */
-class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore {
+class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore, BloodPressureCalibrationStore {
 
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
@@ -57,9 +83,37 @@ class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore {
 
     override suspend fun setWeightKg(weightKg: Double?) = writeDouble(WEIGHT_KG_KEY, weightKg)
 
-    private suspend fun readDouble(key: String): Double? = read { if (contains(key)) Double.fromBits(getLong(key, 0L)) else null }
+    override suspend fun bloodPressureCalibration(): BloodPressureCalibration? = read {
+        if (!contains(BP_CALIBRATED_AT_KEY)) return@read null
+        BloodPressureCalibration(
+            systolic = doubleOrNull(BP_SYSTOLIC_KEY) ?: return@read null,
+            diastolic = doubleOrNull(BP_DIASTOLIC_KEY) ?: return@read null,
+            heartRate = doubleOrNull(BP_HEART_RATE_KEY) ?: return@read null,
+            rmssdMs = doubleOrNull(BP_RMSSD_KEY),
+            skinTemperatureCelsius = doubleOrNull(BP_SKIN_TEMPERATURE_KEY),
+            calibratedAt = Instant.ofEpochMilli(getLong(BP_CALIBRATED_AT_KEY, 0L)),
+        )
+    }
 
-    private suspend fun writeDouble(key: String, value: Double?) = write { if (value == null) remove(key) else putLong(key, value.toRawBits()) }
+    override suspend fun setBloodPressureCalibration(calibration: BloodPressureCalibration?) = write {
+        putDouble(BP_SYSTOLIC_KEY, calibration?.systolic)
+        putDouble(BP_DIASTOLIC_KEY, calibration?.diastolic)
+        putDouble(BP_HEART_RATE_KEY, calibration?.heartRate)
+        putDouble(BP_RMSSD_KEY, calibration?.rmssdMs)
+        putDouble(BP_SKIN_TEMPERATURE_KEY, calibration?.skinTemperatureCelsius)
+        if (calibration == null) remove(BP_CALIBRATED_AT_KEY) else putLong(BP_CALIBRATED_AT_KEY, calibration.calibratedAt.toEpochMilli())
+    }
+
+    private fun SharedPreferences.doubleOrNull(key: String): Double? =
+        if (contains(key)) Double.fromBits(getLong(key, 0L)) else null
+
+    private fun SharedPreferences.Editor.putDouble(key: String, value: Double?) {
+        if (value == null) remove(key) else putLong(key, value.toRawBits())
+    }
+
+    private suspend fun readDouble(key: String): Double? = read { doubleOrNull(key) }
+
+    private suspend fun writeDouble(key: String, value: Double?) = write { putDouble(key, value) }
 
     private suspend fun <T> read(block: SharedPreferences.() -> T): T = withContext(Dispatchers.IO) { prefs.block() }
 

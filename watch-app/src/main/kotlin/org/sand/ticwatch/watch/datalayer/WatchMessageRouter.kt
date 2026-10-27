@@ -9,6 +9,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.sand.ticwatch.watch.install.ApkInstaller
 import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
+import org.sand.ticwatch.watch.phonedata.PhonePayloadSink
 import org.sand.ticwatch.watch.sensors.SensorCollector
 import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
@@ -27,6 +28,8 @@ class WatchMessageRouter(
     private val sensorCollector: SensorCollector,
     private val debugProbes: List<DebugProbeRoute>,
     private val replyTransport: DeviceLinkTransport,
+    /** Phone -> watch payloads (scores, blood pressure) by path; each is just stored for the dashboard. */
+    private val phonePayloads: Map<String, PhonePayloadSink>,
     private val scope: CoroutineScope,
 ) {
     private val pendingInstallPackage = AtomicReference<String?>()
@@ -52,9 +55,11 @@ class WatchMessageRouter(
                 }
             }
 
+            in phonePayloads -> phonePayloads.getValue(path).accept(String(payload, Charsets.UTF_8))
+
             else -> debugProbes.firstOrNull { it.requestPath == path }?.let { route ->
                 Log.i(TAG, "Debug probe requested: $path")
-                scope.launch { replyWithProbe(route) }
+                scope.launch { replyWithProbe(route, payload) }
             }
         }
     }
@@ -108,8 +113,8 @@ class WatchMessageRouter(
             .onFailure { Log.w(TAG, "Sensor snapshot reply failed", it) }
     }
 
-    private suspend fun replyWithProbe(route: DebugProbeRoute) {
-        val payload = runCatching { route.probe.describe() }
+    private suspend fun replyWithProbe(route: DebugProbeRoute, request: ByteArray) {
+        val payload = runCatching { route.query.answer(request) }
             .getOrElse { error -> JSONObject().put("error", error.toString()) }
             .toString()
         replyTransport.sendMessage(route.responsePath, payload.toByteArray(Charsets.UTF_8))

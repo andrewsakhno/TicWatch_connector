@@ -88,6 +88,11 @@ fun interface SleepStageQueries {
     suspend fun sleepStages(from: Instant, to: Instant): List<SleepStage>
 }
 
+/** Deletes raw rows of [types] recorded exactly at [at] (one user-deleted reading); rollups keep it, like [SleepHistoryEraser]. */
+fun interface SampleEraser {
+    suspend fun eraseSamples(types: Set<SensorType>, at: Instant): Int
+}
+
 /** Position just after one raw row in (recorded_at, id) order - the resume point of a paged read. */
 data class SampleCursor(val recordedAt: Instant, val id: Long)
 

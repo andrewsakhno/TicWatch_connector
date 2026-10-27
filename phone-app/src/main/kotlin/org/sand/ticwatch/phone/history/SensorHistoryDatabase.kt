@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import org.sand.ticwatch.phone.health.SampleSource
 import org.sand.ticwatch.phone.health.SensorSample
 import org.sand.ticwatch.phone.health.SensorType
 import java.io.File
@@ -39,10 +40,19 @@ class SensorHistoryDatabase private constructor(
     override fun onCreate(db: SQLiteDatabase) = createSchema(db)
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // First: the backfills below read the source column; a v1 upgrade gets it from createSchema instead.
+        if (oldVersion in VERSION_COMPACT_SCHEMA until VERSION_SAMPLE_SOURCE) addSourceColumn(db)
         if (oldVersion < VERSION_COMPACT_SCHEMA) migrateToCompactSchema(db)
         if (oldVersion < VERSION_SLEEP_SESSIONS) addSleepSessions(db)
         if (oldVersion < VERSION_EXERCISE_ROUTES) createRoutePointTable(db)
         if (oldVersion < VERSION_SLEEP_STAGES) createSleepStageTable(db)
+    }
+
+    /** v6 records the measuring device; every earlier row came from the watch (or was derived from its data). */
+    private fun addSourceColumn(db: SQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE ${Table.NAME} ADD COLUMN ${Table.SOURCE} INTEGER NOT NULL DEFAULT ${SampleSource.WATCH.code}",
+        )
     }
 
     /** v5 added sleep stages; nothing to backfill, the watch never sent SLEEP_STAGE before. */
@@ -108,7 +118,8 @@ class SensorHistoryDatabase private constructor(
                 ${Table.ENDED_AT} INTEGER,
                 ${Table.RECEIVED_AT} INTEGER NOT NULL,
                 ${Table.DELIVERY_STATUS} INTEGER NOT NULL,
-                ${Table.DELIVERY_UPDATED_AT} INTEGER
+                ${Table.DELIVERY_UPDATED_AT} INTEGER,
+                ${Table.SOURCE} INTEGER NOT NULL DEFAULT ${SampleSource.WATCH.code}
             )
             """.trimIndent(),
         )
@@ -199,6 +210,9 @@ class SensorHistoryDatabase private constructor(
         const val RECEIVED_AT = "received_at_epoch_ms"
         const val DELIVERY_STATUS = "delivery_status"
         const val DELIVERY_UPDATED_AT = "delivery_updated_at_epoch_ms"
+
+        /** [SampleSource.code]. */
+        const val SOURCE = "source"
     }
 
     object RollupTable {
@@ -246,13 +260,14 @@ class SensorHistoryDatabase private constructor(
         private const val VERSION_SLEEP_SESSIONS = 3
         private const val VERSION_EXERCISE_ROUTES = 4
         private const val VERSION_SLEEP_STAGES = 5
-        private const val DATABASE_VERSION = VERSION_SLEEP_STAGES
+        private const val VERSION_SAMPLE_SOURCE = 6
+        private const val DATABASE_VERSION = VERSION_SAMPLE_SOURCE
         private const val LEGACY_TABLE = "sensor_history_v1"
         private const val BACKFILL_PAGE_SIZE = 2000
         private val SIDE_FILE_SUFFIXES = listOf("-wal", "-shm", "-journal")
 
         /** Columns [readSample] needs. */
-        val SAMPLE_COLUMNS = arrayOf(Table.TYPE, Table.VALUE, Table.RECORDED_AT, Table.ENDED_AT)
+        val SAMPLE_COLUMNS = arrayOf(Table.TYPE, Table.VALUE, Table.RECORDED_AT, Table.ENDED_AT, Table.SOURCE)
 
         @Volatile
         private var instance: SensorHistoryDatabase? = null
@@ -276,5 +291,6 @@ internal fun Cursor.readSample(): SensorSample {
         value = getDouble(getColumnIndexOrThrow(SensorHistoryDatabase.Table.VALUE)),
         recordedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow(SensorHistoryDatabase.Table.RECORDED_AT))),
         endedAt = if (isNull(endedAtColumn)) null else Instant.ofEpochMilli(getLong(endedAtColumn)),
+        source = SampleSource.of(getInt(getColumnIndexOrThrow(SensorHistoryDatabase.Table.SOURCE))),
     )
 }

@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+import org.sand.ticwatch.watch.route.WorkoutPayloads
 import org.sand.ticwatch.watch.sensors.UserActivityObserver
 import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
@@ -41,7 +41,7 @@ class WorkoutStateNotifier(
     }
 
     private suspend fun sendWithRetry(isActive: Boolean) {
-        val payload = JSONObject().put(ACTIVE, isActive).toString().toByteArray(Charsets.UTF_8)
+        val payload = WorkoutPayloads.workoutState(isActive)
         repeat(MAX_ATTEMPTS) { attempt ->
             if (transport.sendMessage(DataLayerPaths.MESSAGE_WORKOUT_STATE, payload).isSuccess) {
                 Log.i(TAG, "Sent workout state active=$isActive")
@@ -54,9 +54,6 @@ class WorkoutStateNotifier(
 
     private companion object {
         const val TAG = "WorkoutStateNotifier"
-
-        /** Wire key shared with phone-app's `WorkoutPayloads.ACTIVE`. */
-        const val ACTIVE = "active"
         const val MAX_ATTEMPTS = 5
         const val RETRY_DELAY_MS = 10_000L
     }

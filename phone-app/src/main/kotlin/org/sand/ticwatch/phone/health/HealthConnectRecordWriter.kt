@@ -3,9 +3,11 @@ package org.sand.ticwatch.phone.health
 import android.content.Context
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.StepsRecord
+import org.sand.ticwatch.phone.history.SensorHistoryQueries
 import org.sand.ticwatch.phone.history.SleepStageQueries
 import org.sand.ticwatch.phone.route.ExerciseRouteQueries
 import java.time.ZoneId
@@ -15,12 +17,17 @@ class HealthConnectRecordWriter(
     private val context: Context,
     exerciseRoutes: ExerciseRouteQueries,
     sleepStages: SleepStageQueries,
+    history: SensorHistoryQueries,
     private val client: HealthConnectClient = HealthConnectClient.getOrCreate(context),
     // Zone the samples were measured in; Health Connect consumers use the stored
     // offset to place records on the user's local timeline.
     zoneId: ZoneId = ZoneId.systemDefault(),
     private val mappers: Map<SensorType, HealthRecordMapper> = defaultHealthRecordMappers(
-        zoneId, ExerciseRouteFactory(exerciseRoutes), SleepStageFactory(sleepStages),
+        zoneId = zoneId,
+        exerciseRoutes = ExerciseRouteFactory(SessionRoutePoints(exerciseRoutes)),
+        sleepStages = SleepStageFactory(sleepStages, HeartRateSleepStageEstimator(SampleWindowReader(history))),
+        storedReadings = SampleWindowReader(history),
+        isFeatureAvailable = { client.features.getFeatureStatus(it) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE },
     ),
 ) : HealthRecordWriter {
 

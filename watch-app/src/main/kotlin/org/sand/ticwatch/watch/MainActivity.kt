@@ -12,28 +12,36 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Scaffold
-import androidx.wear.compose.material.Text
-import kotlinx.coroutines.flow.StateFlow
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.sand.ticwatch.watch.autoworkout.AutoWorkoutMode
+import org.sand.ticwatch.watch.autoworkout.AutoWorkoutSettings
+import org.sand.ticwatch.watch.autoworkout.SharedPreferencesAutoWorkoutSettings
+import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressureSettings
+import org.sand.ticwatch.watch.bloodpressure.SharedPreferencesAutoBloodPressureSettings
+import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
+import org.sand.ticwatch.watch.sensors.LiveReadings
 import org.sand.ticwatch.watch.sensors.SensorCollectionService
-import org.sand.ticwatch.watch.sensors.SensorType
 import org.sand.ticwatch.watch.transport.BluetoothLinkServerService
 
 class MainActivity : ComponentActivity() {
 
-    private var lastHeartRateFlow by mutableStateOf<StateFlow<Double?>?>(null)
+    private var liveReadings by mutableStateOf<LiveReadings?>(null)
+    private var autoWorkoutMode by mutableStateOf<AutoWorkoutMode?>(null)
+    private var phonePayloads by mutableStateOf<PhonePayloadStores?>(null)
+    private var bloodPressureAvailable by mutableStateOf(false)
+    private val autoWorkoutSettings: AutoWorkoutSettings by lazy { SharedPreferencesAutoWorkoutSettings(applicationContext) }
+    private var autoBloodPressure by mutableStateOf<Boolean?>(null)
+    private val autoBloodPressureSettings: AutoBloodPressureSettings by lazy {
+        SharedPreferencesAutoBloodPressureSettings(applicationContext)
+    }
     private var boundToSensorService = false
     private var sensorService: SensorCollectionService.LocalBinder? = null
     private var holdingLiveHeartRate = false
@@ -42,14 +50,16 @@ class MainActivity : ComponentActivity() {
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             sensorService = binder as? SensorCollectionService.LocalBinder
-            lastHeartRateFlow = sensorService?.readings?.latest(SensorType.HEART_RATE)
+            liveReadings = sensorService?.readings
+            bloodPressureAvailable = sensorService != null
             updateLiveHeartRateDemand()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             sensorService = null
             holdingLiveHeartRate = false
-            lastHeartRateFlow = null
+            liveReadings = null
+            bloodPressureAvailable = false
         }
     }
 
@@ -59,14 +69,20 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { onStartupPermissionsResolved() }
 
-    // BODY_SENSORS_BACKGROUND can only be requested on its own, after BODY_SENSORS is
-    // granted. Without it, a SensorCollectionService started from the background
-    // (AutoStartReceiver after reboot/update) runs but never receives heart rate,
-    // because the FGS isn't given while-in-use sensor access. Launched from the
-    // first request's result, so the two dialogs are sequential, not concurrent.
-    private val requestBackgroundSensors = registerForActivityResult(
+    // Background permissions (BODY_SENSORS_BACKGROUND, ACCESS_BACKGROUND_LOCATION) can only be
+    // requested one at a time, after their foreground counterpart is granted. Without them a
+    // SensorCollectionService started from the background (AutoStartReceiver after
+    // reboot/update, or a workout starting off-screen) gets no while-in-use sensor/location
+    // access. Each is launched from the previous result, so the dialogs are sequential.
+    private val pendingBackgroundPermissions = ArrayDeque<String>()
+
+    private val requestBackgroundPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> if (!granted) Log.w(TAG, "Background body-sensor access denied") }
+    ) { granted ->
+        if (!granted) Log.w(TAG, "Background permission denied: ${pendingBackgroundPermissions.firstOrNull()}")
+        pendingBackgroundPermissions.removeFirstOrNull()
+        requestNextBackgroundPermission()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,11 +94,47 @@ class MainActivity : ComponentActivity() {
             requestStartupPermissions.launch(missing.toTypedArray())
         }
 
+        // First SharedPreferences access reads the file: off the main thread.
+        lifecycleScope.launch {
+            autoWorkoutMode = withContext(Dispatchers.IO) { autoWorkoutSettings.mode() }
+            autoBloodPressure = withContext(Dispatchers.IO) { autoBloodPressureSettings.isEnabled() }
+            phonePayloads = withContext(Dispatchers.IO) { PhonePayloadStores.get(applicationContext) }
+        }
+
         setContent {
             MaterialTheme {
-                HeartRateScreen(lastHeartRateFlow)
+                val stores = phonePayloads
+                WatchDashboardScreen(
+                    readings = liveReadings,
+                    healthScores = stores?.healthScores?.latest,
+                    spaceWeather = stores?.spaceWeather?.latest,
+                    bloodPressure = BloodPressurePageState(
+                        history = stores?.bloodPressureHistory?.latest,
+                        lastResult = stores?.bloodPressureResult?.latest,
+                        onMeasure = if (bloodPressureAvailable) ::requestBloodPressure else null,
+                        autoMeasure = autoBloodPressure,
+                        onAutoMeasureChange = ::setAutoBloodPressure,
+                    ),
+                    autoWorkoutMode = autoWorkoutMode,
+                    onAutoWorkoutModeClick = ::cycleAutoWorkoutMode,
+                )
             }
         }
+    }
+
+    private fun requestBloodPressure() {
+        sensorService?.bloodPressure?.request()
+    }
+
+    private fun setAutoBloodPressure(enabled: Boolean) {
+        autoBloodPressure = enabled
+        lifecycleScope.launch(Dispatchers.IO) { autoBloodPressureSettings.setEnabled(enabled) }
+    }
+
+    private fun cycleAutoWorkoutMode() {
+        val next = autoWorkoutMode?.next() ?: return
+        autoWorkoutMode = next
+        lifecycleScope.launch(Dispatchers.IO) { autoWorkoutSettings.setMode(next) }
     }
 
     private fun startupPermissions(): List<String> = buildList {
@@ -90,6 +142,10 @@ class MainActivity : ComponentActivity() {
         add(Manifest.permission.BODY_SENSORS)
         // Health Services' user-activity state (asleep/awake), the source of sleep sessions.
         add(Manifest.permission.ACTIVITY_RECOGNITION)
+        // Snore detection during sleep; optional, collection runs without it.
+        add(Manifest.permission.RECORD_AUDIO)
+        // The watch's own GPS route during workouts; optional, the phone still tracks one.
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
     private fun isGranted(permission: String): Boolean =
@@ -99,16 +155,23 @@ class MainActivity : ComponentActivity() {
     // before); sensor collection needs BODY_SENSORS.
     private fun onStartupPermissionsResolved() {
         startBluetoothLinkService()
-        if (isGranted(Manifest.permission.BODY_SENSORS)) {
-            startAndBindSensorCollectionService()
-            requestBackgroundSensorsIfNeeded()
-        }
+        if (isGranted(Manifest.permission.BODY_SENSORS)) startAndBindSensorCollectionService()
+        pendingBackgroundPermissions.clear()
+        pendingBackgroundPermissions += backgroundPermissions().filterNot(::isGranted)
+        requestNextBackgroundPermission()
     }
 
-    private fun requestBackgroundSensorsIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (isGranted(Manifest.permission.BODY_SENSORS_BACKGROUND)) return
-        requestBackgroundSensors.launch(Manifest.permission.BODY_SENSORS_BACKGROUND)
+    /** Background permissions whose foreground counterpart is already granted (Android refuses the rest). */
+    private fun backgroundPermissions(): List<String> = buildList {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isGranted(Manifest.permission.BODY_SENSORS)) {
+            add(Manifest.permission.BODY_SENSORS_BACKGROUND)
+        }
+        if (isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+    }
+
+    private fun requestNextBackgroundPermission() {
+        val next = pendingBackgroundPermissions.firstOrNull() ?: return
+        requestBackgroundPermission.launch(next)
     }
 
     private fun startBluetoothLinkService() {
@@ -151,20 +214,5 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val TAG = "WatchMainActivity"
-    }
-}
-
-@Composable
-private fun HeartRateScreen(lastHeartRateFlow: StateFlow<Double?>?) {
-    var lastBpm by remember { mutableStateOf<Double?>(null) }
-
-    LaunchedEffect(lastHeartRateFlow) {
-        lastHeartRateFlow?.collect { value -> lastBpm = value }
-    }
-
-    Scaffold {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = lastBpm?.let { "%.0f bpm".format(it) } ?: "-- bpm")
-        }
     }
 }

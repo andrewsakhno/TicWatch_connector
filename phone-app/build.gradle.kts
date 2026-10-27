@@ -50,7 +50,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     // Reads sensor/activity data synced from the watch and writes it into Google Health.
-    implementation("androidx.health.connect:connect-client:1.1.0")
+    implementation("androidx.health.connect:connect-client:1.2.0-alpha02")
 
     // Daily purge of the transfer-history database.
     implementation("androidx.work:work-runtime-ktx:2.9.1")

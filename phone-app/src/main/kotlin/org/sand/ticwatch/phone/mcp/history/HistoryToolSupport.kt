@@ -64,6 +64,13 @@ object HistoryToolSchema {
     fun toProperty(): JSONObject = JSONObject().put("type", "string")
         .put("description", "Range end, exclusive. $TIME_FORMATS. Default: now")
 
+    /** `from`/`to` schema of a tool whose range defaults to the [defaultDays] days before `to`. */
+    fun dayRangeSchema(defaultDays: Long): JSONObject = objectSchema(
+        JSONObject()
+            .put(FROM, fromProperty().put("description", "Range start, inclusive. $TIME_FORMATS. Default: $defaultDays days before 'to'"))
+            .put(TO, toProperty()),
+    )
+
     fun intProperty(description: String, default: Int, max: Int): JSONObject = JSONObject()
         .put("type", "integer").put("minimum", 1).put("maximum", max).put("default", default)
         .put("description", description)

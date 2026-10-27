@@ -29,6 +29,7 @@ class StateSessionTracker(
     private val sensorType: SensorType,
     private val minDuration: Duration,
     private val valueAtOpen: (UserActivityInfo) -> Double = { NO_SESSION_VALUE },
+    private val startAtOpen: (UserActivityInfo) -> Instant = { it.stateChangeTime },
 ) : UserActivitySessionTracker {
 
     private val startKey = "${sensorType.name}$START_KEY_SUFFIX"
@@ -40,7 +41,7 @@ class StateSessionTracker(
         if (info.userActivityState == trackedState) {
             if (openStart == NO_OPEN_SESSION) {
                 preferences.edit()
-                    .putLong(startKey, info.stateChangeTime.toEpochMilli())
+                    .putLong(startKey, startAtOpen(info).toEpochMilli())
                     .putFloat(valueKey, valueAtOpen(info).toFloat())
                     .apply()
             }

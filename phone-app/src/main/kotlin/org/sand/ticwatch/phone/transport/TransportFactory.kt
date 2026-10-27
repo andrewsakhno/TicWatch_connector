@@ -21,15 +21,21 @@ import org.sand.ticwatch.phone.sync.SyncStatusRepository
  * for free instead of remembering to wrap it themselves.
  */
 object TransportFactory {
-    fun create(context: Context): DeviceLinkTransport = ProgressReportingDeviceLinkTransport(
-        delegate = FallbackDeviceLinkTransport(
-            primary = BluetoothClassicTransport(context),
-            fallback = DataLayerTransport(
-                nodeClient = Wearable.getNodeClient(context),
-                messageClient = Wearable.getMessageClient(context),
-                channelClient = Wearable.getChannelClient(context),
+    /** Shared by every transport this factory builds: callers each create their own instance. */
+    private val arbiter = LinkArbiter()
+
+    fun create(context: Context): DeviceLinkTransport = ArbitratedDeviceLinkTransport(
+        delegate = ProgressReportingDeviceLinkTransport(
+            delegate = FallbackDeviceLinkTransport(
+                primary = BluetoothClassicTransport(context),
+                fallback = DataLayerTransport(
+                    nodeClient = Wearable.getNodeClient(context),
+                    messageClient = Wearable.getMessageClient(context),
+                    channelClient = Wearable.getChannelClient(context),
+                ),
             ),
+            reporter = SyncStatusRepository,
         ),
-        reporter = SyncStatusRepository,
+        arbiter = arbiter,
     )
 }

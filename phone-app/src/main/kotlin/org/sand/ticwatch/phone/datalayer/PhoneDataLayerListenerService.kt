@@ -27,6 +27,9 @@ class PhoneDataLayerListenerService : WearableListenerService() {
             appContainer.workoutRouteRecorder,
             appContainer.exerciseRouteLog,
             SyncStatusRepository,
+            WatchReplies,
+            appContainer.watchStatePublishers,
+            appContainer.bloodPressureRequestHandler,
         )
     }
 

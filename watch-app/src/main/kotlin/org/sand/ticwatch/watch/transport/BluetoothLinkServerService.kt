@@ -1,9 +1,11 @@
 package org.sand.ticwatch.watch.transport
 
+import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
@@ -12,8 +14,10 @@ import android.os.IBinder
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
@@ -35,7 +39,8 @@ import java.io.InputStream
 class BluetoothLinkServerService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var serverSocket: BluetoothServerSocket? = null
+    @Volatile private var serverSocket: BluetoothServerSocket? = null
+    private var acceptJob: Job? = null
 
     private val resumableReceiver: ResumableTransferReceiver by lazy {
         ResumableTransferReceiver(File(noBackupFilesDir, INCOMING_TRANSFERS_DIR))
@@ -48,6 +53,7 @@ class BluetoothLinkServerService : Service() {
             sensorCollector = HealthServicesSensorCollector(applicationContext),
             debugProbes = defaultDebugProbeRoutes(applicationContext),
             replyTransport = TransportFactory.create(applicationContext),
+            phonePayloads = PhonePayloadStores.get(applicationContext).sinksByPath,
             scope = scope,
         )
     }
@@ -55,25 +61,47 @@ class BluetoothLinkServerService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIFICATION_ID, buildNotification())
-        scope.launch { acceptLoop() }
     }
 
-    private suspend fun acceptLoop() {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        ensureListening()
+        return START_STICKY
+    }
+
+    /**
+     * Re-arms the listener on every start: a Bluetooth reset kills the server socket while
+     * the foreground service itself stays alive, so `onCreate` alone would never listen again.
+     */
+    private fun ensureListening() {
+        if (acceptJob?.isActive == true) return
+        acceptJob = scope.launch { listenLoop() }
+    }
+
+    private suspend fun listenLoop() {
         val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
         if (adapter == null) {
             Log.w(TAG, "No Bluetooth adapter available")
             return
         }
+        while (scope.isActive) {
+            acceptLoop(adapter)
+            runCatching { serverSocket?.close() }
+            serverSocket = null
+            delay(RELISTEN_DELAY_MS)
+        }
+    }
+
+    private fun acceptLoop(adapter: BluetoothAdapter) {
         val socket = runCatching {
             adapter.listenUsingInsecureRfcommWithServiceRecord(TransportProtocol.SERVICE_NAME, TransportProtocol.SERVICE_UUID)
-        }.onFailure { Log.w(TAG, "Failed to open RFCOMM listening socket", it) }.getOrNull() ?: return
+        }.onFailure { Log.w(TAG, "Failed to open RFCOMM listening socket, retrying", it) }.getOrNull() ?: return
         serverSocket = socket
         Log.i(TAG, "Listening for Bluetooth link connections")
 
         while (scope.isActive) {
             val connection = runCatching { socket.accept() }
-                .onFailure { Log.w(TAG, "accept() failed, stopping accept loop", it) }
-                .getOrNull() ?: break
+                .onFailure { Log.w(TAG, "accept() failed, re-opening the listening socket", it) }
+                .getOrNull() ?: return
             Log.i(TAG, "Accepted Bluetooth link connection from ${connection.remoteDevice?.address}")
             scope.launch { handleConnection(connection) }
         }
@@ -133,5 +161,7 @@ class BluetoothLinkServerService : Service() {
         private const val CHANNEL_ID = "watch_link_bridge"
         private const val TAG = "BluetoothLinkServer"
         private const val INCOMING_TRANSFERS_DIR = "incoming_transfers"
+        // Short on purpose; a suspended watch only postpones it and onStartCommand re-arms anyway.
+        private const val RELISTEN_DELAY_MS = 3_000L
     }
 }

@@ -22,7 +22,8 @@ class SqliteSensorHistoryStore(
     private val database: SensorHistoryDatabase,
     private val projections: List<HistoryProjection>,
     private val zone: ZoneId,
-) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries, SleepHistoryEraser {
+) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries, SleepHistoryEraser,
+    SampleEraser {
 
     override suspend fun recordPending(samples: List<SensorSample>, receivedAt: Instant): List<Long> =
         withContext(Dispatchers.IO) {
@@ -37,6 +38,7 @@ class SqliteSensorHistoryStore(
                         sample.endedAt?.let { put(Table.ENDED_AT, it.toEpochMilli()) }
                         put(Table.RECEIVED_AT, receivedAt.toEpochMilli())
                         put(Table.DELIVERY_STATUS, DeliveryStatus.PENDING.code)
+                        put(Table.SOURCE, sample.source.code)
                     }
                     db.insertOrThrow(Table.NAME, null, values)
                 }
@@ -125,6 +127,13 @@ class SqliteSensorHistoryStore(
         } finally {
             db.endTransaction()
         }
+    }
+
+    override suspend fun eraseSamples(types: Set<SensorType>, at: Instant): Int = withContext(Dispatchers.IO) {
+        val codes = types.joinToString { SensorTypeCodes.code(it).toString() }
+        database.writableDatabase.delete(
+            Table.NAME, "${Table.TYPE} IN ($codes) AND ${Table.RECORDED_AT} = ?", arrayOf(at.toEpochMilli().toString()),
+        )
     }
 
     override suspend fun clear() = withContext(Dispatchers.IO) {

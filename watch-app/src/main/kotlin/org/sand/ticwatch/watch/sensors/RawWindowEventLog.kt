@@ -9,7 +9,7 @@ class RawSensorEvent(val at: Instant, val values: FloatArray)
 
 /**
  * Receives every raw event an aggregator saw during one measurement window, so a vendor
- * sensor whose layout isn't decoded yet (`psp_rr`) can be inspected without a continuous
+ * sensor whose layout isn't decoded yet (`psp_rr`, `psp_lphr`, `mobvoi_hr_alert`) can be inspected without a continuous
  * listener keeping its emitter lit between windows.
  */
 fun interface RawWindowEventSink {
@@ -39,6 +39,11 @@ class FileRawWindowEventLog(
     companion object {
         private const val TAG = "RawWindowEvents"
         const val RESPIRATION_LOG_FILE_NAME = "respiration_sensor.log"
+        const val LOW_POWER_HEART_RATE_LOG_FILE_NAME = "heart_rate_sensor.log"
+        const val HEART_RATE_ALERT_LOG_FILE_NAME = "heart_rate_alert.log"
+
+        /** A night of 1 Hz `psp_lphr` events (~70 bytes each) exceeds the default cap. */
+        const val NIGHT_LOG_MAX_BYTES = 6L * 1024 * 1024
         private const val WINDOW_HEADER = "# window"
         private const val DEFAULT_MAX_BYTES = 2L * 1024 * 1024
     }
