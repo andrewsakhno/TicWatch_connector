@@ -22,13 +22,14 @@ internal class ResumableUpload(
     private val source: PayloadSource,
     private val contentHash: String,
 ) {
-    enum class Outcome { COMPLETED, PEER_IS_LEGACY }
+    /** PAUSED: stopped at a chunk boundary on request; the watch keeps the part for a resume. */
+    enum class Outcome { COMPLETED, PEER_IS_LEGACY, PAUSED }
 
     /** Bytes the receiver has confirmed so far; [NO_HANDSHAKE] until the first handshake. */
     var confirmedOffset: Long = NO_HANDSHAKE
         private set
 
-    fun runOn(socket: BluetoothSocket): Outcome {
+    fun runOn(socket: BluetoothSocket, pauseRequested: () -> Boolean): Outcome {
         val output = DataOutputStream(BufferedOutputStream(socket.outputStream, TransportProtocol.RESUMABLE_CHUNK_SIZE))
         val input = DataInputStream(socket.inputStream)
 
@@ -61,6 +62,7 @@ internal class ResumableUpload(
                 if (reply != TransportProtocol.ACK) throw IOException("Chunk at $offset of $path not acknowledged: $reply")
                 offset += size
                 confirmedOffset = offset
+                if (offset < length && pauseRequested()) return Outcome.PAUSED
             }
         }
 

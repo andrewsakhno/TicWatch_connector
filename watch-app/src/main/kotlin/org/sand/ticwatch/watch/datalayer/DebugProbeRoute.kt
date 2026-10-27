@@ -7,14 +7,26 @@ import org.sand.ticwatch.watch.sensors.FileTemperatureChannelLog
 import org.sand.ticwatch.watch.sensors.HealthDeviceCapabilityProbe
 import org.sand.ticwatch.watch.sensors.VendorDataProbe
 import org.sand.ticwatch.watch.sensors.VendorSensorRecorder
+import org.json.JSONObject
+import org.sand.ticwatch.watch.logging.LogQueryHandler
+import org.sand.ticwatch.watch.logging.RotatingLogStore
 import java.io.File
 
-/** Debug bridge: a probe answered on [responsePath] when [requestPath] arrives. */
+/** Debug bridge: a request's payload answered with a JSON report. */
+fun interface DebugQuery {
+    suspend fun answer(request: ByteArray): JSONObject
+}
+
+/** Debug bridge: [query] answered on [responsePath] when [requestPath] arrives. */
 class DebugProbeRoute(
     val requestPath: String,
     val responsePath: String,
-    val probe: DeviceCapabilityProbe,
-)
+    val query: DebugQuery,
+) {
+    /** A probe that ignores the request payload. */
+    constructor(requestPath: String, responsePath: String, probe: DeviceCapabilityProbe) :
+        this(requestPath, responsePath, DebugQuery { probe.describe() })
+}
 
 fun defaultDebugProbeRoutes(context: Context): List<DebugProbeRoute> = listOf(
     DebugProbeRoute(
@@ -36,8 +48,15 @@ fun defaultDebugProbeRoutes(context: Context): List<DebugProbeRoute> = listOf(
                 VendorSensorRecorder.TEMPERATURE_LOG_FILE_NAME,
                 FileTemperatureChannelLog.LOG_FILE_NAME,
                 FileRawWindowEventLog.RESPIRATION_LOG_FILE_NAME,
+                FileRawWindowEventLog.LOW_POWER_HEART_RATE_LOG_FILE_NAME,
+                FileRawWindowEventLog.HEART_RATE_ALERT_LOG_FILE_NAME,
             )
                 .map { File(context.filesDir, it) },
         ),
+    ),
+    DebugProbeRoute(
+        DataLayerPaths.MESSAGE_DEBUG_LOGS_REQUEST,
+        DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE,
+        LogQueryHandler(RotatingLogStore.inFilesDir(context.filesDir)),
     ),
 )

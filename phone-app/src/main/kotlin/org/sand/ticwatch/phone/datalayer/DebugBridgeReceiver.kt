@@ -8,12 +8,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.AppContainer
+import org.sand.ticwatch.phone.bpm.BiolandProtocol
+import org.sand.ticwatch.phone.bpm.BpmGattProbe
+import org.sand.ticwatch.phone.bpm.BpmProbeCommands
 import org.sand.ticwatch.phone.health.LegacyRecordCleanup
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
 import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
 import org.sand.ticwatch.phone.history.SleepNightReplaceWorker
+import org.sand.ticwatch.phone.spaceweather.SpaceWeatherRefreshWorker
 import org.sand.ticwatch.phone.transport.TransportFactory
 import org.sand.ticwatch.phone.transport.sendMessage
+import java.time.LocalDateTime
+import java.util.UUID
 
 /**
  * adb-triggerable entry point into the watch debug bridge for [ACTION_PING_WATCH_SENSORS]
@@ -60,6 +66,9 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         if (intent.action == ACTION_RUN_HISTORY_MAINTENANCE) {
             SensorHistoryPurgeWorker.runNow(appContext)
         }
+        if (intent.action == ACTION_REFRESH_SPACE_WEATHER) {
+            SpaceWeatherRefreshWorker.runNow(appContext)
+        }
         if (intent.action == ACTION_BACKFILL_BODY_TEMPERATURE) {
             BodyTemperatureBackfillWorker.enqueue(appContext, force = true)
         }
@@ -72,6 +81,13 @@ class DebugBridgeReceiver : BroadcastReceiver() {
                     appContext, payloadPath, intent.getLongExtra(EXTRA_FROM, 0L), intent.getLongExtra(EXTRA_TO, 0L),
                 )
             }
+        }
+        if (intent.action == ACTION_PROBE_BPM) {
+            activeBpmProbe?.stop()
+            val commands = BpmProbeCommands.parse(intent.getStringExtra(EXTRA_BPM_FRAMES).orEmpty(), LocalDateTime.now())
+            val target = intent.getStringExtra(EXTRA_BPM_CHARACTERISTIC)
+                ?.let { UUID.fromString("0000$it-0000-1000-8000-00805f9b34fb") } ?: BiolandProtocol.COMMAND_CHARACTERISTIC
+            activeBpmProbe = BpmGattProbe(appContext, commands, target).also { it.start() }
         }
         pendingResult.finish()
     }
@@ -96,6 +112,9 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         /** Phone-local maintenance: runs the daily history purge + failed-delivery retry now. */
         const val ACTION_RUN_HISTORY_MAINTENANCE = "org.sand.ticwatch.phone.action.DEBUG_RUN_HISTORY_MAINTENANCE"
 
+        /** Phone-local: fetches NOAA space weather now and sends it to the watch. */
+        const val ACTION_REFRESH_SPACE_WEATHER = "org.sand.ticwatch.phone.action.DEBUG_REFRESH_SPACE_WEATHER"
+
         /** Phone-local maintenance: re-runs the body-temperature backfill over the retained history. */
         const val ACTION_BACKFILL_BODY_TEMPERATURE = "org.sand.ticwatch.phone.action.DEBUG_BACKFILL_BODY_TEMPERATURE"
 
@@ -107,6 +126,17 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         const val EXTRA_PAYLOAD_PATH = "payloadPath"
         const val EXTRA_FROM = "fromEpochMs"
         const val EXTRA_TO = "toEpochMs"
+
+        /**
+         * Phone-local: GATT-explores the bonded Bioland cuff for 10 min, logging under `BpmGattProbe`; optionally
+         * writes [EXTRA_BPM_FRAMES] (see [BpmProbeCommands]) to the 16-bit characteristic [EXTRA_BPM_CHARACTERISTIC].
+         */
+        const val ACTION_PROBE_BPM = "org.sand.ticwatch.phone.action.DEBUG_PROBE_BPM"
+        const val EXTRA_BPM_FRAMES = "frames"
+        const val EXTRA_BPM_CHARACTERISTIC = "characteristic"
+
+        /** Held process-wide so the autoConnect GATT client outlives the receiver. */
+        private var activeBpmProbe: BpmGattProbe? = null
 
         private val REQUEST_PATHS = mapOf(
             ACTION_PING_WATCH_SENSORS to DataLayerPaths.MESSAGE_DEBUG_SENSOR_SNAPSHOT_REQUEST,

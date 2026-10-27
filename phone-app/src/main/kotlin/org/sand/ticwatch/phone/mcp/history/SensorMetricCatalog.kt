@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.mcp.history
 
+import org.sand.ticwatch.phone.health.HeartRateZone
 import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.history.RollupPoint
 
@@ -41,6 +42,7 @@ class SensorMetricCatalog {
     fun describe(type: SensorType): MetricDescriptor = descriptors.getValue(type)
 
     private companion object {
+        const val PERCENT = 100
         val descriptors: Map<SensorType, MetricDescriptor> = mapOf(
             SensorType.HEART_RATE to MetricDescriptor("bpm", MetricKind.INSTANTANEOUS, "passive heart rate from the watch"),
             SensorType.RESTING_HEART_RATE to MetricDescriptor(
@@ -88,7 +90,60 @@ class SensorMetricCatalog {
             SensorType.EXERCISE to MetricDescriptor(
                 "session", MetricKind.SESSION, "exercise session; value is the Health Services exercise type id",
             ),
-        )
+            SensorType.OXYGEN_DESATURATION to MetricDescriptor(
+                "% points", MetricKind.SESSION,
+                "SpO2 drop >= 3 points below the 2-min baseline for >= 10 s during sleep; value is the depth",
+            ),
+            SensorType.SNORING to MetricDescriptor(
+                "fraction", MetricKind.SESSION, "share (0..1) of a 5-min sleep epoch spent snoring, from 1 min of audio features",
+            ),
+            SensorType.OXYGEN_DESATURATION_INDEX to MetricDescriptor(
+                "events/h", MetricKind.SESSION,
+                "per sleep session: desaturations per monitored hour (screening only: <5 normal, 5-15 mild, 15-30 moderate, >30 severe)",
+            ),
+            SensorType.SNORING_DURATION to MetricDescriptor(
+                "min", MetricKind.SESSION, "per sleep session: estimated minutes of snoring",
+            ),
+            SensorType.SKIN_TEMPERATURE_NIGHTLY to MetricDescriptor(
+                "°C", MetricKind.SESSION, "per sleep session: the personal skin baseline the night's deviation is measured against",
+            ),
+            SensorType.BASAL_BODY_TEMPERATURE to MetricDescriptor(
+                "°C", MetricKind.INSTANTANEOUS, "lowest settled body-temperature estimate of a sleep session",
+            ),
+            SensorType.POWER to MetricDescriptor("W", MetricKind.INSTANTANEOUS, "running power estimated from GPS pace, grade and weight"),
+            SensorType.ACTIVITY_INTENSITY to MetricDescriptor(
+                "level", MetricKind.SESSION, "interval of moderate (1, 40-59% HR reserve) or vigorous (2, >= 60%) activity",
+            ),
+            SensorType.WEIGHT to MetricDescriptor("kg", MetricKind.INSTANTANEOUS, "from the profile, on change"),
+            SensorType.HEIGHT to MetricDescriptor("cm", MetricKind.INSTANTANEOUS, "from the profile, on change"),
+            SensorType.AUTO_EXERCISE to MetricDescriptor(
+                "session", MetricKind.SESSION, "walk/run detected from step cadence; value is the Health Services exercise type id",
+            ),
+            SensorType.VO2_MAX_EXERCISE to MetricDescriptor(
+                "ml/kg/min", MetricKind.INSTANTANEOUS, "estimate from an outdoor run's pace against heart-rate reserve",
+            ),
+            SensorType.SLEEP_SCORE to MetricDescriptor(
+                "score", MetricKind.SESSION, "per sleep session: 0-100 night score; breakdown via get_sleep_score",
+            ),
+            SensorType.HEART_RATE_ALERT to MetricDescriptor(
+                "raw", MetricKind.INSTANTANEOUS,
+                "watch mobvoi_hr_alert event (vendor resting-HR threshold alert?); value is undecoded values[0], timestamps matter",
+            ),
+            SensorType.BLOOD_PRESSURE_SYSTOLIC to MetricDescriptor(
+                "mmHg", MetricKind.INSTANTANEOUS, "calibrated cuffless estimate, paired with diastolic; see get_blood_pressure",
+            ),
+            SensorType.BLOOD_PRESSURE_DIASTOLIC to MetricDescriptor(
+                "mmHg", MetricKind.INSTANTANEOUS, "calibrated cuffless estimate, paired with systolic; see get_blood_pressure",
+            ),
+            SensorType.TRAINING_LOAD to MetricDescriptor(
+                "TRIMP", MetricKind.CUMULATIVE, "per workout: Banister training impulse from heart-rate reserve; sum per day",
+            ),
+        ) + HeartRateZone.entries.associate { zone ->
+            zone.sensorType to MetricDescriptor(
+                "min", MetricKind.CUMULATIVE,
+                "per workout: minutes in Karvonen zone ${zone.number} (>= ${(zone.minReserveFraction * PERCENT).toInt()}% HR reserve)",
+            )
+        }
 
         init {
             check(descriptors.keys == SensorType.entries.toSet()) { "Every SensorType needs a MetricDescriptor" }

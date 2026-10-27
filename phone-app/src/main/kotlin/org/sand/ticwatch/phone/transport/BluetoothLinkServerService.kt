@@ -18,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.AppContainer
 import org.sand.ticwatch.phone.datalayer.PhoneMessageRouter
+import org.sand.ticwatch.phone.datalayer.WatchReplies
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
 import java.io.DataInputStream
 
@@ -39,13 +40,20 @@ class BluetoothLinkServerService : Service() {
             appContainer.workoutRouteRecorder,
             appContainer.exerciseRouteLog,
             SyncStatusRepository,
+            WatchReplies,
+            appContainer.watchStatePublishers,
+            appContainer.bloodPressureRequestHandler,
         )
     }
+
+    // Hosted here because this connectedDevice service already keeps the process alive for the watch link.
+    private val cuffClient by lazy { appContainer.bloodPressureCuffClient(scope) }
 
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIFICATION_ID, buildNotification())
         scope.launch { acceptLoop() }
+        cuffClient.start()
     }
 
     private suspend fun acceptLoop() {
@@ -101,6 +109,7 @@ class BluetoothLinkServerService : Service() {
 
     override fun onDestroy() {
         runCatching { serverSocket?.close() }
+        cuffClient.stop()
         scope.cancel()
         super.onDestroy()
     }

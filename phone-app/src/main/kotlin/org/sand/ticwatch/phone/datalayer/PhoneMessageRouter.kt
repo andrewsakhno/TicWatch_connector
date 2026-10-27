@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone.datalayer
 
 import android.util.Log
+import org.json.JSONObject
 import org.sand.ticwatch.phone.health.SensorDataSyncWorker
 import org.sand.ticwatch.phone.route.ExerciseRouteLog
 import org.sand.ticwatch.phone.route.WorkoutPayloads
@@ -23,6 +24,10 @@ class PhoneMessageRouter(
     private val workoutRouteRecorder: WorkoutRouteRecorder,
     private val exerciseRouteLog: ExerciseRouteLog,
     private val syncStatusReporter: SyncStatusReporter,
+    private val replySink: WatchReplySink,
+    /** Health scores, blood pressure history, space weather: re-sent (deduplicated) after every stored push. */
+    private val pushPublishers: List<WatchStatePublisher>,
+    private val bloodPressureRequests: BloodPressureRequestHandler,
 ) {
     /**
      * Handles one incoming message to completion. Returns false when the payload was received
@@ -53,12 +58,23 @@ class PhoneMessageRouter(
                 }
             }
 
+            // Answers a request someone is waiting on (e.g. the MCP `get_watch_logs` tool).
+            DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE -> {
+                val text = String(payload, Charsets.UTF_8)
+                runCatching { JSONObject(text).getString(REQUEST_ID) }
+                    .onSuccess { replySink.deliver(it, text) }
+                    .onFailure { Log.w(TAG, "Watch log reply without a request id", it) }
+            }
+
             DataLayerPaths.MESSAGE_SENSOR_DATA_PUSH -> {
                 handled = sensorDataSyncWorker.onSensorDataPush(payload)
                     .onSuccess { count -> Log.i(TAG, "Wrote $count sensor sample(s) to Health Connect") }
                     .onFailure { Log.w(TAG, "Failed to write sensor data to Health Connect; watch will retry", it) }
                     .isSuccess
+                if (handled) pushPublishers.forEach(WatchStatePublisher::publish)
             }
+
+            DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST -> bloodPressureRequests.onMeasureRequested(payload)
 
             DataLayerPaths.MESSAGE_WORKOUT_STATE -> {
                 runCatching { WorkoutPayloads.isWorkoutActive(payload) }
@@ -82,5 +98,6 @@ class PhoneMessageRouter(
     companion object {
         private const val TAG = "PhoneMessageRouter"
         private const val LOG_CHUNK_LENGTH = 3_000
+        const val REQUEST_ID = "request_id"
     }
 }

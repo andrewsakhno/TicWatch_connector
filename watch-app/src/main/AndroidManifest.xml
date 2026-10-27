@@ -13,6 +13,16 @@
          collection running for as long as the watch is on, not just while the app is
          in the foreground. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!-- Snore detection during sleep (NightBreathingSampleSource): audio is analysed in memory and
+         dropped, only a per-epoch snoring fraction leaves the watch. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- The watch's own GPS track during workouts (WatchRouteRecorder). Workouts start while the app
+         is in the background, so the fix stream needs background location, not just while-in-use. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <!-- Direct-Bluetooth fallback transport, used when the Wear Data Layer can't reach
          the phone (e.g. no official Wear OS by Google pairing). -->
@@ -43,6 +53,7 @@
     <uses-permission android:name="com.google.android.permission.PROVIDE_BACKGROUND" />
 
     <application
+        android:name=".WatchApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -53,8 +64,8 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:screenOrientation="nosensor">
+            android:exported="true">
+            <!-- No screenOrientation: "nosensor" overrode the user's 180° wrist flip while in front. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -66,7 +77,7 @@
         <service
             android:name=".sensors.SensorCollectionService"
             android:exported="false"
-            android:foregroundServiceType="health" />
+            android:foregroundServiceType="health|microphone" />
 
         <!-- Receives install/uninstall requests and APK bytes pushed down from phone-app. -->
         <service

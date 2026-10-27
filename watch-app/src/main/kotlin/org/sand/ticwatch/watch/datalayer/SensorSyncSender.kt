@@ -59,6 +59,9 @@ class SensorSyncSender(
         }
     }
 
+    /** Delivers the whole backlog now, e.g. before the phone computes something from the latest samples. */
+    suspend fun flushNow() = flushPending()
+
     private suspend fun flushPending() = flushLock.withLock {
         enqueuedSinceFlush.set(0)
         awakeRunner.runAwake(FLUSH_WAKE_LOCK_TIMEOUT) {

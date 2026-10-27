@@ -67,6 +67,9 @@ class SleepStageSegmenter(
     private var sessionStart: Instant? = null
     private var lastEventAt: Instant? = null
 
+    /** Whether a night is open (an AWAKE stage inside it included). */
+    val inSession: Boolean get() = sessionStart != null
+
     fun onStage(next: SleepStage?, at: Instant): List<SensorSample> {
         val previousEventAt = lastEventAt
         val completed = mutableListOf<SensorSample>()
@@ -111,13 +114,15 @@ class SleepStageSegmenter(
  * on this watch, so this is its only sleep source. [sensorTypes] are in priority order: a lower
  * priority sensor's events are ignored while a higher one has reported within [preferenceWindow], so
  * two sensors describing the same night don't interleave. Registered non-wakeup with a long report
- * latency, so the hub batches events instead of waking the CPU through the night.
+ * latency, so the hub batches events instead of waking the CPU through the night. Every event also
+ * updates [sleepState], which gates the night-time breathing monitor.
  */
 class VendorSleepStageSource(
     private val sensorManager: SensorManager,
     private val sensorTypes: List<Int>,
     private val decoder: SleepStageDecoder,
     private val segmenter: SleepStageSegmenter,
+    private val sleepState: SleepStateSink,
     private val preferenceWindow: Duration = Duration.ofMinutes(15),
 ) : SampleSource {
 
@@ -130,6 +135,7 @@ class VendorSleepStageSource(
                 lastEventBySensor[type] = at
                 if (isShadowed(type, at, lastEventBySensor)) return
                 segmenter.onStage(decoder.decode(event.values), at).forEach { trySend(it) }
+                sleepState.update(segmenter.inSession, at)
             }
 
             override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit

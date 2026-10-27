@@ -1,5 +1,6 @@
 package org.sand.ticwatch.watch.datalayer
 
+import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
@@ -29,6 +30,7 @@ class WatchDataLayerListenerService : WearableListenerService() {
             sensorCollector = HealthServicesSensorCollector(applicationContext),
             debugProbes = defaultDebugProbeRoutes(applicationContext),
             replyTransport = TransportFactory.create(applicationContext),
+            phonePayloads = PhonePayloadStores.get(applicationContext).sinksByPath,
             scope = scope,
         )
     }

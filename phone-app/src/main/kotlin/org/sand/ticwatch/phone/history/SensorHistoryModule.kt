@@ -48,6 +48,6 @@ object SensorHistoryModule {
 
     fun retrier(context: Context): FailedDeliveryRetrier {
         val store = store(context)
-        return FailedDeliveryRetrier(store, delivery(HealthConnectRecordWriter(context, routeStore(context), store), store))
+        return FailedDeliveryRetrier(store, delivery(HealthConnectRecordWriter(context, routeStore(context), store, store), store))
     }
 }

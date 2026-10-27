@@ -21,7 +21,7 @@ object HealthServicesExerciseTypes {
     private const val PILATES = 48
     private const val ROWING = 53
     private const val ROWING_MACHINE = 54
-    private const val RUNNING = 55
+    const val RUNNING = 55
     private const val RUNNING_TREADMILL = 56
     private const val SKIING = 61
     private const val SOCCER = 64
@@ -32,7 +32,7 @@ object HealthServicesExerciseTypes {
     private const val SWIMMING_OPEN_WATER = 73
     private const val SWIMMING_POOL = 74
     private const val TENNIS = 76
-    private const val WALKING = 79
+    const val WALKING = 79
     private const val WEIGHTLIFTING = 81
     private const val YOGA = 83
 
