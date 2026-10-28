@@ -2,12 +2,15 @@ package org.sand.ticwatch.phone.datalayer
 
 import android.util.Log
 import org.json.JSONObject
+import org.sand.ticwatch.phone.snore.SnoreMonitorControl
+import org.sand.ticwatch.phone.snapshot.SnapshotResultReceiver
 import org.sand.ticwatch.phone.health.SensorDataSyncWorker
 import org.sand.ticwatch.phone.route.ExerciseRouteLog
 import org.sand.ticwatch.phone.route.WorkoutPayloads
 import org.sand.ticwatch.phone.route.WorkoutRouteRecorder
 import org.sand.ticwatch.phone.sync.SyncDirection
 import org.sand.ticwatch.phone.sync.SyncStatusReporter
+import org.sand.ticwatch.phone.watchsettings.WatchSettingsReceiver
 
 /**
  * Business logic for requests arriving from the watch, independent of which transport
@@ -28,6 +31,10 @@ class PhoneMessageRouter(
     /** Health scores, blood pressure history, space weather: re-sent (deduplicated) after every stored push. */
     private val pushPublishers: List<WatchStatePublisher>,
     private val bloodPressureRequests: BloodPressureRequestHandler,
+    private val watchSettings: WatchSettingsReceiver,
+    private val snoreMonitor: SnoreMonitorControl,
+    private val watchScreenshots: WatchScreenshotSink,
+    private val snapshotResults: SnapshotResultReceiver,
 ) {
     /**
      * Handles one incoming message to completion. Returns false when the payload was received
@@ -66,6 +73,11 @@ class PhoneMessageRouter(
                     .onFailure { Log.w(TAG, "Watch log reply without a request id", it) }
             }
 
+            DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_RESPONSE -> {
+                runCatching { watchScreenshots.save(payload) }
+                    .onFailure { Log.w(TAG, "Failed to store the watch screenshot", it) }
+            }
+
             DataLayerPaths.MESSAGE_SENSOR_DATA_PUSH -> {
                 handled = sensorDataSyncWorker.onSensorDataPush(payload)
                     .onSuccess { count -> Log.i(TAG, "Wrote $count sensor sample(s) to Health Connect") }
@@ -74,7 +86,20 @@ class PhoneMessageRouter(
                 if (handled) pushPublishers.forEach(WatchStatePublisher::publish)
             }
 
+            DataLayerPaths.MESSAGE_SNAPSHOT_RESULT -> {
+                handled = snapshotResults.onSnapshotResult(payload)
+                if (handled) pushPublishers.forEach(WatchStatePublisher::publish)
+            }
+
             DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST -> bloodPressureRequests.onMeasureRequested(payload)
+
+            DataLayerPaths.MESSAGE_WATCH_SETTINGS -> watchSettings.onWatchSettings(payload)
+
+            DataLayerPaths.MESSAGE_SNORE_MONITOR -> {
+                runCatching { WorkoutPayloads.isWorkoutActive(payload) }
+                    .onSuccess { active -> if (active) snoreMonitor.onSleepStarted() else snoreMonitor.onSleepEnded() }
+                    .onFailure { Log.w(TAG, "Malformed snore monitor state: ${String(payload, Charsets.UTF_8)}", it) }
+            }
 
             DataLayerPaths.MESSAGE_WORKOUT_STATE -> {
                 runCatching { WorkoutPayloads.isWorkoutActive(payload) }

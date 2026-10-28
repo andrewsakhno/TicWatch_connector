@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Snoring analysis on the phone's microphone (watch setting "Snore microphone: Phone"). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Phone-side GPS track while a workout runs on the watch (WorkoutLocationService). The
          watch starts it while this app is in the background, which Android only allows with
          background location ("Allow all the time", granted in system Settings). -->
@@ -120,7 +123,7 @@
         <service
             android:name=".transport.BluetoothLinkServerService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|microphone" />
 
         <!-- Debug-only entry point: `adb shell am start-foreground-service` deploys a
              watch-app build over the bridge without needing adb access to the watch
@@ -148,6 +151,18 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local MCP server so a user-chosen external model can call the app's tools" />
         </service>
+
+        <!-- Home-screen widget: cardio readiness, advice and latest vitals (advisor/widget/). -->
+        <receiver
+            android:name=".advisor.widget.CardioAdvisorWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/cardio_advisor_widget_info" />
+        </receiver>
 
         <!-- Restarts the long-running services after reboot / app update. -->
         <receiver

@@ -7,6 +7,7 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import org.sand.ticwatch.phone.AppContainer
 import org.sand.ticwatch.phone.bpm.BiolandProtocol
 import org.sand.ticwatch.phone.bpm.BpmGattProbe
@@ -60,6 +61,15 @@ class DebugBridgeReceiver : BroadcastReceiver() {
                     .onFailure { error -> Log.w(TAG, "Failed to send $path", error) }
             }
         }
+        if (intent.action == ACTION_CAPTURE_WATCH_SCREEN) {
+            val request = JSONObject()
+            if (intent.hasExtra(EXTRA_PAGE)) request.put(EXTRA_PAGE, intent.getIntExtra(EXTRA_PAGE, 0))
+            CoroutineScope(Dispatchers.IO).launch {
+                TransportFactory.create(appContext)
+                    .sendMessage(DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_REQUEST, request.toString().toByteArray(Charsets.UTF_8))
+                    .onFailure { error -> Log.w(TAG, "Failed to request a watch screenshot", error) }
+            }
+        }
         LEGACY_CLEANUPS[intent.action]?.let { cleanupOf ->
             CoroutineScope(Dispatchers.IO).launch { cleanupOf(AppContainer(appContext)).run() }
         }
@@ -110,6 +120,13 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         )
 
         /** Phone-local maintenance: runs the daily history purge + failed-delivery retry now. */
+        /**
+         * Asks the watch for a PNG of its app screen (the app must be open on the watch), optionally switching to
+         * dashboard page `--ei page <n>` first; saved by [FileWatchScreenshotSink].
+         */
+        const val ACTION_CAPTURE_WATCH_SCREEN = "org.sand.ticwatch.phone.action.DEBUG_CAPTURE_WATCH_SCREEN"
+        const val EXTRA_PAGE = "page"
+
         const val ACTION_RUN_HISTORY_MAINTENANCE = "org.sand.ticwatch.phone.action.DEBUG_RUN_HISTORY_MAINTENANCE"
 
         /** Phone-local: fetches NOAA space weather now and sends it to the watch. */

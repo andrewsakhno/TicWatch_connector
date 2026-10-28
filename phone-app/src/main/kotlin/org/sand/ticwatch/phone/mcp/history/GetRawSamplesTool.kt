@@ -41,6 +41,7 @@ class GetRawSamplesTool(
                 .put("received", format.time(row.receivedAt))
                 .put("status", row.status.name)
             row.sample.endedAt?.let { sample.put("end", format.time(it)) }
+            if (row.sample.snapshot) sample.put("snapshot", true)
             row.statusUpdatedAt?.let { sample.put("status_at", format.time(it)) }
             samples.put(sample)
         }

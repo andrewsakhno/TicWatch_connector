@@ -28,6 +28,12 @@ object SpaceWeatherModule {
             ),
             store = store,
             publisher = publisher(store, TransportFactory.create(context)),
+            alerter = GeomagneticAlerter(
+                GeomagneticAlertPolicy(),
+                SharedPreferencesGeomagneticAlertLedger(context),
+                SystemGeomagneticAlertNotifier(context),
+                SensorHistoryModule.clock,
+            ),
         )
     }
 }

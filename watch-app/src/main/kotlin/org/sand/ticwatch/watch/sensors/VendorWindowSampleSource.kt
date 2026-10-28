@@ -9,40 +9,88 @@ import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.merge
+import org.sand.ticwatch.watch.sensors.adaptive.MeasurementGroup
+import org.sand.ticwatch.watch.sensors.adaptive.WindowCadence
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 
 /**
  * [SampleSource] that measures with Mobvoi's vendor sensors in short periodic windows:
- * every [interval] it listens for [window] and emits each aggregator's result. Periodic
- * rather than continuous because listening to `psp_spo2` keeps the PPG emitter lit,
- * which drains the battery when left on around the clock.
+ * each [AggregatorGroup] is due every [WindowCadence.intervalFor] its [AggregatorGroup.group] (30 min while idle,
+ * sooner while the adaptive scheduler is alerted), counted from the end of its last window; groups due within
+ * [PIGGYBACK] of the one starting a window share it. Periodic rather than continuous because listening to
+ * `psp_spo2` keeps the PPG emitter lit, which drains the battery when left on around the clock.
  *
- * Holds a partial wake lock for the window only: these are non-wakeup sensors, so their
- * events are dropped while the application processor sleeps.
+ * Waits on the alarm [scheduler] for the earliest due group, or until the [cadence] changes (an alert shortened an
+ * interval).
+ */
+class VendorWindowSampleSource(
+    private val measurer: WindowMeasurer,
+    private val scheduler: WindowScheduler,
+    private val cadence: WindowCadence,
+    private val groups: List<AggregatorGroup>,
+    private val window: Duration,
+    private val clock: Clock,
+) : SampleSource {
+
+    override fun samples(): Flow<SensorSample> = flow {
+        val lastRun = mutableMapOf<MeasurementGroup, Instant>()
+        while (true) {
+            val now = clock.instant()
+            if (groups.any { dueIn(it, lastRun, now) <= DUE_TOLERANCE }) {
+                // Groups due soon join the window that is waking the watch anyway, so they realign after an alert.
+                val due = groups.filter { dueIn(it, lastRun, now) <= PIGGYBACK }
+                measurer.measure(due, window).forEach { emit(it) }
+                val finishedAt = clock.instant()
+                due.forEach { lastRun[it.group] = finishedAt }
+            }
+            awaitNextDue(lastRun)
+        }
+    }
+
+    private fun dueIn(group: AggregatorGroup, lastRun: Map<MeasurementGroup, Instant>, now: Instant): Duration {
+        val last = lastRun[group.group] ?: return Duration.ZERO
+        return Duration.between(now, last.plus(cadence.intervalFor(group.group)))
+    }
+
+    private suspend fun awaitNextDue(lastRun: Map<MeasurementGroup, Instant>) {
+        val wait = groups.minOf { dueIn(it, lastRun, clock.instant()) }
+        if (wait <= DUE_TOLERANCE) return
+        merge(flow { scheduler.awaitNext(wait); emit(Unit) }, cadence.changes).first()
+    }
+
+    private companion object {
+        /** The alarm window: a group due this soon starts a window now. */
+        val DUE_TOLERANCE: Duration = Duration.ofMinutes(1)
+
+        /** Groups due within this long join a window another group started. */
+        val PIGGYBACK: Duration = Duration.ofMinutes(5)
+    }
+}
+
+/** Measures [AggregatorGroup]s together for one window and returns their results. */
+fun interface WindowMeasurer {
+    suspend fun measure(groups: List<AggregatorGroup>, window: Duration): List<SensorSample>
+}
+
+/**
+ * [WindowMeasurer] on [SensorManager] listeners. Holds a partial wake lock for the window only: these are
+ * non-wakeup sensors, so their events are dropped while the application processor sleeps.
  *
  * Each [AggregatorGroup] only joins a window its [AggregatorGroup.gate] allows, checked at the
  * window start and again at its end (a body reading taken while the watch came off the wrist is
  * discarded); a window no group joins is skipped entirely, wake lock included.
  */
-class VendorWindowSampleSource(
+class SensorWindowMeasurer(
     private val sensorManager: SensorManager,
     private val powerManager: PowerManager,
-    private val scheduler: WindowScheduler,
-    private val groups: List<AggregatorGroup>,
-    private val interval: Duration,
-    private val window: Duration,
-) : SampleSource {
+) : WindowMeasurer {
 
-    override fun samples(): Flow<SensorSample> = flow {
-        while (true) {
-            measureWindow().forEach { emit(it) }
-            scheduler.awaitNext(interval)
-        }
-    }
-
-    private suspend fun measureWindow(): List<SensorSample> {
+    override suspend fun measure(groups: List<AggregatorGroup>, window: Duration): List<SensorSample> {
         val openGroups = groups.filter { it.gate.isOpen() }
         if (openGroups.isEmpty()) {
             Log.i(TAG, "Vendor window skipped: every group is gated off")
@@ -102,8 +150,12 @@ fun interface WindowGate {
     }
 }
 
-/** Aggregators that are measured together under one [gate], kept only if every [qualifiers] one accepts the window. */
+/**
+ * Aggregators that are measured together under one [gate], kept only if every [qualifiers] one accepts the window;
+ * paced as [group] by the adaptive cadence.
+ */
 class AggregatorGroup(
+    val group: MeasurementGroup,
     val factories: List<() -> VendorReadingAggregator>,
     val gate: WindowGate = WindowGate.ALWAYS,
     val qualifiers: List<() -> WindowQualifier> = emptyList(),

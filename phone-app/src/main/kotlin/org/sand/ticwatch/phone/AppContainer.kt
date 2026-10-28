@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone
 
+import android.os.PowerManager
 import org.sand.ticwatch.phone.insights.HealthInsightsSource
 import org.sand.ticwatch.phone.insights.HistoryHealthInsightsSource
 import org.sand.ticwatch.phone.insights.ReadinessScorer
@@ -23,12 +24,49 @@ import org.sand.ticwatch.phone.datalayer.HealthScoresPublisher
 import org.sand.ticwatch.phone.datalayer.WatchStatePublisher
 import org.sand.ticwatch.phone.mcp.spaceweather.GetSpaceWeatherTool
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherModule
+import org.sand.ticwatch.phone.spaceweather.GeomagneticAlertPolicy
+import org.sand.ticwatch.phone.health.PatientNameStore
+import org.sand.ticwatch.phone.medication.CardioAdvisor
+import org.sand.ticwatch.phone.medication.MedicationEffectAnalyzer
+import org.sand.ticwatch.phone.medication.MedicationEffectReader
+import org.sand.ticwatch.phone.medication.CardioDatabase
+import org.sand.ticwatch.phone.medication.MedicationIntakeLog
+import org.sand.ticwatch.phone.medication.RoomMedicationIntakeLog
+import org.sand.ticwatch.phone.medication.MedicationRegimen
+import org.sand.ticwatch.phone.medication.PresetMedicationRegimen
+import org.sand.ticwatch.phone.report.AmbulatoryPressureCalculator
+import org.sand.ticwatch.phone.report.CalibrationAccuracyCalculator
+import org.sand.ticwatch.phone.report.CardioReportCalculators
+import org.sand.ticwatch.phone.report.CardioReportComposer
+import org.sand.ticwatch.phone.report.CardioReportFormatter
+import org.sand.ticwatch.phone.report.CardioReportGenerator
+import org.sand.ticwatch.phone.report.DayNightWindow
+import org.sand.ticwatch.phone.report.HeartRateReportCalculator
+import org.sand.ticwatch.phone.report.HtmlCardioReportRenderer
+import org.sand.ticwatch.phone.report.MarkdownCardioReportRenderer
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherStore
 import org.sand.ticwatch.phone.datalayer.WatchHealthScoresPublisher
 import org.sand.ticwatch.phone.datalayer.BloodPressureRequestHandler
 import org.sand.ticwatch.phone.datalayer.WatchBloodPressurePublisher
 import org.sand.ticwatch.phone.datalayer.WatchBloodPressureRequestHandler
 import org.sand.ticwatch.phone.mcp.history.GetHrvStatusTool
+import org.sand.ticwatch.phone.mcp.history.GetCardioReadinessTool
+import org.sand.ticwatch.phone.advisor.AdviceSelector
+import org.sand.ticwatch.phone.advisor.AutonomicExhaustionRule
+import org.sand.ticwatch.phone.advisor.CardioReadinessEngine
+import org.sand.ticwatch.phone.advisor.CardioReadinessSource
+import org.sand.ticwatch.phone.advisor.DiastolicPressureRule
+import org.sand.ticwatch.phone.advisor.FatigueRule
+import org.sand.ticwatch.phone.advisor.GeomagneticStormRule
+import org.sand.ticwatch.phone.advisor.HistoryCardioReadinessSource
+import org.sand.ticwatch.phone.advisor.MedicationEffectCurve
+import org.sand.ticwatch.phone.advisor.MedicationInfoRule
+import org.sand.ticwatch.phone.advisor.NightRecoveryRule
+import org.sand.ticwatch.phone.advisor.ReadinessForecaster
+import org.sand.ticwatch.phone.advisor.ReadinessSnapshotReader
+import org.sand.ticwatch.phone.advisor.RestingTachycardiaRule
+import org.sand.ticwatch.phone.advisor.TrainingLoadInfoRule
+import org.sand.ticwatch.phone.advisor.widget.AdvisorWidgetRefresher
 import org.sand.ticwatch.phone.mcp.history.GetSleepScoreTool
 import org.sand.ticwatch.phone.mcp.history.GetBloodPressureTool
 import org.sand.ticwatch.phone.bpm.BiolandCuffClient
@@ -48,6 +86,9 @@ import com.google.android.gms.wearable.Wearable
 import org.sand.ticwatch.phone.datalayer.TransportWatchAppManager
 import org.sand.ticwatch.phone.datalayer.WatchAppManager
 import org.sand.ticwatch.phone.datalayer.WatchReplies
+import java.io.File
+import org.sand.ticwatch.phone.datalayer.FileWatchScreenshotSink
+import org.sand.ticwatch.phone.datalayer.WatchScreenshotSink
 import org.sand.ticwatch.phone.health.HealthConnectRecordWriter
 import org.sand.ticwatch.phone.health.HealthRecordWriter
 import androidx.health.connect.client.HealthConnectClient
@@ -92,6 +133,10 @@ import org.sand.ticwatch.phone.health.SharedPreferencesInstantLog
 import org.sand.ticwatch.phone.health.SleepBreathingSummaryDeriver
 import org.sand.ticwatch.phone.mcp.history.GetSleepBreathingTool
 import org.sand.ticwatch.phone.history.AcknowledgingHealthRecordWriter
+import org.sand.ticwatch.phone.snore.MicrophoneSnoreMeter
+import org.sand.ticwatch.phone.snore.PhoneSnoreMonitor
+import org.sand.ticwatch.phone.snore.ServiceSnoreMonitorControl
+import org.sand.ticwatch.phone.snore.SnoreMonitorControl
 import org.sand.ticwatch.phone.history.HistoryRetentionStore
 import org.sand.ticwatch.phone.history.SensorHistoryMaintenance
 import org.sand.ticwatch.phone.history.SleepSessionRetentionStore
@@ -104,6 +149,13 @@ import org.sand.ticwatch.phone.mcp.history.ExportSamplesTool
 import org.sand.ticwatch.phone.mcp.history.GetDailyProfileTool
 import org.sand.ticwatch.phone.mcp.history.GetDeliveryStatusTool
 import org.sand.ticwatch.phone.mcp.watch.GetWatchLogsTool
+import org.sand.ticwatch.phone.mcp.watch.TriggerHealthSnapshotTool
+import org.sand.ticwatch.phone.snapshot.ProcessSnapshotResults
+import org.sand.ticwatch.phone.snapshot.SnapshotResultLog
+import org.sand.ticwatch.phone.snapshot.SnapshotResultReceiver
+import org.sand.ticwatch.phone.snapshot.StoringSnapshotResultReceiver
+import org.sand.ticwatch.phone.snapshot.TransportWatchSnapshotRequester
+import org.sand.ticwatch.phone.snapshot.WatchSnapshotRequester
 import org.sand.ticwatch.phone.mcp.history.GetExerciseRouteTool
 import org.sand.ticwatch.phone.mcp.history.GetMultiSeriesTool
 import org.sand.ticwatch.phone.mcp.history.GetRawSamplesTool
@@ -120,8 +172,12 @@ import org.sand.ticwatch.phone.route.ExerciseRouteLog
 import org.sand.ticwatch.phone.route.ServiceWorkoutRouteRecorder
 import org.sand.ticwatch.phone.route.WorkoutRouteRecorder
 import org.sand.ticwatch.phone.network.BackendApiFactory
+import org.sand.ticwatch.phone.transport.BluetoothBondedWatchSource
 import org.sand.ticwatch.phone.transport.DeviceLinkTransport
 import org.sand.ticwatch.phone.transport.TransportFactory
+import org.sand.ticwatch.phone.watchsettings.SharedPreferencesWatchSettingsStore
+import org.sand.ticwatch.phone.watchsettings.WatchSettingsStore
+import org.sand.ticwatch.phone.watchsettings.WatchSettingsSync
 
 /**
  * Minimal composition root: builds concrete implementations once and hands them out
@@ -134,6 +190,7 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
     val watchAppManager: WatchAppManager = TransportWatchAppManager(
         nodeClient = Wearable.getNodeClient(context),
         transport = deviceLinkTransport,
+        bondedWatchSource = BluetoothBondedWatchSource(context),
     )
 
     private val exerciseRouteStore = SensorHistoryModule.routeStore(context)
@@ -163,6 +220,9 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
     private val profileStore = SharedPreferencesUserProfileStore(context)
 
     val userProfileStore: UserProfileStore = profileStore
+
+    /** Name printed on the doctor's report. */
+    val patientNameStore: PatientNameStore = profileStore
 
     val sensorHistoryPurger: SensorHistoryPurger =
         SensorHistoryPurger(
@@ -272,7 +332,10 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
             historyEraser = sensorHistoryStore,
             recordEraser = HealthConnectBloodPressureEraser(HealthConnectClient.getOrCreate(context)),
             // Resolved on call: the publisher reads back through this monitor.
-            listener = { bloodPressurePublisher.onLogChanged() },
+            listener = {
+                bloodPressurePublisher.onLogChanged()
+                advisorWidgetRefresher.publish()
+            },
         ),
         clock = SensorHistoryModule.clock,
     )
@@ -298,6 +361,51 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
             SensorHistoryModule.clock,
             SensorHistoryModule.zone,
         )
+
+    /** Preset antihypertensive therapy (Nedal + Noliprel Forte) and its logged intakes. */
+    val medicationRegimen: MedicationRegimen = PresetMedicationRegimen()
+
+    /** Room database for cardio data (medication intakes), separate from the hand-written sensor history; opened on first query. */
+    private val cardioDatabase = CardioDatabase.open(appContext)
+
+    val medicationIntakeLog: MedicationIntakeLog = RoomMedicationIntakeLog(cardioDatabase.medicationIntakes(), SensorHistoryModule.clock)
+
+    /** Heart rate / blood pressure change 1, 2 and 4 h after an intake. */
+    val medicationEffects = MedicationEffectReader(sampleWindowReader, bloodPressureMonitor.log, MedicationEffectAnalyzer())
+
+    /** Advice shown when a geomagnetic alert is opened. */
+    val cardioAdvisor = CardioAdvisor(medicationRegimen)
+
+    val geomagneticAlertPolicy = GeomagneticAlertPolicy()
+
+    val medicationTracking = MedicationTracking(medicationRegimen, medicationIntakeLog, medicationEffects)
+
+    /** Blood Pressure tab's "Export report for doctor". */
+    val cardioReportComposer: CardioReportComposer by lazy {
+        val window = DayNightWindow(SensorHistoryModule.zone)
+        CardioReportComposer(
+            generator = CardioReportGenerator(
+                samples = sampleWindowReader,
+                queries = sensorHistoryStore,
+                bloodPressure = bloodPressureMonitor.log,
+                intakes = medicationIntakeLog,
+                effects = medicationEffects,
+                profile = userProfileStore,
+                patientNames = patientNameStore,
+                regimen = medicationRegimen,
+                calculators = CardioReportCalculators(
+                    AmbulatoryPressureCalculator(window),
+                    HeartRateReportCalculator(window),
+                    CalibrationAccuracyCalculator(),
+                ),
+                clock = SensorHistoryModule.clock,
+                zone = SensorHistoryModule.zone,
+            ),
+            formatter = CardioReportFormatter(),
+            html = HtmlCardioReportRenderer(),
+            markdown = MarkdownCardioReportRenderer(),
+        )
+    }
 
     /** Battery and serial the cuff last reported, shown on the Blood Pressure tab. */
     val cuffStatusStore = SharedPreferencesCuffStatusStore(appContext)
@@ -328,9 +436,76 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
     /** NOAA Kp / solar flux the [org.sand.ticwatch.phone.spaceweather.SpaceWeatherRefreshWorker] last fetched. */
     val spaceWeatherStore: SpaceWeatherStore = SpaceWeatherModule.store(context)
 
-    /** Phone-held state the watch mirrors; each is re-sent (deduplicated) after every stored sensor push. */
+    /** Battery-relevant watch features (auto blood pressure, log capture); first access reads prefs - off the main thread. */
+    val watchSettingsStore: WatchSettingsStore by lazy { SharedPreferencesWatchSettingsStore.get(context) }
+
+    val watchSettingsSync: WatchSettingsSync by lazy {
+        WatchSettingsSync(watchSettingsStore, deviceLinkTransport, CoroutineScope(SupervisorJob() + Dispatchers.IO), SensorHistoryModule.clock)
+    }
+
+    /** Routes the watch's sleep start/end to the link service hosting [phoneSnoreMonitor]. */
+    val snoreMonitorControl: SnoreMonitorControl = ServiceSnoreMonitorControl(appContext)
+
+    /** Baseline Snapshots: the Metrics tab's button and the MCP tool ask the watch, its result is stored flagged. */
+    val watchSnapshotRequester: WatchSnapshotRequester = TransportWatchSnapshotRequester(deviceLinkTransport, WatchReplies)
+    val snapshotResults: SnapshotResultLog = ProcessSnapshotResults
+    val snapshotResultReceiver: SnapshotResultReceiver by lazy {
+        StoringSnapshotResultReceiver(sensorDataSyncWorker, bloodPressureRequestHandler, snapshotResults, WatchReplies)
+    }
+
+    val watchScreenshotSink: WatchScreenshotSink =
+        FileWatchScreenshotSink(File(appContext.filesDir, FileWatchScreenshotSink.DIRECTORY_NAME))
+
+    /** Snoring analysis on the phone's microphone; owned by the long-lived link service (microphone FGS type). */
+    fun phoneSnoreMonitor(scope: CoroutineScope): PhoneSnoreMonitor = PhoneSnoreMonitor(
+        meter = MicrophoneSnoreMeter(appContext),
+        writer = acknowledgingHealthRecordWriter,
+        settings = { watchSettingsStore.settings.value },
+        powerManager = appContext.getSystemService(PowerManager::class.java),
+        scope = scope,
+        clock = SensorHistoryModule.clock,
+    )
+
+    /** Dashboard "Advisor" tab, its widget and MCP `get_cardio_readiness`: rule-based readiness + hourly forecast. */
+    val cardioReadiness: CardioReadinessSource by lazy {
+        val engine = CardioReadinessEngine(
+            rules = listOf(
+                DiastolicPressureRule(),
+                RestingTachycardiaRule(),
+                AutonomicExhaustionRule(),
+                FatigueRule(),
+                GeomagneticStormRule(),
+                NightRecoveryRule(),
+                TrainingLoadInfoRule(),
+                MedicationInfoRule(),
+            ),
+            adviceSelector = AdviceSelector(),
+        )
+        HistoryCardioReadinessSource(
+            reader = ReadinessSnapshotReader(
+                queries = sensorHistoryStore,
+                pressureLog = bloodPressureMonitor.log,
+                pressureCalculator = AmbulatoryPressureCalculator(DayNightWindow(SensorHistoryModule.zone)),
+                intakes = medicationIntakeLog,
+                spaceWeather = spaceWeatherStore,
+                clock = SensorHistoryModule.clock,
+                zone = SensorHistoryModule.zone,
+            ),
+            engine = engine,
+            forecaster = ReadinessForecaster(engine, MedicationEffectCurve(), SensorHistoryModule.zone),
+        )
+    }
+
+    private val advisorWidgetRefresher = AdvisorWidgetRefresher(appContext)
+
+    /**
+     * Phone-held state the watch mirrors; each is re-sent (deduplicated) after every stored sensor push. The advisor
+     * widget rides on the same hook to re-render after new data.
+     */
     val watchStatePublishers: List<WatchStatePublisher> by lazy {
         listOf(
+            advisorWidgetRefresher,
+            watchSettingsSync,
             healthScoresPublisher,
             bloodPressurePublisher,
             SpaceWeatherModule.publisher(spaceWeatherStore, deviceLinkTransport),
@@ -365,7 +540,9 @@ class AppContainer(context: Context, backendBaseUrl: String = "http://10.0.2.2:8
             GetBloodPressureTool(bloodPressureMonitor, arguments, format),
             GetDeliveryStatusTool(sensorHistoryStore, arguments, format),
             GetWatchLogsTool(deviceLinkTransport, WatchReplies, arguments),
+            TriggerHealthSnapshotTool(watchSnapshotRequester, format),
             GetSpaceWeatherTool(spaceWeatherStore, SensorHistoryModule.zone),
+            GetCardioReadinessTool(cardioReadiness, format),
         )
     }
 

@@ -30,6 +30,10 @@ class PhoneDataLayerListenerService : WearableListenerService() {
             WatchReplies,
             appContainer.watchStatePublishers,
             appContainer.bloodPressureRequestHandler,
+            appContainer.watchSettingsSync,
+            appContainer.snoreMonitorControl,
+            appContainer.watchScreenshotSink,
+            appContainer.snapshotResultReceiver,
         )
     }
 

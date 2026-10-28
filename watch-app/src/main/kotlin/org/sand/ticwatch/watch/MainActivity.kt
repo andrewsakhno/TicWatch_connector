@@ -1,5 +1,7 @@
 package org.sand.ticwatch.watch
 
+import kotlinx.coroutines.flow.StateFlow
+import org.sand.ticwatch.watch.snapshot.SnapshotState
 import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
@@ -11,6 +13,9 @@ import android.os.IBinder
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import org.sand.ticwatch.watch.screenshot.DashboardPageNavigator
+import org.sand.ticwatch.watch.screenshot.VisibleScreen
+import org.sand.ticwatch.watch.screenshot.WindowScreenCapturer
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,11 +29,12 @@ import kotlinx.coroutines.withContext
 import org.sand.ticwatch.watch.autoworkout.AutoWorkoutMode
 import org.sand.ticwatch.watch.autoworkout.AutoWorkoutSettings
 import org.sand.ticwatch.watch.autoworkout.SharedPreferencesAutoWorkoutSettings
-import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressureSettings
-import org.sand.ticwatch.watch.bloodpressure.SharedPreferencesAutoBloodPressureSettings
 import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 import org.sand.ticwatch.watch.sensors.LiveReadings
 import org.sand.ticwatch.watch.sensors.SensorCollectionService
+import org.sand.ticwatch.watch.settings.SharedPreferencesWatchSettingsStore
+import org.sand.ticwatch.watch.settings.WatchSettings
+import org.sand.ticwatch.watch.settings.WatchSettingsSync
 import org.sand.ticwatch.watch.transport.BluetoothLinkServerService
 
 class MainActivity : ComponentActivity() {
@@ -37,11 +43,10 @@ class MainActivity : ComponentActivity() {
     private var autoWorkoutMode by mutableStateOf<AutoWorkoutMode?>(null)
     private var phonePayloads by mutableStateOf<PhonePayloadStores?>(null)
     private var bloodPressureAvailable by mutableStateOf(false)
+    private var snapshotState by mutableStateOf<StateFlow<SnapshotState>?>(null)
     private val autoWorkoutSettings: AutoWorkoutSettings by lazy { SharedPreferencesAutoWorkoutSettings(applicationContext) }
-    private var autoBloodPressure by mutableStateOf<Boolean?>(null)
-    private val autoBloodPressureSettings: AutoBloodPressureSettings by lazy {
-        SharedPreferencesAutoBloodPressureSettings(applicationContext)
-    }
+    private var watchSettings by mutableStateOf<WatchSettings?>(null)
+    private val watchSettingsSync by lazy { WatchSettingsSync.create(applicationContext, lifecycleScope) }
     private var boundToSensorService = false
     private var sensorService: SensorCollectionService.LocalBinder? = null
     private var holdingLiveHeartRate = false
@@ -52,6 +57,7 @@ class MainActivity : ComponentActivity() {
             sensorService = binder as? SensorCollectionService.LocalBinder
             liveReadings = sensorService?.readings
             bloodPressureAvailable = sensorService != null
+            snapshotState = sensorService?.snapshotState
             updateLiveHeartRateDemand()
         }
 
@@ -60,6 +66,7 @@ class MainActivity : ComponentActivity() {
             holdingLiveHeartRate = false
             liveReadings = null
             bloodPressureAvailable = false
+            snapshotState = null
         }
     }
 
@@ -84,6 +91,10 @@ class MainActivity : ComponentActivity() {
         requestNextBackgroundPermission()
     }
 
+    /** Lets the debug bridge switch pages and capture them while this screen is visible. */
+    private val pageNavigator = DashboardPageNavigator()
+    private val screenCapturer by lazy { WindowScreenCapturer(window, pageNavigator) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -97,8 +108,10 @@ class MainActivity : ComponentActivity() {
         // First SharedPreferences access reads the file: off the main thread.
         lifecycleScope.launch {
             autoWorkoutMode = withContext(Dispatchers.IO) { autoWorkoutSettings.mode() }
-            autoBloodPressure = withContext(Dispatchers.IO) { autoBloodPressureSettings.isEnabled() }
             phonePayloads = withContext(Dispatchers.IO) { PhonePayloadStores.get(applicationContext) }
+            val settingsStore = withContext(Dispatchers.IO) { SharedPreferencesWatchSettingsStore.get(applicationContext) }
+            // A change from the phone shows up here too.
+            settingsStore.settings.collect { watchSettings = it }
         }
 
         setContent {
@@ -112,23 +125,44 @@ class MainActivity : ComponentActivity() {
                         history = stores?.bloodPressureHistory?.latest,
                         lastResult = stores?.bloodPressureResult?.latest,
                         onMeasure = if (bloodPressureAvailable) ::requestBloodPressure else null,
-                        autoMeasure = autoBloodPressure,
+                        autoMeasure = watchSettings?.autoBloodPressure,
                         onAutoMeasureChange = ::setAutoBloodPressure,
                     ),
                     autoWorkoutMode = autoWorkoutMode,
                     onAutoWorkoutModeClick = ::cycleAutoWorkoutMode,
+                    logCapture = watchSettings?.logCapture,
+                    onLogCaptureChange = ::setLogCapture,
+                    snoreAnalysis = SnoreAnalysisState(
+                        enabled = watchSettings?.snoreAnalysis,
+                        microphone = watchSettings?.snoreMicrophone,
+                        onEnabledChange = { on -> changeSettings { it.copy(snoreAnalysis = on) } },
+                        onMicrophoneClick = { changeSettings { it.copy(snoreMicrophone = it.snoreMicrophone.next()) } },
+                    ),
+                    snapshot = SnapshotPageState(
+                        state = snapshotState,
+                        onCapture = if (snapshotState != null) ::requestSnapshot else null,
+                    ),
+                    pageNavigator = pageNavigator,
                 )
             }
         }
+    }
+
+    private fun requestSnapshot() {
+        sensorService?.snapshot?.request(null)
     }
 
     private fun requestBloodPressure() {
         sensorService?.bloodPressure?.request()
     }
 
-    private fun setAutoBloodPressure(enabled: Boolean) {
-        autoBloodPressure = enabled
-        lifecycleScope.launch(Dispatchers.IO) { autoBloodPressureSettings.setEnabled(enabled) }
+    private fun setAutoBloodPressure(enabled: Boolean) = changeSettings { it.copy(autoBloodPressure = enabled) }
+
+    private fun setLogCapture(enabled: Boolean) = changeSettings { it.copy(logCapture = enabled) }
+
+    /** Stored and sent to the phone; the screen follows through the store's flow. */
+    private fun changeSettings(transform: (WatchSettings) -> WatchSettings) {
+        lifecycleScope.launch(Dispatchers.IO) { watchSettingsSync.change(transform) }
     }
 
     private fun cycleAutoWorkoutMode() {
@@ -187,11 +221,13 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         visible = true
+        VisibleScreen.show(screenCapturer)
         updateLiveHeartRateDemand()
     }
 
     override fun onStop() {
         visible = false
+        VisibleScreen.hide(screenCapturer)
         updateLiveHeartRateDemand()
         super.onStop()
     }

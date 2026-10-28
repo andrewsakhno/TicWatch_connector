@@ -18,6 +18,9 @@ object DataLayerPaths {
     /** Watch -> phone: a workout started/ended on the watch (`{"active": bool}`), so the phone can track GPS. */
     const val MESSAGE_WORKOUT_STATE = "/workout/state"
 
+    /** Watch -> phone: a sleep session opened/closed and the phone's microphone should listen for snoring (`{"active": bool}`). */
+    const val MESSAGE_SNORE_MONITOR = "/sleep/snore-monitor"
+
     /** Watch -> phone: GPS fixes the watch recorded on its own during a workout (JSON array). */
     const val MESSAGE_EXERCISE_ROUTE_PUSH = "/workout/route"
 
@@ -27,6 +30,9 @@ object DataLayerPaths {
     /** Phone -> watch: NOAA geomagnetic (Kp) and solar activity, today + forecast days, as JSON. */
     const val MESSAGE_SPACE_WEATHER = "/insights/space-weather"
 
+    /** Both ways: battery-relevant watch features (`{"auto_blood_pressure", "log_capture", "changed_at"}`), newest change wins. */
+    const val MESSAGE_WATCH_SETTINGS = "/settings/watch"
+
     /** Watch -> phone: estimate and save blood pressure now (`{"heart_rate": bpm, "heart_rate_at": epochMs}`, optional). */
     const val MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST = "/blood-pressure/measure"
 
@@ -35,6 +41,12 @@ object DataLayerPaths {
 
     /** Phone -> watch: the latest saved readings, cuff and wrist estimates, newest first (JSON). */
     const val MESSAGE_BLOOD_PRESSURE_HISTORY = "/blood-pressure/history"
+
+    /** Phone -> watch: take a Baseline Snapshot now (`{"request_id": id}`, optional; echoed in the result). */
+    const val MESSAGE_CAPTURE_SNAPSHOT = "/command/capture_snapshot"
+
+    /** Watch -> phone: a snapshot's outcome and samples (`{"status", "message", "samples": [...], "request_id"?}`). */
+    const val MESSAGE_SNAPSHOT_RESULT = "/snapshot_result"
 
     /** Debug bridge: phone asks for a one-shot sensor reading, watch replies with one.
      *  Goes over the same Wear Data Layer session as everything else, so it works
@@ -58,4 +70,8 @@ object DataLayerPaths {
     /** Debug bridge: phone queries the watch app's own rotating logcat files (JSON filter in, JSON lines out). */
     const val MESSAGE_DEBUG_LOGS_REQUEST = "/debug/logs/request"
     const val MESSAGE_DEBUG_LOGS_RESPONSE = "/debug/logs/response"
+
+    /** Debug bridge: phone asks for a PNG of the watch app's visible screen (`{"page": n}`, optional), watch answers base64 JSON. */
+    const val MESSAGE_DEBUG_SCREENSHOT_REQUEST = "/debug/screenshot/request"
+    const val MESSAGE_DEBUG_SCREENSHOT_RESPONSE = "/debug/screenshot/response"
 }

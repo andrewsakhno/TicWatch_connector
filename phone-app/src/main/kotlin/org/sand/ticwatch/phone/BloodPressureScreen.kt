@@ -40,6 +40,13 @@ import org.sand.ticwatch.phone.health.BloodPressureCategory
 import org.sand.ticwatch.phone.health.BloodPressureMeasurement
 import org.sand.ticwatch.phone.health.BloodPressureMonitor
 import org.sand.ticwatch.phone.health.BloodPressureReading
+import org.sand.ticwatch.phone.medication.MedicationDose
+import org.sand.ticwatch.phone.medication.MedicationEffect
+import org.sand.ticwatch.phone.medication.MedicationEffectReader
+import org.sand.ticwatch.phone.medication.MedicationIntake
+import org.sand.ticwatch.phone.medication.MedicationIntakeLog
+import org.sand.ticwatch.phone.medication.MedicationRegimen
+import org.sand.ticwatch.phone.report.CardioReportComposer
 import org.sand.ticwatch.phone.health.CalibrationResult
 import org.sand.ticwatch.phone.health.WristSignalsReader
 import java.time.Duration
@@ -53,7 +60,12 @@ import kotlin.math.roundToInt
  * save the estimate (history + Health Connect) and chart the last [HISTORY_WINDOW] of readings (tap one to delete it).
  */
 @Composable
-fun BloodPressureScreen(monitor: BloodPressureMonitor, cuffStatus: CuffStatusSource) {
+fun BloodPressureScreen(
+    monitor: BloodPressureMonitor,
+    cuffStatus: CuffStatusSource,
+    medication: MedicationTracking,
+    reports: CardioReportComposer,
+) {
     val coroutineScope = rememberCoroutineScope()
     var calibration by remember { mutableStateOf<BloodPressureCalibration?>(null) }
     var measurement by remember { mutableStateOf<BloodPressureMeasurement?>(null) }
@@ -61,12 +73,16 @@ fun BloodPressureScreen(monitor: BloodPressureMonitor, cuffStatus: CuffStatusSou
     var historyEnd by remember { mutableStateOf(Instant.now()) }
     var message by remember { mutableStateOf<String?>(null) }
     var cuff by remember { mutableStateOf<CuffStatus?>(null) }
+    var intakes by remember { mutableStateOf<List<MedicationIntake>>(emptyList()) }
+    var latestEffect by remember { mutableStateOf<MedicationEffect?>(null) }
 
     suspend fun reload() {
         calibration = monitor.calibration()
         historyEnd = Instant.now()
         recent = monitor.since(historyEnd.minus(HISTORY_WINDOW))
         cuff = withContext(Dispatchers.IO) { cuffStatus.cuffStatus() }
+        intakes = medication.intakes.intakes(historyEnd.minus(HISTORY_WINDOW), historyEnd.plusMillis(1))
+        latestEffect = intakes.lastOrNull()?.let { medication.effects.effect(it) }
     }
 
     LaunchedEffect(Unit) { reload() }
@@ -98,15 +114,28 @@ fun BloodPressureScreen(monitor: BloodPressureMonitor, cuffStatus: CuffStatusSou
             },
         )
         message?.let { Text(text = it, style = MaterialTheme.typography.bodyMedium) }
+        MedicationCard(medication.regimen.medications(MedicationDose.MORNING), latestEffect, historyEnd) {
+            coroutineScope.launch {
+                message = medication.intakes.record(MedicationDose.MORNING).fold(
+                    onSuccess = { "Intake logged at ${formatTime(it.takenAt)}" },
+                    onFailure = { "Logging the intake failed: ${it.message}" },
+                )
+                reload()
+            }
+        }
         cuff?.let { CuffCard(it) }
-        HistoryCard(recent, historyEnd.minus(HISTORY_WINDOW), historyEnd) { reading ->
+        HistoryCard(recent, historyEnd.minus(HISTORY_WINDOW), historyEnd, intakes.map { it.takenAt }) { reading ->
             coroutineScope.launch {
                 runCatching { monitor.log.delete(reading) }.onFailure { message = "Delete failed: ${it.message}" }
                 reload()
             }
         }
+        ReportExportCard(reports)
     }
 }
+
+/** What the medication card needs: the regimen, the intake log and the effect reader. */
+class MedicationTracking(val regimen: MedicationRegimen, val intakes: MedicationIntakeLog, val effects: MedicationEffectReader)
 
 @Composable
 private fun CalibrationCard(
@@ -203,12 +232,19 @@ private fun CuffCard(status: CuffStatus) = SectionCard("Bioland cuff") {
 }
 
 @Composable
-private fun HistoryCard(readings: List<BloodPressureReading>, start: Instant, end: Instant, onDelete: (BloodPressureReading) -> Unit) =
-    SectionCard("Last 24 hours") {
-        BloodPressureDayChart(readings, start, end) { reading ->
-            TextButton(onClick = { onDelete(reading) }) { Text(text = "Delete") }
-        }
-    }
+private fun HistoryCard(
+    readings: List<BloodPressureReading>,
+    start: Instant,
+    end: Instant,
+    intakes: List<Instant>,
+    onDelete: (BloodPressureReading) -> Unit,
+) = SectionCard("Last 24 hours") {
+    BloodPressureDayChart(
+        readings, start, end,
+        selectedActions = { reading -> TextButton(onClick = { onDelete(reading) }) { Text(text = "Delete") } },
+        markers = intakes,
+    )
+}
 
 @Composable
 private fun PressureField(text: String, label: String, modifier: Modifier, onChange: (String) -> Unit) = OutlinedTextField(
@@ -221,7 +257,7 @@ private fun PressureField(text: String, label: String, modifier: Modifier, onCha
 )
 
 @Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(FIELD_SPACING.dp)) {
             Text(text = title, style = MaterialTheme.typography.titleMedium)
@@ -230,7 +266,7 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
     }
 }
 
-private fun formatTime(instant: Instant): String = TIME_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
+internal fun formatTime(instant: Instant): String = TIME_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
 
 private val HISTORY_WINDOW: Duration = Duration.ofHours(24)
 private const val PRESSURE_DIGITS = 3

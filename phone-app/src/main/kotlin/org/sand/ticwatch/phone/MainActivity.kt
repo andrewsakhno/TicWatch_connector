@@ -97,6 +97,8 @@ class MainActivity : ComponentActivity() {
             // Phone GPS track of watch workouts; background location can't be asked for in the same dialog.
             add(Manifest.permission.ACCESS_FINE_LOCATION)
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            // Snoring analysis on the phone's microphone; the link service adds its microphone type once granted.
+            add(Manifest.permission.RECORD_AUDIO)
             addAll(appContainer.healthRecordWriter.requiredPermissions)
         }
         requestStartupPermissions.launch(startupPermissions.toTypedArray())
@@ -104,11 +106,13 @@ class MainActivity : ComponentActivity() {
         val initialScreen = intent.getStringExtra(EXTRA_SCREEN)
             ?.let { name -> Screen.entries.firstOrNull { it.name == name } }
             ?: Screen.Dashboard
+        val openCardioAdvice = intent.getBooleanExtra(EXTRA_CARDIO_ADVICE, false)
+        val openAdvisor = intent.getBooleanExtra(EXTRA_ADVISOR, false)
 
         setContent {
             MaterialTheme {
                 Surface {
-                    AppScaffold(appContainer, initialScreen)
+                    AppScaffold(appContainer, initialScreen, openCardioAdvice, openAdvisor)
                 }
             }
         }
@@ -121,17 +125,33 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val EXTRA_SCREEN = "org.sand.ticwatch.phone.extra.SCREEN"
+        private const val EXTRA_CARDIO_ADVICE = "org.sand.ticwatch.phone.extra.CARDIO_ADVICE"
+        private const val EXTRA_ADVISOR = "org.sand.ticwatch.phone.extra.ADVISOR"
+
+        /** Opens the Dashboard's Advisor tab (the advisor widget's tap target). */
+        fun advisorIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_SCREEN, Screen.Dashboard.name)
+                .putExtra(EXTRA_ADVISOR, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 
         /** Opens the app straight on the MCP agent screen (the agent notification's tap target). */
         fun mcpAgentIntent(context: Context): Intent =
             Intent(context, MainActivity::class.java).putExtra(EXTRA_SCREEN, Screen.McpAgent.name)
+
+        /** Opens the Blood Pressure tab with the cardio advice sheet (the geomagnetic alert's tap target). */
+        fun cardioAdviceIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_SCREEN, Screen.Dashboard.name)
+                .putExtra(EXTRA_CARDIO_ADVICE, true)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen) {
+private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openCardioAdvice: Boolean, openAdvisor: Boolean) {
     var currentScreen by remember { mutableStateOf(initialScreen) }
+    var showCardioAdvice by remember { mutableStateOf(openCardioAdvice) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
 
@@ -166,25 +186,38 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen) {
         ) { innerPadding ->
             Surface(modifier = Modifier.padding(innerPadding)) {
                 when (currentScreen) {
-                    Screen.Dashboard -> DashboardScreen(appContainer)
+                    Screen.Dashboard -> DashboardScreen(
+                        appContainer,
+                        when {
+                            openCardioAdvice -> DashboardTab.BLOOD_PRESSURE
+                            openAdvisor -> DashboardTab.ADVISOR
+                            else -> DashboardTab.METRICS
+                        },
+                    )
                     Screen.Settings -> SettingsScreen(appContainer)
                     Screen.McpAgent -> McpAgentScreen(appContainer)
                 }
             }
         }
     }
+    if (showCardioAdvice) {
+        CardioAdviceBottomSheet(
+            appContainer.spaceWeatherStore, appContainer.geomagneticAlertPolicy, appContainer.cardioAdvisor,
+        ) { showCardioAdvice = false }
+    }
 }
 
 private enum class DashboardTab(val label: String) {
     METRICS("Metrics"),
+    ADVISOR("Advisor"),
     BLOOD_PRESSURE("Blood Pressure"),
     SYSTEM("System"),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DashboardScreen(appContainer: AppContainer) {
-    var selectedTab by remember { mutableStateOf(DashboardTab.METRICS) }
+private fun DashboardScreen(appContainer: AppContainer, initialTab: DashboardTab) {
+    var selectedTab by remember { mutableStateOf(initialTab) }
 
     Column {
         PrimaryTabRow(selectedTabIndex = selectedTab.ordinal) {
@@ -198,7 +231,11 @@ private fun DashboardScreen(appContainer: AppContainer) {
         }
         when (selectedTab) {
             DashboardTab.METRICS -> HealthInsightsScreen(appContainer)
-            DashboardTab.BLOOD_PRESSURE -> BloodPressureScreen(appContainer.bloodPressureMonitor, appContainer.cuffStatusStore)
+            DashboardTab.ADVISOR -> CardioAdvisorScreen(appContainer.cardioReadiness)
+            DashboardTab.BLOOD_PRESSURE -> BloodPressureScreen(
+                appContainer.bloodPressureMonitor, appContainer.cuffStatusStore,
+                appContainer.medicationTracking, appContainer.cardioReportComposer,
+            )
             DashboardTab.SYSTEM -> PairedWatchesScreen(appContainer)
         }
     }

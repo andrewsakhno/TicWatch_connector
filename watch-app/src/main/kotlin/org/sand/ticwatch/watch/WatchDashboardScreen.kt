@@ -1,5 +1,7 @@
 package org.sand.ticwatch.watch
 
+import org.sand.ticwatch.watch.settings.SnoreMicrophone
+import org.sand.ticwatch.watch.screenshot.DashboardPageNavigator
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -25,8 +28,10 @@ import androidx.wear.compose.material.HorizontalPageIndicator
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.PageIndicatorState
 import androidx.wear.compose.material.Scaffold
+import androidx.wear.compose.material.Switch
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
+import androidx.wear.compose.material.ToggleChip
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.sand.ticwatch.watch.autoworkout.AutoWorkoutMode
@@ -67,8 +72,9 @@ private const val SCALE_WIDTH_FRACTION = 0.8f
 /**
  * Main app screen: swipeable pages (heart, readiness, breathing, environment - each with a colored
  * scale and/or a trend of the service's in-memory history; sleep score and recovery from the phone's
- * [healthScores], null until the phone sent them; NOAA Kp / solar flux from the phone's [spaceWeather]; [bloodPressure] readings and its "Measure" button - then settings, where
- * [onAutoWorkoutModeClick] switches the automatic walk workout to the next mode). Readings are null
+ * [healthScores], null until the phone sent them; NOAA Kp / solar flux from the phone's [spaceWeather]; [bloodPressure] readings and its "Measure" button, the [snapshot] button - then settings, where
+ * [onAutoWorkoutModeClick] switches the automatic walk workout to the next mode and [onLogCaptureChange] toggles
+ * the on-watch log capture; [snoreAnalysis] switches sleep snoring analysis and picks its microphone). Readings are null
  * until the service binds.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -80,19 +86,31 @@ fun WatchDashboardScreen(
     bloodPressure: BloodPressurePageState,
     autoWorkoutMode: AutoWorkoutMode?,
     onAutoWorkoutModeClick: () -> Unit,
+    logCapture: Boolean?,
+    onLogCaptureChange: (Boolean) -> Unit,
+    snoreAnalysis: SnoreAnalysisState,
+    snapshot: SnapshotPageState,
+    pageNavigator: DashboardPageNavigator? = null,
 ) {
     val pages: List<@Composable () -> Unit> = listOf(
         { HeartPage(readings) },
         { ReadinessPage(readings) },
         { BloodPressurePage(bloodPressure) },
+        { SnapshotPage(snapshot) },
         { SleepScorePage(healthScores) },
         { RecoveryPage(healthScores) },
         { BreathingPage(readings) },
         { EnvironmentPage(readings) },
         { SpaceWeatherPage(spaceWeather) },
-        { SettingsPage(autoWorkoutMode, onAutoWorkoutModeClick) },
+        { SettingsPage(autoWorkoutMode, onAutoWorkoutModeClick, logCapture, onLogCaptureChange, snoreAnalysis) },
     )
     val pagerState = rememberPagerState { pages.size }
+    if (pageNavigator != null) {
+        LaunchedEffect(pageNavigator, pages.size) {
+            pageNavigator.pageCount = pages.size
+            pageNavigator.requests.collect { pagerState.scrollToPage(it) }
+        }
+    }
     Scaffold(
         timeText = { TimeText() },
         pageIndicator = { HorizontalPageIndicator(pageIndicatorState = pagerState.asIndicatorState()) },
@@ -264,7 +282,13 @@ private fun EnvironmentPage(readings: LiveReadings?) {
 }
 
 @Composable
-private fun SettingsPage(autoWorkoutMode: AutoWorkoutMode?, onAutoWorkoutModeClick: () -> Unit) {
+private fun SettingsPage(
+    autoWorkoutMode: AutoWorkoutMode?,
+    onAutoWorkoutModeClick: () -> Unit,
+    logCapture: Boolean?,
+    onLogCaptureChange: (Boolean) -> Unit,
+    snoreAnalysis: SnoreAnalysisState,
+) {
     PageColumn {
         Text("Settings", style = MaterialTheme.typography.caption1, color = MaterialTheme.colors.onSurfaceVariant)
         Spacer(Modifier.height(SECTION_GAP))
@@ -275,8 +299,45 @@ private fun SettingsPage(autoWorkoutMode: AutoWorkoutMode?, onAutoWorkoutModeCli
             colors = ChipDefaults.secondaryChipColors(),
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(SECTION_GAP))
+        ToggleChip(
+            checked = logCapture == true,
+            onCheckedChange = onLogCaptureChange,
+            enabled = logCapture != null,
+            label = { Text("Log capture") },
+            secondaryLabel = { Text("Debug, uses battery") },
+            toggleControl = { Switch(checked = logCapture == true) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(SECTION_GAP))
+        ToggleChip(
+            checked = snoreAnalysis.enabled == true,
+            onCheckedChange = snoreAnalysis.onEnabledChange,
+            enabled = snoreAnalysis.enabled != null,
+            label = { Text("Snore analysis") },
+            secondaryLabel = { Text("While asleep") },
+            toggleControl = { Switch(checked = snoreAnalysis.enabled == true) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(SECTION_GAP))
+        Chip(
+            onClick = snoreAnalysis.onMicrophoneClick,
+            enabled = snoreAnalysis.microphone != null,
+            label = { Text("Snore microphone") },
+            secondaryLabel = { Text(snoreAnalysis.microphone?.label ?: MISSING) },
+            colors = ChipDefaults.secondaryChipColors(),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
+
+/** Snore analysis switch and microphone choice (the watch's costs battery); null values until the settings load. */
+class SnoreAnalysisState(
+    val enabled: Boolean?,
+    val microphone: SnoreMicrophone?,
+    val onEnabledChange: (Boolean) -> Unit,
+    val onMicrophoneClick: () -> Unit,
+)
 
 /** Title, big value, the value's band on [scale] (if any), its trend, and an optional footer. */
 @Composable
