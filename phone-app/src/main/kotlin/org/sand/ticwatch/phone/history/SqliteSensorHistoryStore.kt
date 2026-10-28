@@ -39,6 +39,7 @@ class SqliteSensorHistoryStore(
                         put(Table.RECEIVED_AT, receivedAt.toEpochMilli())
                         put(Table.DELIVERY_STATUS, DeliveryStatus.PENDING.code)
                         put(Table.SOURCE, sample.source.code)
+                        put(Table.IS_SNAPSHOT, if (sample.snapshot) SensorHistoryDatabase.SNAPSHOT else SensorHistoryDatabase.NOT_SNAPSHOT)
                     }
                     db.insertOrThrow(Table.NAME, null, values)
                 }

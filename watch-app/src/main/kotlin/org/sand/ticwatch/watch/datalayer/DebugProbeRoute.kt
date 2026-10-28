@@ -10,6 +10,8 @@ import org.sand.ticwatch.watch.sensors.VendorSensorRecorder
 import org.json.JSONObject
 import org.sand.ticwatch.watch.logging.LogQueryHandler
 import org.sand.ticwatch.watch.logging.RotatingLogStore
+import org.sand.ticwatch.watch.screenshot.ScreenshotQuery
+import org.sand.ticwatch.watch.screenshot.VisibleScreen
 import java.io.File
 
 /** Debug bridge: a request's payload answered with a JSON report. */
@@ -58,5 +60,10 @@ fun defaultDebugProbeRoutes(context: Context): List<DebugProbeRoute> = listOf(
         DataLayerPaths.MESSAGE_DEBUG_LOGS_REQUEST,
         DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE,
         LogQueryHandler(RotatingLogStore.inFilesDir(context.filesDir)),
+    ),
+    DebugProbeRoute(
+        DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_REQUEST,
+        DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_RESPONSE,
+        ScreenshotQuery { VisibleScreen.capturer },
     ),
 )

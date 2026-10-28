@@ -59,6 +59,9 @@ object BloodPressureChartColors {
 
     /** Both values of a cuff reading, drawn as a marker instead of joining the wrist-estimate lines. */
     val CUFF = Color(0xFFFFB300)
+
+    /** Vertical line at a logged medication intake. */
+    val MEDICATION = Color(0xFF26A69A)
 }
 
 private val NORMAL_COLOR = Color(0xFF9CCC65)
@@ -83,7 +86,8 @@ fun readingSourceText(reading: BloodPressureReading): String {
 
 /**
  * [BloodPressureChart] of [readings] (oldest first) over [start]..[end] with a legend; tapping it shows the nearest
- * reading's details below, followed by [selectedActions] (e.g. Delete) when given.
+ * reading's details below, followed by [selectedActions] (e.g. Delete) when given. [markers] (medication intakes)
+ * are drawn as vertical lines.
  */
 @Composable
 fun BloodPressureDayChart(
@@ -91,14 +95,18 @@ fun BloodPressureDayChart(
     start: Instant,
     end: Instant,
     selectedActions: (@Composable (BloodPressureReading) -> Unit)? = null,
+    markers: List<Instant> = emptyList(),
 ) {
     var selected by remember(readings) { mutableStateOf<BloodPressureReading?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(ROW_SPACING)) {
-        BloodPressureChart(readings, start, end, selected, { selected = it }, Modifier.fillMaxWidth().height(CHART_HEIGHT))
+        BloodPressureChart(readings, start, end, selected, { selected = it }, Modifier.fillMaxWidth().height(CHART_HEIGHT), markers)
         Row(horizontalArrangement = Arrangement.spacedBy(LEGEND_SPACING)) {
             Text(text = "Systolic", style = MaterialTheme.typography.labelSmall, color = BloodPressureChartColors.SYSTOLIC)
             Text(text = "Diastolic", style = MaterialTheme.typography.labelSmall, color = BloodPressureChartColors.DIASTOLIC)
             Text(text = "Cuff", style = MaterialTheme.typography.labelSmall, color = BloodPressureChartColors.CUFF)
+            if (markers.isNotEmpty()) {
+                Text(text = "Medication", style = MaterialTheme.typography.labelSmall, color = BloodPressureChartColors.MEDICATION)
+            }
             Text(
                 text = "${TIME_FORMAT.format(start)} - ${TIME_FORMAT.format(end)}",
                 style = MaterialTheme.typography.labelSmall,
@@ -142,6 +150,7 @@ fun BloodPressureChart(
     selected: BloodPressureReading?,
     onSelect: (BloodPressureReading) -> Unit,
     modifier: Modifier = Modifier,
+    markers: List<Instant> = emptyList(),
 ) {
     if (readings.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
@@ -168,6 +177,9 @@ fun BloodPressureChart(
         fun x(at: Instant): Float = fraction(at) * size.width
         fun y(value: Double): Float = size.height * (1f - ((value - low) / (high - low)).toFloat())
 
+        markers.filter { !it.isBefore(start) && !it.isAfter(end) }.forEach { at ->
+            drawLine(BloodPressureChartColors.MEDICATION, Offset(x(at), 0f), Offset(x(at), size.height), LINE_WIDTH.toPx())
+        }
         selected?.let { reading ->
             drawLine(
                 Color.Gray, Offset(x(reading.measuredAt), 0f), Offset(x(reading.measuredAt), size.height), GUIDE_WIDTH.toPx(),

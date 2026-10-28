@@ -167,9 +167,11 @@ private val AUTOMATIC_METADATA = Metadata.autoRecorded(device = WATCH_DEVICE)
 
 /** The bonded Bioland upper-arm cuff (`bpm/`); Health Connect has no device type for it. */
 private val BLOOD_PRESSURE_CUFF_DEVICE = Device(manufacturer = CUFF_MANUFACTURER, model = CUFF_MODEL, type = Device.TYPE_UNKNOWN)
+private val PHONE_DEVICE = Device(type = Device.TYPE_PHONE)
 private val SOURCE_DEVICES = mapOf(
     SampleSource.WATCH to WATCH_DEVICE,
     SampleSource.BLOOD_PRESSURE_CUFF to BLOOD_PRESSURE_CUFF_DEVICE,
+    SampleSource.PHONE to PHONE_DEVICE,
 )
 
 private fun autoRecordedMetadata(source: SampleSource): Metadata = Metadata.autoRecorded(device = SOURCE_DEVICES.getValue(source))

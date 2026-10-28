@@ -42,6 +42,7 @@ class SensorHistoryDatabase private constructor(
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // First: the backfills below read the source column; a v1 upgrade gets it from createSchema instead.
         if (oldVersion in VERSION_COMPACT_SCHEMA until VERSION_SAMPLE_SOURCE) addSourceColumn(db)
+        if (oldVersion in VERSION_COMPACT_SCHEMA until VERSION_SNAPSHOT_FLAG) addSnapshotColumn(db)
         if (oldVersion < VERSION_COMPACT_SCHEMA) migrateToCompactSchema(db)
         if (oldVersion < VERSION_SLEEP_SESSIONS) addSleepSessions(db)
         if (oldVersion < VERSION_EXERCISE_ROUTES) createRoutePointTable(db)
@@ -53,6 +54,11 @@ class SensorHistoryDatabase private constructor(
         db.execSQL(
             "ALTER TABLE ${Table.NAME} ADD COLUMN ${Table.SOURCE} INTEGER NOT NULL DEFAULT ${SampleSource.WATCH.code}",
         )
+    }
+
+    /** v7 flags Baseline Snapshot readings; nothing earlier was one. */
+    private fun addSnapshotColumn(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE ${Table.NAME} ADD COLUMN ${Table.IS_SNAPSHOT} INTEGER NOT NULL DEFAULT $NOT_SNAPSHOT")
     }
 
     /** v5 added sleep stages; nothing to backfill, the watch never sent SLEEP_STAGE before. */
@@ -119,7 +125,8 @@ class SensorHistoryDatabase private constructor(
                 ${Table.RECEIVED_AT} INTEGER NOT NULL,
                 ${Table.DELIVERY_STATUS} INTEGER NOT NULL,
                 ${Table.DELIVERY_UPDATED_AT} INTEGER,
-                ${Table.SOURCE} INTEGER NOT NULL DEFAULT ${SampleSource.WATCH.code}
+                ${Table.SOURCE} INTEGER NOT NULL DEFAULT ${SampleSource.WATCH.code},
+                ${Table.IS_SNAPSHOT} INTEGER NOT NULL DEFAULT $NOT_SNAPSHOT
             )
             """.trimIndent(),
         )
@@ -213,6 +220,9 @@ class SensorHistoryDatabase private constructor(
 
         /** [SampleSource.code]. */
         const val SOURCE = "source"
+
+        /** 1 for a Baseline Snapshot reading ([SensorSample.snapshot]), else 0. */
+        const val IS_SNAPSHOT = "is_snapshot"
     }
 
     object RollupTable {
@@ -261,13 +271,16 @@ class SensorHistoryDatabase private constructor(
         private const val VERSION_EXERCISE_ROUTES = 4
         private const val VERSION_SLEEP_STAGES = 5
         private const val VERSION_SAMPLE_SOURCE = 6
-        private const val DATABASE_VERSION = VERSION_SAMPLE_SOURCE
+        private const val VERSION_SNAPSHOT_FLAG = 7
+        private const val DATABASE_VERSION = VERSION_SNAPSHOT_FLAG
+        const val NOT_SNAPSHOT = 0
+        const val SNAPSHOT = 1
         private const val LEGACY_TABLE = "sensor_history_v1"
         private const val BACKFILL_PAGE_SIZE = 2000
         private val SIDE_FILE_SUFFIXES = listOf("-wal", "-shm", "-journal")
 
         /** Columns [readSample] needs. */
-        val SAMPLE_COLUMNS = arrayOf(Table.TYPE, Table.VALUE, Table.RECORDED_AT, Table.ENDED_AT, Table.SOURCE)
+        val SAMPLE_COLUMNS = arrayOf(Table.TYPE, Table.VALUE, Table.RECORDED_AT, Table.ENDED_AT, Table.SOURCE, Table.IS_SNAPSHOT)
 
         @Volatile
         private var instance: SensorHistoryDatabase? = null
@@ -292,5 +305,6 @@ internal fun Cursor.readSample(): SensorSample {
         recordedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow(SensorHistoryDatabase.Table.RECORDED_AT))),
         endedAt = if (isNull(endedAtColumn)) null else Instant.ofEpochMilli(getLong(endedAtColumn)),
         source = SampleSource.of(getInt(getColumnIndexOrThrow(SensorHistoryDatabase.Table.SOURCE))),
+        snapshot = getInt(getColumnIndexOrThrow(SensorHistoryDatabase.Table.IS_SNAPSHOT)) == SensorHistoryDatabase.SNAPSHOT,
     )
 }

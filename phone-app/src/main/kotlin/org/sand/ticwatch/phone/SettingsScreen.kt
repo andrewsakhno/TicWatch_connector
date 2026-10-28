@@ -138,6 +138,8 @@ fun SettingsScreen(appContainer: AppContainer) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+        WatchSettingsSection(appContainer)
+        Spacer(modifier = Modifier.height(24.dp))
         ProfileSettingsSection(appContainer)
 
         Spacer(modifier = Modifier.height(24.dp))

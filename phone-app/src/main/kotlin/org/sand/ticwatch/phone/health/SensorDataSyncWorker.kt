@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone.health
 
 import org.json.JSONArray
+import org.json.JSONObject
 import java.time.Instant
 
 /**
@@ -13,8 +14,11 @@ class SensorDataSyncWorker(
     private val healthRecordWriter: HealthRecordWriter,
     private val derivers: List<SampleDeriver>,
 ) {
-    suspend fun onSensorDataPush(payload: ByteArray): Result<Int> = runCatching {
-        val samples = parse(payload)
+    suspend fun onSensorDataPush(payload: ByteArray): Result<Int> =
+        runCatching { parse(payload) }.fold(onSuccess = { ingest(it) }, onFailure = { Result.failure(it) })
+
+    /** Derives from and writes already-decoded watch samples (e.g. a snapshot's); returns how many came in. */
+    suspend fun ingest(samples: List<SensorSample>): Result<Int> = runCatching {
         val allSamples = derivers.fold(samples) { accumulated, deriver -> accumulated + deriver.derive(accumulated) }
 
         healthRecordWriter.write(allSamples).getOrThrow()
@@ -23,19 +27,23 @@ class SensorDataSyncWorker(
 
     private fun parse(payload: ByteArray): List<SensorSample> {
         val entries = JSONArray(String(payload, Charsets.UTF_8))
-        return (0 until entries.length()).map { index ->
-            val entry = entries.getJSONObject(index)
-            SensorSample(
-                type = SensorType.valueOf(entry.getString("type")),
-                value = entry.getDouble("value"),
-                recordedAt = Instant.ofEpochMilli(entry.getLong("recordedAtEpochMs")),
-                endedAt = if (entry.has(KEY_ENDED_AT)) Instant.ofEpochMilli(entry.getLong(KEY_ENDED_AT)) else null,
-            )
-        }
+        return (0 until entries.length()).map { index -> SensorSampleJson.decode(entries.getJSONObject(index)) }
     }
+}
 
-    private companion object {
-        /** Present only on interval samples (e.g. sleep sessions). */
-        const val KEY_ENDED_AT = "endedAtEpochMs"
-    }
+/** Wire shape of one watch sample (`/sensors/push` entries, snapshot samples), mirrored by watch-app's encoder. */
+object SensorSampleJson {
+    const val TYPE = "type"
+    const val VALUE = "value"
+    const val RECORDED_AT = "recordedAtEpochMs"
+
+    /** Present only on interval samples (e.g. sleep sessions). */
+    const val ENDED_AT = "endedAtEpochMs"
+
+    fun decode(entry: JSONObject): SensorSample = SensorSample(
+        type = SensorType.valueOf(entry.getString(TYPE)),
+        value = entry.getDouble(VALUE),
+        recordedAt = Instant.ofEpochMilli(entry.getLong(RECORDED_AT)),
+        endedAt = if (entry.has(ENDED_AT)) Instant.ofEpochMilli(entry.getLong(ENDED_AT)) else null,
+    )
 }

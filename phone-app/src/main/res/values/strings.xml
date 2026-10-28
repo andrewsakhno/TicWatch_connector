@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">TicWatch Connector</string>
+    <string name="advisor_widget_description">Cardio readiness, the current advice and latest vitals</string>
+    <string name="advisor_widget_loading">Cardio readiness…</string>
 </resources>

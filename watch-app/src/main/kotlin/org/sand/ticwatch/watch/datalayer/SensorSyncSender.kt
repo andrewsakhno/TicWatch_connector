@@ -8,7 +8,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
-import org.json.JSONObject
 import org.sand.ticwatch.watch.buffer.BufferedSample
 import org.sand.ticwatch.watch.buffer.SensorSampleBuffer
 import org.sand.ticwatch.watch.power.AwakeRunner
@@ -76,14 +75,7 @@ class SensorSyncSender(
     }
     private fun toPayload(batch: List<BufferedSample>): ByteArray {
         val entries = JSONArray()
-        batch.forEach { buffered ->
-            val entry = JSONObject()
-                .put("type", buffered.sample.type.name)
-                .put("value", buffered.sample.value)
-                .put("recordedAtEpochMs", buffered.sample.recordedAt.toEpochMilli())
-            buffered.sample.endedAt?.let { entry.put("endedAtEpochMs", it.toEpochMilli()) }
-            entries.put(entry)
-        }
+        batch.forEach { buffered -> entries.put(SensorSampleJson.encode(buffered.sample)) }
         return entries.toString().toByteArray(Charsets.UTF_8)
     }
 

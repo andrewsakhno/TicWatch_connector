@@ -10,7 +10,10 @@ import org.json.JSONObject
 import org.sand.ticwatch.watch.install.ApkInstaller
 import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
 import org.sand.ticwatch.watch.phonedata.PhonePayloadSink
+import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 import org.sand.ticwatch.watch.sensors.SensorCollector
+import org.sand.ticwatch.watch.settings.WatchSettingsSync
+import org.sand.ticwatch.watch.snapshot.SnapshotRequester
 import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
 import java.io.InputStream
@@ -30,6 +33,8 @@ class WatchMessageRouter(
     private val replyTransport: DeviceLinkTransport,
     /** Phone -> watch payloads (scores, blood pressure) by path; each is just stored for the dashboard. */
     private val phonePayloads: Map<String, PhonePayloadSink>,
+    /** Hands the phone's snapshot command to the sensor service, which owns the sensors. */
+    private val snapshotRequester: SnapshotRequester,
     private val scope: CoroutineScope,
 ) {
     private val pendingInstallPackage = AtomicReference<String?>()
@@ -53,6 +58,13 @@ class WatchMessageRouter(
                     runCatching { replyWithSensorSnapshot() }
                         .onFailure { Log.w(TAG, "replyWithSensorSnapshot failed", it) }
                 }
+            }
+
+            DataLayerPaths.MESSAGE_CAPTURE_SNAPSHOT -> {
+                val requestId = runCatching { JSONObject(String(payload, Charsets.UTF_8)).optString(REQUEST_ID) }
+                    .getOrNull()?.takeIf { it.isNotEmpty() }
+                Log.i(TAG, "Snapshot requested by the phone ($requestId)")
+                snapshotRequester.request(requestId)
             }
 
             in phonePayloads -> phonePayloads.getValue(path).accept(String(payload, Charsets.UTF_8))
@@ -128,6 +140,12 @@ class WatchMessageRouter(
     }
 
     companion object {
+        /** Every phone -> watch payload path with its receiver: the dashboard stores plus the synced settings. */
+        fun phonePayloadSinks(context: Context, scope: CoroutineScope): Map<String, PhonePayloadSink> =
+            PhonePayloadStores.get(context).sinksByPath +
+                (DataLayerPaths.MESSAGE_WATCH_SETTINGS to WatchSettingsSync.create(context, scope))
+
+        private const val REQUEST_ID = "request_id"
         private const val SENSOR_SNAPSHOT_TIMEOUT_MS = 5_000L
         private const val RESULT_OK = "OK"
         private const val RESULT_FAILED = "FAILED"

@@ -4,6 +4,8 @@ plugins {
     id("com.android.application") version "8.11.1"
     kotlin("android") version "2.3.21"
     kotlin("plugin.compose") version "2.3.21"
+    id("com.google.devtools.ksp") version "2.3.4"
+    id("androidx.room") version "2.8.4"
 }
 
 android {
@@ -26,6 +28,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 kotlin {
@@ -54,6 +60,11 @@ dependencies {
 
     // Daily purge of the transfer-history database.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Cardio data the user enters (medication intakes).
+    implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.room:room-ktx:2.8.4")
+    ksp("androidx.room:room-compiler:2.8.4")
 
     // REST client for the backend module.
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

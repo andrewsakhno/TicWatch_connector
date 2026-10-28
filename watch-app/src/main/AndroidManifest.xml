@@ -45,7 +45,9 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!-- Keeps the CPU up during the periodic vendor-sensor measurement window. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Mobvoi's own health/fitness data; granted only if Mobvoi declared them non-signature. -->
+    <!-- Mobvoi's own health/fitness data; granted only if Mobvoi declared them non-signature. On other
+         watches the permissions don't exist: Android ignores the request, nothing checks or requests them
+         at runtime (VendorDataProbe only reports their state), so the app installs and runs unaffected. -->
     <uses-permission android:name="com.mobvoi.wear.permission.HEALTH_DATA_NORMAL" />
     <uses-permission android:name="com.mobvoi.ticwear.permission.HEALTH" />
     <uses-permission android:name="com.mobvoi.ticwear.permission.FITNESS_DATA" />

@@ -137,7 +137,7 @@ system Settings, otherwise the start is refused and logged. Watch track: `WatchR
 `LocationManager` GPS, 4 s) during EXERCISE and sends fixes on `/workout/route` (JSON array,
 `WorkoutPayloads` in `watch/route/`) in batches of 60 plus the rest at workout end; needs
 ACCESS_FINE_LOCATION + ACCESS_BACKGROUND_LOCATION on the watch (MainActivity asks, background ones
-sequentially). They must arrive before the EXERCISE sample (next sync flush, <= 15 min) to land on
+sequentially). They must arrive before the EXERCISE sample (next sync flush: every 30 min or at 150 buffered samples) to land on
 its record. Route points follow the raw retention; MCP tool `get_exercise_route` pages them.
 
 ### watch-app automatic walk workouts
@@ -153,6 +153,41 @@ starts while another app's workout runs and acts on each brisk stretch once. The
 to EXERCISE, so the existing session/route/phone pipeline records it; `AutoWorkoutStartLedger` backdates that
 session's start to where the walk began. Re-checks run on an `AlarmWindowScheduler` every minute only while a
 stretch or workout is open.
+
+### watch-app adaptive polling and Baseline Snapshot
+
+`watch/sensors/adaptive/`: every collected sample (`SensorCollectionService.onCollected`) goes through
+`AdaptiveSensorScheduler`'s `AdaptiveTrigger`s (Strategy, one alert state per `TriggerId`): `RestingHeartRateTrigger`
+(HR > 100 / < 50 while no steps for 2 min and no workout -> HEART_RATE continuous, HRV + SpO2 every 5 min),
+`DesaturationTrigger` (SpO2 < 94 -> SpO2 again 60 s after the window), `SkinTemperatureRiseTrigger` (>= 1 °C over the
+median of the in-memory 6 h trend, awake only -> every 5 min). `MonitoringProfile` per `MeasurementGroup`: IDLE (30 min)
+-> ALERT on an abnormal reading -> RECOVERY on the first normal one (boost interval x2) -> IDLE after 10 min of normal
+readings; an ALERT without readings for 15 min starts recovering. Decay is lazy (on samples and reads) - no timer of its
+own. `VendorWindowSampleSource` paces each `AggregatorGroup` (now keyed by `group`) by `WindowCadence.intervalFor`,
+counted from its last window's end; groups due within 5 min join a starting window; `cadence.changes` interrupts the
+alarm wait. `SensorWindowMeasurer` (extracted) does the actual window. `BoostedHeartRateSampleSource` runs the Measure
+API (thinned to 1 per 10 s) only while HEART_RATE isn't IDLE. Add a trigger by registering it in the service.
+
+Baseline Snapshot (`watch/snapshot/`): `BaselineSnapshotCapturer.captureFullSnapshot()` - worn check, 10 s
+accelerometer + gyroscope stillness probe, then all window groups in one 3 min window + live HR median. Started by the
+watch's "Snapshot" page or the phone's `/command/capture_snapshot` (`{"request_id"}`; the router forwards it to the
+service as `ACTION_CAPTURE_SNAPSHOT`). `SnapshotController` sends `/snapshot_result` (status, samples, HR in the BP
+request keys); if the phone is unreachable the samples go into the regular sync unflagged. Phone (`phone/snapshot/`):
+`StoringSnapshotResultReceiver` ingests them with `SensorSample.snapshot = true` (history schema v7
+`sensor_history.is_snapshot`, `get_raw_samples` shows `snapshot: true`), estimates blood pressure from the snapshot HR
+(not flagged), records the result in `ProcessSnapshotResults` and answers `WatchReplies`. Phone triggers: the Metrics
+tab's "Watch snapshot" card and MCP `trigger_health_snapshot` (`wait`, default true, up to 5 min).
+
+### watch-app on other Wear OS watches (ExtendedMetricsProvider)
+
+Sleep stages, SpO2, HRV, breathing rate and skin temperature come from an `ExtendedMetricsProvider` (`watch/sensors/`)
+picked once by `MetricsProviderFactory` in `SensorCollectionService`: `MobvoiMetricsProvider` (vendor sleep source,
+night breathing monitor, body window groups, `mobvoi_hr_alert`, vendor recorders) when `mobvoi_sleep` + `psp_spo2`
+exist, else `GenericWearOsMetricsProvider` (public APIs only: Health Services has no sleep-stage/SpO2/skin-temperature
+DataType, so sleep = the shared passive ASLEEP `StateSessionTracker`, mirrored into the sleep state for the phone snore
+relay; no body windows/night monitor, so no wasted PPG or wake locks). `Build.MANUFACTURER`/`BRAND` is only logged -
+sensor presence decides. Passive HS data, environment window group, sync and wire format are provider-independent.
+Add a vendor (e.g. Samsung SDK) as another provider + factory rule. Mobvoi `uses-permission`s are inert elsewhere.
 
 ### watch-app measurement windows and the off-body gate
 
@@ -254,14 +289,71 @@ on-screen (Measure API) heart rate, which `WristSignalsReader` prefers over stor
 step) and answers a status line on `/blood-pressure/measure/result`. `BloodPressureLog` notifies a
 `BloodPressureLogListener` on every save/delete -> `WatchBloodPressurePublisher` sends the readings on
 `/blood-pressure/history` (the last 24 h, max 400, newest first; also after each sensor push, deduplicated).
-Automatic: `AutoBloodPressureController` (watch, `SensorCollectionService`, alarm-paced every 5 min, toggle "Auto at
-rest" on the page, `SharedPreferencesAutoBloodPressureSettings`, default on) sends the same request when the
+Automatic: `AutoBloodPressureController` (watch, `SensorCollectionService`, alarm-paced every 5 min, toggle "Auto at rest" on the page or the phone's Settings > Watch features, default off - see
+synced watch settings below) sends the same request when the
 `WindowGate`s are open (worn, `NoWorkoutGate`, `RecentStepsGate` <= 30 steps in 5 min from the step counter) and a
 20 s gyroscope probe (`GyroscopeStillnessQualifier` via `SensorQualifierProbe`) accepts; every estimate is saved to
 history. Both apps chart the day (`dashboard/BloodPressureChart.kt`, mirrored): watch page, phone Metrics card and the
 Blood Pressure tab (where the selected point gets Delete) - tap a point for its details; no text list anymore.
 Watch side, every phone -> watch payload is a
 `PhonePayloadStore` in `PhonePayloadStores` (one per process, keyed by path for `WatchMessageRouter`).
+
+### Synced watch settings (battery-heavy features)
+
+`WatchSettings` (`auto_blood_pressure`, `log_capture`, `changed_at`; both off by default) lives on both sides
+(`watch/settings/`, `phone/watchsettings/`, mirrored) and travels on `/settings/watch` in both directions, newest
+`changed_at` wins. A local change is stored and sent; the phone re-sends its copy after every sensor push
+(`WatchStatePublisher`, deduplicated) and the watch answers an older copy with its own, so a change made while the
+link was down converges. Switches: watch Settings page ("Log capture") and blood pressure page ("Auto at rest");
+phone Settings > Watch features. Add further battery toggles to the same payload.
+
+Snore analysis: `snore_analysis` (default off) + `snore_microphone` (`SnoreMicrophone` WATCH/PHONE, default WATCH) in
+the same payload (optional keys, so an older peer still decodes). WATCH: the night monitor's `MicrophoneSnoreMeter`
+behind `SettingsGatedSnoreMeter`. PHONE: `PhoneSnoreMonitorRelay` (decorator over the sleep-state sink fed by
+`VendorSleepStageSource`) sends `/sleep/snore-monitor` (`{"active": bool}`, `LatestMessageSender` - also behind
+`WorkoutStateNotifier`) when a sleep session opens/closes; the phone's `ServiceSnoreMonitorControl` forwards it to
+`BluetoothLinkServerService`, which hosts `phone/snore/PhoneSnoreMonitor` (mirrored `SnoreDetector`, back-to-back
+5-min epochs -> SNORING rows with `SampleSource.PHONE`, wake lock, capped at 12 h since a night ended by sensor
+silence sends no stop). Microphone needs RECORD_AUDIO and the service's `microphone` FGS type, added in
+`onStartCommand` only when MainActivity starts it - after a boot start phone snoring is skipped until the app opens.
+
+### phone-app cardio: geomagnetic alerts, medication log, doctor's report
+
+Geomagnetic alerts: after each refresh `SpaceWeatherRefresher` runs `GeomagneticAlerter` - `GeomagneticAlertPolicy` takes
+the peak Kp of the 3-hour slots running or starting within 48 h and alerts from `GeomagneticLevel.ACTIVE` (Kp 4; G1+ is
+a storm); `SharedPreferencesGeomagneticAlertLedger` re-announces only a higher level or after 24 h.
+`SystemGeomagneticAlertNotifier` posts on `channel_space_weather_alerts`; the tap opens `MainActivity.cardioAdviceIntent`
+(Blood Pressure tab + `CardioAdviceBottomSheet`, advice from `CardioAdvisor` per `DrugClass` of the regimen).
+
+`medication/`: `PresetMedicationRegimen` (Nedal 1/4 = nebivolol 1.25 mg; Noliprel Forte 1/2 = perindopril 2.5 +
+indapamide 0.625 mg; no editing UI). The Blood Pressure tab's button logs an intake into `cardio.db` - the app's
+only **Room** database (`CardioDatabase`, KSP, schemas exported to `phone-app/schemas/`; bump `VERSION` with a `Migration`),
+kept apart from the hand-written `sensor_history.db`: user-entered cardio data goes there, sensor data stays in the
+history. `RoomMedicationIntakeLog` implements `MedicationIntakeLog` (table `medication_intake`); intakes are drawn as vertical lines on
+the BP chart, and `MedicationEffectAnalyzer` compares watch HR (15-min median) / nearest BP reading at +1/2/4 h with the
+30 min / 2 h before (onset = first 15-min HR median >= 5 bpm below baseline).
+
+`report/`: `CardioReportGenerator` (1-7 days) -> `CardioReport` (ABPM-style means for 24 h / day 07-23 / night 23-07,
+dipping % and pattern, pulse pressure; night resting HR = lowest 15-min mean per night, morning surge vs it, daytime
+runs > 90 bpm >= 2 min outside workouts, median medication onset; cuff readings vs nearest wrist estimate within
+30 min) -> `CardioReportFormatter` (`ReportDocument`) -> HTML / Markdown `CardioReportRenderer`s. Exported from the tab
+via `AndroidCardioReportExporter`: WebView + `PrintManager` (print / save as PDF) or `ACTION_SEND` Markdown. Patient name
+comes from Settings > Profile (`PatientNameStore`).
+
+### phone-app cardio advisor (readiness, widget, MCP)
+
+`advisor/`: Dashboard tab "Advisor" (`CardioAdvisorScreen`, MVI via `CardioAdvisorStore`: `AdvisorUiState` +
+`AdvisorIntent`), home-screen widget (`advisor/widget/`, RemoteViews `CardioAdvisorWidgetProvider`, 30 min
+`updatePeriodMillis` plus `AdvisorWidgetRefresher` in `watchStatePublishers` and the BP log listener; tap opens
+`MainActivity.advisorIntent`) and MCP `get_cardio_readiness`, all over one `CardioReadinessSource`.
+`ReadinessSnapshotReader` gathers rollup signals (15-min HR else resting HR vs the 14-day mean of the same local hour,
+2 h RMSSD, last BP within 24 h + its ABPM dipping %, SLEEP_SCORE, 24 h steps, 48 h TRIMP, last intake, Kp slot).
+`CardioReadinessEngine` = 100 + `ReadinessRule`s (diastolic >= 90/95 -25/-40, HR > norm +10/+20 -15/-30, RMSSD < 25
+-15, > 15k steps after sleep < 70 -15, Kp >= 5 -10, good sleep + 10-20 % dip +10; info rules for TRIMP/medication) ->
+`ReadinessState` bands 80/55/35 with `AdviceSelector` (no-stimulants card when tachycardia dominates).
+`ReadinessForecaster` re-scores the next 12 h with the same engine: `MedicationEffectCurve` (ramp 2 h, plateau to 8 h,
+50 % at 24 h) lowers diastolic/HR excess by up to 8, 06-09 adds a 5 mmHg morning surge, HR norm and Kp follow the hour;
+Optimal hours 07-20 are walk windows. Add rules by registering them in `AppContainer.cardioReadiness`. Heuristic only.
 
 ### phone-app Bioland cuff (BLE blood pressure monitor)
 
@@ -321,12 +413,20 @@ Bluetooth` tunneling to the watch itself.
   cached-app freezer mid-transfer (no crash, no log, just silently stuck). adb's shell
   UID isn't subject to either restriction, so start the service directly by explicit
   component instead of broadcasting to it.
-- Watch app log: `WatchApplication` starts `LogcatFileRecorder` (tees this process's own logcat,
-  `-v year`, plus uncaught crashes) into `RotatingLogStore` (`filesDir/logs/app-yyyyMMdd-HH.log`,
+- Watch app log: `WatchApplication` always records uncaught crashes; `LogcatFileRecorder` (tees this
+  process's own logcat, `-v year`) runs only while the synced "Log capture" setting is on (default off - battery) into `RotatingLogStore` (`filesDir/logs/app-yyyyMMdd-HH.log`,
   3 days). Queried over `/debug/logs/request` (JSON filter with `request_id`) -> `LogQueryHandler`;
   the phone's MCP tool `get_watch_logs` sends it and waits on `WatchReplies` (process-wide, since the
   reply lands in whichever listener service the transport woke). Request-aware debug routes take a
   `DebugQuery`; payload-less probes keep using `DeviceCapabilityProbe`.
+- Watch screenshots: `adb shell am broadcast -n org.sand.ticwatch.phone/.datalayer.DebugBridgeReceiver -a
+  org.sand.ticwatch.phone.action.DEBUG_CAPTURE_WATCH_SCREEN [--ei page <n>]` -> `/debug/screenshot/request` ->
+  `ScreenshotQuery` (watch `screenshot/`) asks `VisibleScreen.capturer` (registered by `MainActivity` between
+  onStart/onStop, so the app must be open on the watch) = `WindowScreenCapturer`: switches the dashboard pager via
+  `DashboardPageNavigator`, waits 1.2 s, `PixelCopy` of the window -> base64 PNG JSON (`page`, `page_count`) on
+  `/debug/screenshot/response`. The phone's `FileWatchScreenshotSink` writes `files/watch_screenshots/page-<n>-<ms>.png`
+  (pull with `adb exec-out run-as org.sand.ticwatch.phone cat files/watch_screenshots/<name>`). Only this app's own
+  window - other apps / the watch face would need MediaProjection consent.
 - **One-shot dev loop: `deploy.bat` / `deploy.ps1` at the repo root.** Builds both apps,
   exits if neither APK changed since the last successful deploy (hashes in
   `build/deploy-state.json`), installs phone-app on the non-watch adb device, stages the

@@ -104,6 +104,7 @@ fun HealthInsightsScreen(appContainer: AppContainer) {
         modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        WatchSnapshotCard(appContainer.watchSnapshotRequester, appContainer.snapshotResults)
         val loaded = insights
         if (loaded == null) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

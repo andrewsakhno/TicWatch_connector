@@ -31,12 +31,15 @@ import java.time.Year
 fun ProfileSettingsSection(appContainer: AppContainer) {
     val coroutineScope = rememberCoroutineScope()
     val profile = appContainer.userProfileStore
+    val patientNames = appContainer.patientNameStore
+    var nameText by remember { mutableStateOf("") }
     var birthYearText by remember { mutableStateOf("") }
     var heightText by remember { mutableStateOf("") }
     var weightText by remember { mutableStateOf("") }
     var sex by remember { mutableStateOf<BiologicalSex?>(null) }
 
     LaunchedEffect(Unit) {
+        nameText = patientNames.patientName().orEmpty()
         birthYearText = profile.birthYear()?.toString().orEmpty()
         heightText = profile.heightCm()?.let(::formatMeasurement).orEmpty()
         weightText = profile.weightKg()?.let(::formatMeasurement).orEmpty()
@@ -45,6 +48,16 @@ fun ProfileSettingsSection(appContainer: AppContainer) {
 
     Column(verticalArrangement = Arrangement.spacedBy(FIELD_SPACING.dp)) {
         Text(text = "Profile", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = nameText,
+            onValueChange = { name ->
+                nameText = name.take(MAX_NAME_CHARS)
+                coroutineScope.launch { patientNames.setPatientName(nameText) }
+            },
+            label = { Text(text = "Name") },
+            supportingText = { Text(text = "Shown on the report for your doctor") },
+            singleLine = true,
+        )
         ProfileNumberField(
             text = birthYearText,
             label = "Year of birth",
@@ -145,3 +158,4 @@ private const val MAX_MEASUREMENT_CHARS = 6
 private const val MIN_BIRTH_YEAR = 1900
 private const val YEAR_DIGITS = 4
 private const val FIELD_SPACING = 8
+private const val MAX_NAME_CHARS = 80

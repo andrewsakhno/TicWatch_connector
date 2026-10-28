@@ -31,6 +31,10 @@ fun describeSyncPath(path: String, direction: SyncDirection): String = when (pat
     DataLayerPaths.MESSAGE_DEBUG_SLEEP_LOG_RESPONSE -> "Receiving sleep-sensor log from watch"
     DataLayerPaths.MESSAGE_DEBUG_LOGS_REQUEST -> "Requesting app log from watch"
     DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE -> "Receiving app log from watch"
+    DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_REQUEST -> "Requesting screenshot from watch"
+    DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_RESPONSE -> "Receiving screenshot from watch"
+    DataLayerPaths.MESSAGE_CAPTURE_SNAPSHOT -> "Requesting snapshot from watch"
+    DataLayerPaths.MESSAGE_SNAPSHOT_RESULT -> "Receiving snapshot from watch"
     else -> when (direction) {
         SyncDirection.TO_WATCH -> "Sending data to watch"
         SyncDirection.FROM_WATCH -> "Receiving data from watch"

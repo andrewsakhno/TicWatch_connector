@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.hardware.SensorManager
 import android.location.LocationManager
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -34,7 +35,6 @@ import org.sand.ticwatch.watch.bloodpressure.PhoneBloodPressureMeasureRequester
 import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressureController
 import org.sand.ticwatch.watch.bloodpressure.NoWorkoutGate
 import org.sand.ticwatch.watch.bloodpressure.RecentStepsGate
-import org.sand.ticwatch.watch.bloodpressure.SharedPreferencesAutoBloodPressureSettings
 import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 import org.sand.ticwatch.watch.autoworkout.AutoWorkoutStartLedger
 import org.sand.ticwatch.watch.autoworkout.BriskWalkDetector
@@ -43,12 +43,33 @@ import org.sand.ticwatch.watch.autoworkout.NotificationAutoWorkoutPrompt
 import org.sand.ticwatch.watch.autoworkout.SharedPreferencesAutoWorkoutSettings
 import org.sand.ticwatch.watch.autoworkout.StepCounterSensorSource
 import org.sand.ticwatch.watch.buffer.SqliteSensorSampleBuffer
+import org.sand.ticwatch.watch.datalayer.DataLayerPaths
+import org.sand.ticwatch.watch.datalayer.LatestMessageSender
 import org.sand.ticwatch.watch.datalayer.SensorSyncSender
 import org.sand.ticwatch.watch.datalayer.WorkoutStateNotifier
 import org.sand.ticwatch.watch.power.WakeLockAwakeRunner
 import org.sand.ticwatch.watch.route.GpsLocationFixSource
 import org.sand.ticwatch.watch.route.WatchRouteRecorder
+import org.sand.ticwatch.watch.route.WorkoutPayloads
 import org.sand.ticwatch.watch.transport.BluetoothClassicTransport
+import org.sand.ticwatch.watch.settings.SharedPreferencesWatchSettingsStore
+import org.sand.ticwatch.watch.settings.WatchSettings
+import org.sand.ticwatch.watch.sensors.adaptive.AdaptiveSensorScheduler
+import org.sand.ticwatch.watch.sensors.adaptive.AdaptiveTiming
+import org.sand.ticwatch.watch.sensors.adaptive.BoostedHeartRateSampleSource
+import org.sand.ticwatch.watch.sensors.adaptive.CadenceBoost
+import org.sand.ticwatch.watch.sensors.adaptive.DesaturationTrigger
+import org.sand.ticwatch.watch.sensors.adaptive.MeasurementGroup
+import org.sand.ticwatch.watch.sensors.adaptive.MonitoringProfiles
+import org.sand.ticwatch.watch.sensors.adaptive.RestingHeartRateTrigger
+import org.sand.ticwatch.watch.sensors.adaptive.SkinTemperatureRiseTrigger
+import org.sand.ticwatch.watch.snapshot.BaselineSnapshotCapturer
+import org.sand.ticwatch.watch.snapshot.ChannelSampleSource
+import org.sand.ticwatch.watch.snapshot.SnapshotController
+import org.sand.ticwatch.watch.snapshot.SnapshotRequester
+import org.sand.ticwatch.watch.snapshot.SnapshotState
+import org.sand.ticwatch.watch.snapshot.SnapshotTiming
+import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 import java.time.Clock
 import java.time.Duration
@@ -78,6 +99,101 @@ class SensorCollectionService : Service() {
 
         /** The blood pressure page's "Measure" button. */
         val bloodPressure: BloodPressureMeasureRequester get() = bloodPressureRequester
+
+        /** The snapshot page's "Take snapshot" button and its progress. */
+        val snapshot: SnapshotRequester get() = snapshotController
+        val snapshotState: StateFlow<SnapshotState> get() = snapshotController.state
+
+        /** Per-group adaptive monitoring profile (IDLE / ALERT / RECOVERY). */
+        val monitoring: MonitoringProfiles get() = adaptiveScheduler
+    }
+
+    private val windowMeasurer by lazy {
+        SensorWindowMeasurer(getSystemService(SensorManager::class.java), getSystemService(PowerManager::class.java))
+    }
+
+    /** Periodic window groups; the snapshot measures all of them at once. */
+    private val windowGroups: List<AggregatorGroup> by lazy {
+        // Environment sensors (standard Sensor.TYPE_*) are meaningful on any watch, worn or not.
+        metricsProvider.windowGroups() + AggregatorGroup(
+            group = MeasurementGroup.ENVIRONMENT,
+            factories = listOf(
+                ::AmbientTemperatureAggregator,
+                ::BarometricPressureAggregator,
+                ::AmbientLightAggregator,
+            ),
+        )
+    }
+
+    /** "StepCounter = 0": no steps at all over the last couple of minutes. */
+    private val noStepsGate by lazy {
+        RecentStepsGate(
+            StepCounterSensorSource(getSystemService(SensorManager::class.java), STEP_REPORT_LATENCY),
+            window = ADAPTIVE_REST_WINDOW,
+            maxSteps = 0,
+            clock = Clock.systemUTC(),
+        )
+    }
+
+    private val adaptiveScheduler by lazy {
+        AdaptiveSensorScheduler(
+            triggers = listOf(
+                RestingHeartRateTrigger(
+                    rest = WindowGate { noStepsGate.isOpen() && noWorkoutGate.isOpen() },
+                    low = RESTING_HEART_RATE_LOW,
+                    high = RESTING_HEART_RATE_HIGH,
+                    boosts = listOf(
+                        CadenceBoost(MeasurementGroup.HEART_RATE, CadenceBoost.CONTINUOUS),
+                        CadenceBoost(MeasurementGroup.HRV, ALERT_BODY_INTERVAL),
+                        CadenceBoost(MeasurementGroup.SPO2, ALERT_BODY_INTERVAL),
+                    ),
+                ),
+                DesaturationTrigger(DESATURATION_THRESHOLD, DESATURATION_RETRY),
+                SkinTemperatureRiseTrigger(
+                    history = liveReadings,
+                    applies = WindowGate { !sleepState.isAsleep() },
+                    rise = SKIN_TEMPERATURE_RISE,
+                    minBaselinePoints = SKIN_TEMPERATURE_MIN_BASELINE,
+                    boostedInterval = ALERT_SKIN_TEMPERATURE_INTERVAL,
+                ),
+            ),
+            baseIntervals = MeasurementGroup.entries.associateWith { VENDOR_WINDOW_INTERVAL },
+            timing = AdaptiveTiming(
+                stableNormal = ADAPTIVE_STABLE_NORMAL,
+                alertWithoutReadings = ADAPTIVE_ALERT_WITHOUT_READINGS,
+                recoverySlowdown = ADAPTIVE_RECOVERY_SLOWDOWN,
+            ),
+            clock = Clock.systemUTC(),
+        )
+    }
+
+    /** Snapshot samples the phone didn't take as a snapshot still reach it through the regular sync. */
+    private val snapshotFallback = ChannelSampleSource()
+
+    private val snapshotController by lazy {
+        SnapshotController(
+            capturer = BaselineSnapshotCapturer(
+                worn = WindowGate(offBodyDetector::isWorn),
+                stillness = { listOf(StillnessQualifier(), GyroscopeStillnessQualifier()) },
+                probe = SensorQualifierProbe(getSystemService(SensorManager::class.java)),
+                measurer = windowMeasurer,
+                groups = { windowGroups },
+                heartRate = HealthServicesSensorCollector(applicationContext),
+                awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), SNAPSHOT_WAKE_LOCK_TAG),
+                timing = SnapshotTiming(stillnessProbe = SNAPSHOT_STILLNESS_PROBE, window = VENDOR_WINDOW),
+                clock = Clock.systemUTC(),
+            ),
+            transport = transport,
+            display = { samples -> samples.forEach(::onCollected) },
+            fallback = snapshotFallback,
+            scope = serviceScope,
+        )
+    }
+
+    /** Every collected sample: shown on the watch and judged by the adaptive triggers. */
+    private fun onCollected(sample: SensorSample) {
+        liveReadings.record(sample)
+        adaptiveScheduler.onSample(sample)
     }
 
     private val bloodPressureRequester: PhoneBloodPressureMeasureRequester by lazy {
@@ -104,7 +220,7 @@ class SensorCollectionService : Service() {
 
     private val autoBloodPressure by lazy {
         AutoBloodPressureController(
-            settings = SharedPreferencesAutoBloodPressureSettings(applicationContext),
+            settings = { SharedPreferencesWatchSettingsStore.get(applicationContext).settings.value.autoBloodPressure },
             gates = listOf(WindowGate(offBodyDetector::isWorn), noWorkoutGate, recentStepsGate),
             stillness = { listOf(GyroscopeStillnessQualifier()) },
             probe = SensorQualifierProbe(getSystemService(SensorManager::class.java)),
@@ -125,9 +241,56 @@ class SensorCollectionService : Service() {
         OnDemandCollection(serviceScope) { sensorCollector.heartRateSamples().collect(liveReadings::record) }
     }
 
-    private val vendorSensorRecorders by lazy {
+    /** Sleep stages, SpO2, HRV, breathing and skin temperature: Mobvoi vendor sensors on a TicWatch, public APIs elsewhere. */
+    private val metricsProvider: ExtendedMetricsProvider by lazy {
+        MetricsProviderFactory(
+            sensorManager = getSystemService(SensorManager::class.java),
+            device = DeviceIdentity(Build.MANUFACTURER, Build.BRAND),
+            mobvoi = ::buildMobvoiMetricsProvider,
+            generic = { GenericWearOsMetricsProvider(sleepStateSink) },
+        ).create()
+    }
+
+    /** Every sleep-state update also drives the phone's snore monitor. */
+    private val sleepStateSink: SleepStateSink by lazy {
+        PhoneSnoreMonitorRelay(
+            next = sleepState,
+            settings = ::currentWatchSettings,
+            sender = LatestMessageSender(transport, serviceScope, DataLayerPaths.MESSAGE_SNORE_MONITOR, WorkoutPayloads::workoutState),
+        )
+    }
+
+    private fun buildMobvoiMetricsProvider(): ExtendedMetricsProvider = MobvoiMetricsProvider(
+        sensorManager = getSystemService(SensorManager::class.java),
+        powerManager = getSystemService(PowerManager::class.java),
+        nightScheduler = AlarmWindowScheduler(
+            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), NIGHT_IDLE_ALARM_TAG,
+        ),
+        sleepState = sleepState,
+        sleepStateSink = sleepStateSink,
+        wearState = offBodyDetector,
+        daytimeBodyGate = daytimeBodyGate,
+        wornGate = WindowGate(offBodyDetector::isWorn),
+        snoreMeter = SettingsGatedSnoreMeter(::currentWatchSettings, MicrophoneSnoreMeter(applicationContext)),
+        logs = MobvoiRawLogs(
+            respiration = respirationEventLog,
+            lowPowerHeartRate = lowPowerHeartRateEventLog,
+            heartRateAlert = heartRateAlertEventLog,
+            temperatureChannels = temperatureChannelLog,
+        ),
+        recorders = buildVendorSensorRecorders(),
+        timing = MobvoiMetricsTiming(
+            minSleepSession = MIN_SLEEP_SESSION,
+            maxSleepEventGap = MAX_SLEEP_EVENT_GAP,
+            nightEpoch = NIGHT_EPOCH,
+            nightSnoreSlot = NIGHT_SNORE_SLOT,
+            nightIdleCheckInterval = NIGHT_IDLE_CHECK_INTERVAL,
+        ),
+    )
+
+    private fun buildVendorSensorRecorders(): List<VendorSensorRecorder> {
         val sensorManager = getSystemService(SensorManager::class.java)
-        listOf(
+        return listOf(
             VendorSensorRecorder(sensorManager, File(filesDir, VendorSensorRecorder.SLEEP_LOG_FILE_NAME), VendorSensorRecorder.SLEEP_SENSOR_TYPES),
             VendorSensorRecorder(
                 sensorManager,
@@ -195,94 +358,39 @@ class SensorCollectionService : Service() {
         super.onCreate()
         // Health only: a microphone type is refused when started from the background (boot), see onStartCommand.
         ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
-        vendorSensorRecorders.forEach { it.start() }
+        metricsProvider.start()
         offBodyDetector.start()
 
         val backgroundSources: List<SampleSource> =
-            listOf(
-                buildPassiveSampleSource(), buildVendorWindowSampleSource(), buildSleepStageSampleSource(),
-                buildNightBreathingSampleSource(),
-                HeartRateAlertSampleSource(getSystemService(SensorManager::class.java), heartRateAlertEventLog),
-            )
-        val samples = backgroundSources.map { source -> source.samples().onEach(liveReadings::record) }
+            listOf(buildPassiveSampleSource(), buildVendorWindowSampleSource(), buildBoostedHeartRateSampleSource()) +
+                metricsProvider.sampleSources()
+        val samples = backgroundSources.map { source -> source.samples().onEach(::onCollected) } + snapshotFallback.samples()
         serviceScope.launch { sensorSyncSender.sync(merge(*samples.toTypedArray())) }
+        serviceScope.launch { noStepsGate.track() }
         serviceScope.launch { autoWorkout.run() }
         serviceScope.launch { recentStepsGate.track() }
         serviceScope.launch { autoBloodPressure.run() }
     }
 
-    // mobvoi_sleep first: the TicMotion sensor only fills in while it is silent.
-    private fun buildSleepStageSampleSource(): SampleSource = VendorSleepStageSource(
-        sensorManager = getSystemService(SensorManager::class.java),
-        sensorTypes = listOf(VendorSensorTypes.SLEEP, VendorSensorTypes.TICMOTION_SLEEP),
-        decoder = MobvoiSleepStageDecoder(),
-        segmenter = SleepStageSegmenter(minSession = MIN_SLEEP_SESSION, maxGap = MAX_SLEEP_EVENT_GAP),
-        sleepState = sleepState,
-    )
-
-    private fun buildNightBreathingSampleSource(): SampleSource = NightBreathingSampleSource(
-        sensorManager = getSystemService(SensorManager::class.java),
-        powerManager = getSystemService(PowerManager::class.java),
-        scheduler = AlarmWindowScheduler(
-            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), NIGHT_IDLE_ALARM_TAG,
-        ),
-        sleepState = sleepState,
-        wearState = offBodyDetector,
-        epochAggregators = listOf(
-            ::Spo2Aggregator,
-            ::RmssdAggregator,
-            { RriRespirationRateAggregator() },
-            { RawEventRecorder(VendorSensorTypes.LOW_POWER_HEART_RATE, lowPowerHeartRateEventLog) },
-        ),
-        epochQualifiers = listOf(::StillnessQualifier),
-        detectors = listOf({ DesaturationDetector() }),
-        snoreMeter = MicrophoneSnoreMeter(applicationContext),
-        epoch = NIGHT_EPOCH,
-        snoreSlot = NIGHT_SNORE_SLOT,
-        idleCheckInterval = NIGHT_IDLE_CHECK_INTERVAL,
-    )
+    private fun currentWatchSettings(): WatchSettings = SharedPreferencesWatchSettingsStore.get(applicationContext).settings.value
 
     private val daytimeBodyGate = WindowGate { offBodyDetector.isWorn() && !sleepState.isAsleep() }
 
     private fun buildVendorWindowSampleSource(): SampleSource = VendorWindowSampleSource(
-        sensorManager = getSystemService(SensorManager::class.java),
-        powerManager = getSystemService(PowerManager::class.java),
+        measurer = windowMeasurer,
         scheduler = AlarmWindowScheduler(
             getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), VENDOR_WINDOW_ALARM_TAG,
         ),
-        groups = listOf(
-            // Body sensors only read sensibly on the wrist; off it they'd just light the PPG. During
-            // sleep the night breathing monitor measures them continuously instead.
-            AggregatorGroup(
-                factories = listOf(::Spo2Aggregator),
-                gate = daytimeBodyGate,
-                // PPG reads wrist motion as desaturation, so a moving window's SpO2 is dropped.
-                qualifiers = listOf(::StillnessQualifier),
-            ),
-            AggregatorGroup(
-                factories = listOf(
-                    ::RmssdAggregator,
-                    { RriRespirationRateAggregator() },
-                    { RawEventRecorder(VendorSensorTypes.RESPIRATION_RATE, respirationEventLog) },
-                ),
-                gate = daytimeBodyGate,
-            ),
-            // Skin temperature keeps its 30 min cadence through the night (nightly baseline, body temperature).
-            AggregatorGroup(
-                factories = listOf({ SkinTemperatureAggregator(temperatureChannelLog) }),
-                gate = WindowGate(offBodyDetector::isWorn),
-            ),
-            // Environment sensors are meaningful whether or not the watch is worn.
-            AggregatorGroup(
-                factories = listOf(
-                    ::AmbientTemperatureAggregator,
-                    ::BarometricPressureAggregator,
-                    ::AmbientLightAggregator,
-                ),
-            ),
-        ),
-        interval = VENDOR_WINDOW_INTERVAL,
+        cadence = adaptiveScheduler,
+        groups = windowGroups,
         window = VENDOR_WINDOW,
+        clock = Clock.systemUTC(),
+    )
+
+    private fun buildBoostedHeartRateSampleSource(): SampleSource = BoostedHeartRateSampleSource(
+        profiles = adaptiveScheduler,
+        collector = HealthServicesSensorCollector(applicationContext),
+        spacing = CONTINUOUS_HEART_RATE_SPACING,
     )
 
     private val sensorSyncSender by lazy {
@@ -327,7 +435,8 @@ class SensorCollectionService : Service() {
                 ),
             ),
             // Lets the phone record a GPS route for the workout while it runs, and records the watch's own.
-            activityObservers = listOf(WorkoutStateNotifier(transport, serviceScope), buildWatchRouteRecorder(), noWorkoutGate),
+            activityObservers = listOf(WorkoutStateNotifier(transport, serviceScope), buildWatchRouteRecorder(), noWorkoutGate) +
+                metricsProvider.activityObservers(),
         )
     }
 
@@ -341,6 +450,7 @@ class SensorCollectionService : Service() {
         when (intent?.action) {
             ACTION_START_AUTO_WORKOUT -> serviceScope.launch { autoWorkout.onStartRequested() }
             ACTION_END_AUTO_WORKOUT -> serviceScope.launch { autoWorkout.onEndRequested() }
+            ACTION_CAPTURE_SNAPSHOT -> snapshotController.request(intent.getStringExtra(EXTRA_SNAPSHOT_REQUEST_ID))
         }
         addMicrophoneForegroundType()
         return START_STICKY
@@ -366,7 +476,7 @@ class SensorCollectionService : Service() {
     }
 
     override fun onDestroy() {
-        vendorSensorRecorders.forEach { it.stop() }
+        metricsProvider.stop()
         offBodyDetector.stop()
         serviceScope.cancel()
         super.onDestroy()
@@ -391,6 +501,32 @@ class SensorCollectionService : Service() {
 
         private const val ACTION_START_AUTO_WORKOUT = "org.sand.ticwatch.watch.action.START_AUTO_WORKOUT"
         private const val ACTION_END_AUTO_WORKOUT = "org.sand.ticwatch.watch.action.END_AUTO_WORKOUT"
+        private const val ACTION_CAPTURE_SNAPSHOT = "org.sand.ticwatch.watch.action.CAPTURE_SNAPSHOT"
+        private const val EXTRA_SNAPSHOT_REQUEST_ID = "request_id"
+
+        /** Adaptive polling: resting = no steps over this window and no workout. */
+        private val ADAPTIVE_REST_WINDOW: Duration = Duration.ofMinutes(2)
+        private const val RESTING_HEART_RATE_LOW = 50.0
+        private const val RESTING_HEART_RATE_HIGH = 100.0
+
+        /** HRV and SpO2 while resting heart rate is out of range. */
+        private val ALERT_BODY_INTERVAL: Duration = Duration.ofMinutes(5)
+        private const val DESATURATION_THRESHOLD = 94.0
+        private val DESATURATION_RETRY: Duration = Duration.ofSeconds(60)
+        private const val SKIN_TEMPERATURE_RISE = 1.0
+        private const val SKIN_TEMPERATURE_MIN_BASELINE = 4
+        private val ALERT_SKIN_TEMPERATURE_INTERVAL: Duration = Duration.ofMinutes(5)
+
+        /** Hysteresis: 10 min of normal readings return a group to its 30 min base cadence. */
+        private val ADAPTIVE_STABLE_NORMAL: Duration = Duration.ofMinutes(10)
+        private val ADAPTIVE_ALERT_WITHOUT_READINGS: Duration = Duration.ofMinutes(15)
+        private const val ADAPTIVE_RECOVERY_SLOWDOWN = 2L
+
+        /** Boosted live heart rate is ~1 Hz; this keeps the sync buffer from flushing every 2.5 min. */
+        private val CONTINUOUS_HEART_RATE_SPACING: Duration = Duration.ofSeconds(10)
+
+        private val SNAPSHOT_STILLNESS_PROBE: Duration = Duration.ofSeconds(10)
+        private const val SNAPSHOT_WAKE_LOCK_TAG = "TicWatchConnector:Snapshot"
 
         /** Brisk walking for this long becomes a workout; same cadence as phone-app's AutoExerciseDeriver. */
         private val MIN_AUTO_WALK: Duration = Duration.ofMinutes(5)
@@ -449,10 +585,19 @@ class SensorCollectionService : Service() {
         private const val NIGHT_IDLE_ALARM_TAG = "TicWatchConnector:NightIdleAlarm"
 
         /** Samples reach the phone within this long at most; a full batch goes out sooner. */
-        private val SYNC_FLUSH_INTERVAL: Duration = Duration.ofMinutes(15)
-        private const val SYNC_FLUSH_THRESHOLD = 50
+        // Fewer, larger sends: each one wakes the CPU and the radio for the whole round trip.
+        private val SYNC_FLUSH_INTERVAL: Duration = Duration.ofMinutes(30)
+        private const val SYNC_FLUSH_THRESHOLD = 150
         private const val SYNC_ALARM_TAG = "TicWatchConnector:SyncFlushAlarm"
         private const val SYNC_WAKE_LOCK_TAG = "TicWatchConnector:SyncFlush"
+
+        /** The phone's snapshot command, delivered to the running service (a foreground app may start services). */
+        fun snapshotRequester(context: Context) = SnapshotRequester { requestId ->
+            val intent = Intent(context, SensorCollectionService::class.java)
+                .setAction(ACTION_CAPTURE_SNAPSHOT)
+                .putExtra(EXTRA_SNAPSHOT_REQUEST_ID, requestId)
+            runCatching { context.startService(intent) }.onFailure { Log.w(TAG, "Snapshot request not delivered", it) }
+        }
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, SensorCollectionService::class.java))

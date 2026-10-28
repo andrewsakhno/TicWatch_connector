@@ -44,6 +44,12 @@ data class BloodPressureCalibration(
     val calibratedAt: Instant,
 )
 
+/** The patient's name for the doctor's report (ISP: kept apart from [UserProfileStore]); null/blank clears it. */
+interface PatientNameStore {
+    suspend fun patientName(): String?
+    suspend fun setPatientName(name: String?)
+}
+
 /** Persists the single current [BloodPressureCalibration] (ISP: kept apart from [UserProfileStore]). */
 interface BloodPressureCalibrationStore {
     suspend fun bloodPressureCalibration(): BloodPressureCalibration?
@@ -55,6 +61,7 @@ private const val BIRTH_YEAR_KEY = "birth_year"
 private const val SEX_KEY = "sex"
 private const val HEIGHT_CM_KEY = "height_cm"
 private const val WEIGHT_KG_KEY = "weight_kg"
+private const val PATIENT_NAME_KEY = "patient_name"
 private const val BP_SYSTOLIC_KEY = "bp_baseline_systolic"
 private const val BP_DIASTOLIC_KEY = "bp_baseline_diastolic"
 private const val BP_HEART_RATE_KEY = "bp_calibrated_heart_rate"
@@ -63,7 +70,7 @@ private const val BP_SKIN_TEMPERATURE_KEY = "bp_calibrated_skin_temperature"
 private const val BP_CALIBRATED_AT_KEY = "bp_calibrated_at_epoch_ms"
 
 /** [UserProfileStore] over SharedPreferences; every access hops to [Dispatchers.IO] (first read hits disk). */
-class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore, BloodPressureCalibrationStore {
+class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore, BloodPressureCalibrationStore, PatientNameStore {
 
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
@@ -82,6 +89,13 @@ class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore, Bl
     override suspend fun weightKg(): Double? = readDouble(WEIGHT_KG_KEY)
 
     override suspend fun setWeightKg(weightKg: Double?) = writeDouble(WEIGHT_KG_KEY, weightKg)
+
+    override suspend fun patientName(): String? = read { getString(PATIENT_NAME_KEY, null) }
+
+    override suspend fun setPatientName(name: String?) = write {
+        val trimmed = name?.trim()
+        if (trimmed.isNullOrEmpty()) remove(PATIENT_NAME_KEY) else putString(PATIENT_NAME_KEY, trimmed)
+    }
 
     override suspend fun bloodPressureCalibration(): BloodPressureCalibration? = read {
         if (!contains(BP_CALIBRATED_AT_KEY)) return@read null

@@ -6,6 +6,7 @@ import java.time.Instant
  * A single sensor sample synced from the watch, in a transport-neutral shape. When
  * [endedAt] is set it's an interval spanning [recordedAt]..[endedAt] (e.g. [SensorType.SLEEP]).
  * [source] names the device that measured it (stored per history row, put on the Health Connect record).
+ * [snapshot] marks a reading of a Baseline Snapshot (all metrics taken together on request; history `is_snapshot`).
  */
 data class SensorSample(
     val type: SensorType,
@@ -13,6 +14,7 @@ data class SensorSample(
     val recordedAt: Instant,
     val endedAt: Instant? = null,
     val source: SampleSource = SampleSource.WATCH,
+    val snapshot: Boolean = false,
 )
 
 /**
@@ -21,7 +23,10 @@ data class SensorSample(
  */
 enum class SampleSource(val code: Int, val label: String) {
     WATCH(0, "TicWatch"),
-    BLOOD_PRESSURE_CUFF(1, "Bioland cuff");
+    BLOOD_PRESSURE_CUFF(1, "Bioland cuff"),
+
+    /** The phone's own sensors (the microphone's snoring analysis). */
+    PHONE(2, "Phone");
 
     companion object {
         fun of(code: Int): SampleSource = entries.firstOrNull { it.code == code } ?: WATCH

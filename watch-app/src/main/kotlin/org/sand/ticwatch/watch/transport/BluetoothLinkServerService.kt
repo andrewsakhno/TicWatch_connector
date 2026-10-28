@@ -1,6 +1,5 @@
 package org.sand.ticwatch.watch.transport
 
-import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -25,6 +24,7 @@ import org.sand.ticwatch.watch.datalayer.WatchMessageRouter
 import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
 import org.sand.ticwatch.watch.datalayer.defaultDebugProbeRoutes
 import org.sand.ticwatch.watch.sensors.HealthServicesSensorCollector
+import org.sand.ticwatch.watch.sensors.SensorCollectionService
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -53,7 +53,8 @@ class BluetoothLinkServerService : Service() {
             sensorCollector = HealthServicesSensorCollector(applicationContext),
             debugProbes = defaultDebugProbeRoutes(applicationContext),
             replyTransport = TransportFactory.create(applicationContext),
-            phonePayloads = PhonePayloadStores.get(applicationContext).sinksByPath,
+            phonePayloads = WatchMessageRouter.phonePayloadSinks(applicationContext, scope),
+            snapshotRequester = SensorCollectionService.snapshotRequester(applicationContext),
             scope = scope,
         )
     }
