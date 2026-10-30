@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI strings: keep the three languages in step. -->
+<resources>
+    <string name="app_name">TicWatch Connector</string>
+    <string name="watch_face_name">TicWatch Pulse</string>
+    <string name="tile_name">TicWatch Pulse</string>
+    <string name="tile_open">Otwórz</string>
+    <string name="tile_readiness_name">Gotowość serca</string>
+    <string name="heart_rate">Tętno</string>
+    <string name="readiness_hrv">Gotowość / HRV</string>
+    <string name="sleep_score">Ocena snu</string>
+    <string name="training_load">Obciążenie</string>
+    <string name="hrv_line">HRV %1$s · %2$s</string>
+    <string name="stress_missing">Stres %1$s</string>
+    <string name="daylight_line">Światło dzienne %1$s/%2$s min</string>
+    <string name="geomagnetic">Geomagnetyzm</string>
+    <string name="sun_flux">Słońce F10.7 %1$d · %2$s</string>
+    <string name="sun_missing">Słońce %1$s</string>
+    <string name="spo2">SpO2</string>
+    <string name="breathing_line">Oddech %1$s</string>
+    <string name="barometer">Barometr</string>
+    <string name="environment_footer">%1$s\nObudowa %2$s · Skóra %3$s</string>
+    <string name="pattern_bpm" formatted="false">%.0f ud./min</string>
+    <string name="pattern_ms" formatted="false">%.0f ms</string>
+    <string name="pattern_per_min" formatted="false">%.1f /min</string>
+    <string name="pattern_hpa" formatted="false">%.1f hPa</string>
+    <string name="pattern_lux" formatted="false">%.0f lx</string>
+    <string name="pattern_celsius" formatted="false">%.1f °C</string>
+    <string name="last_6h">ostatnie 6 h</string>
+    <string name="settings">Ustawienia</string>
+    <string name="auto_walk_workout">Automatyczny trening marszu</string>
+    <string name="log_capture">Zapis logów</string>
+    <string name="log_capture_hint">Debug, zużywa baterię</string>
+    <string name="snore_analysis">Analiza chrapania</string>
+    <string name="snore_analysis_hint">Podczas snu</string>
+    <string name="snore_microphone">Mikrofon do chrapania</string>
+    <string name="microphone_watch">Zegarek</string>
+    <string name="microphone_phone">Telefon</string>
+    <string name="auto_workout_off">Wył.</string>
+    <string name="auto_workout_ask">Najpierw zapytaj</string>
+    <string name="auto_workout_auto">Automatycznie</string>
+    <string name="stress_rest">Odpoczynek</string>
+    <string name="stress_low">Niski</string>
+    <string name="stress_moderate">Średni</string>
+    <string name="stress_high">Wysoki</string>
+    <string name="collecting_trend">Zbieranie trendu…</string>
+    <string name="band_low_stress">Niski stres</string>
+    <string name="band_moderate_stress">Umiarkowany stres</string>
+    <string name="band_high_stress">Wysoki stres</string>
+    <string name="band_fatigue">Zmęczenie</string>
+    <string name="band_normal">Norma</string>
+    <string name="band_excellent">Doskonale</string>
+    <string name="band_poor">Słabo</string>
+    <string name="band_fair">Przeciętnie</string>
+    <string name="band_good">Dobrze</string>
+    <string name="band_detraining">Roztrenowanie</string>
+    <string name="band_optimal">Optymalnie</string>
+    <string name="band_high">Wysokie</string>
+    <string name="band_overreaching">Przetrenowanie</string>
+    <string name="band_quiet">Spokojnie</string>
+    <string name="band_unsettled">Niespokojnie</string>
+    <string name="band_active">Aktywnie</string>
+    <string name="band_storm">Burza</string>
+    <string name="band_low">Niski</string>
+    <string name="blood_pressure">Ciśnienie krwi</string>
+    <string name="mmhg">mmHg</string>
+    <string name="pulse_value">tętno %1$d</string>
+    <string name="bp_sys">SYS</string>
+    <string name="bp_dia">DIA</string>
+    <string name="bp_cuff">MANK.</string>
+    <string name="last_24h">ostatnie 24 h</string>
+    <string name="measuring">Pomiar...</string>
+    <string name="measure">Zmierz</string>
+    <string name="auto_at_rest">Automatycznie w spoczynku</string>
+    <string name="every_5_min">Co 5 min</string>
+    <string name="tap_chart">Dotknij wykresu, aby zobaczyć pomiar</string>
+    <string name="no_readings_today">Brak pomiarów dzisiaj</string>
+    <string name="phone_unreachable">Telefon niedostępny</string>
+    <string name="snapshot">Migawka</string>
+    <string name="take_snapshot">Wykonaj migawkę</string>
+    <string name="keep_wrist_still">Trzymaj nadgarstek nieruchomo</string>
+    <string name="all_metrics">Wszystkie wskaźniki, ~3 min</string>
+    <string name="snapshot_not_delivered">\nTelefon niedostępny, synchronizacja później</string>
+    <string name="snapshot_unit_spo2" formatted="false">%.0f %%</string>
+    <string name="snapshot_unit_ambient" formatted="false">%.1f °C otoczenie</string>
+    <string name="snapshot_unit_pressure" formatted="false">%.0f hPa</string>
+    <string name="snapshot_unit_light" formatted="false">%.0f lx</string>
+    <string name="snapshot_completed">Migawka wykonana</string>
+    <string name="put_watch_on">Załóż zegarek</string>
+    <string name="snapshot_not_still">Trzymaj nadgarstek nieruchomo i spróbuj ponownie</string>
+    <string name="snapshot_no_readings">Żaden czujnik nie dał odczytu</string>
+    <string name="snapshot_busy">Migawka jest już w toku</string>
+    <string name="ecg_completed">Nagranie wykonane</string>
+    <string name="ecg_no_beats">Nie wykryto bicia serca - zaciśnij pasek i nie ruszaj się</string>
+    <string name="ecg_busy">Nagrywanie już trwa</string>
+    <string name="ecg_sent">Wysłano do telefonu</string>
+    <string name="keep_still">Nie ruszaj się</string>
+    <string name="finding_pulse">Szukanie tętna...</string>
+    <string name="bpm_int">%1$d ud./min</string>
+    <string name="seconds_left">%1$d s</string>
+    <string name="ecg_notification_title">Nagrywanie rytmu serca</string>
+    <string name="ecg_notification_text">Nie ruszaj się przez 30 s</string>
+    <string name="ecg_channel">Nagrywanie rytmu serca</string>
+    <string name="walk_detected">Wykryto marsz</string>
+    <string name="walk_record_question">Zapisać jako trening?</string>
+    <string name="start">Start</string>
+    <string name="walk_workout">Trening: marsz</string>
+    <string name="walk_recording">Nagrywanie - zakończy się, gdy przestaniesz iść</string>
+    <string name="end">Zakończ</string>
+    <string name="auto_workout_channel">Automatyczne treningi marszu</string>
+    <string name="install_channel">Potwierdzenie aktualizacji</string>
+    <string name="install_title">Aktualizacja TicWatch Connector</string>
+    <string name="install_text">Dotknij, aby potwierdzić instalację nowej wersji</string>
+    <string name="sync_channel">Synchronizacja tętna</string>
+    <string name="sync_text">Zbieranie tętna</string>
+    <string name="bridge_channel">Połączenie z telefonem</string>
+    <string name="bridge_text">Nasłuchiwanie żądań telefonu przez Bluetooth</string>
+</resources>
