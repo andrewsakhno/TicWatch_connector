@@ -36,7 +36,7 @@ class SpaceWeatherAssembler(private val zone: ZoneId, private val days: Int = DE
     }
 
     private companion object {
-        const val DEFAULT_DAYS = 6
+        const val DEFAULT_DAYS = 7
         const val SLOTS_PER_DAY = 8
     }
 }

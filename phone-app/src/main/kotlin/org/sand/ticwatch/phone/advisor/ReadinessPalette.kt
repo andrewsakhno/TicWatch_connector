@@ -1,5 +1,7 @@
 package org.sand.ticwatch.phone.advisor
 
+import org.sand.ticwatch.phone.insights.FatigueLevel
+
 /** ARGB colour of each readiness band, shared by the Advisor tab and its home-screen widget. */
 object ReadinessPalette {
     private const val GREEN = 0xFF43A047L
@@ -13,4 +15,14 @@ object ReadinessPalette {
         ReadinessState.LIMITED -> ORANGE
         ReadinessState.UNLOAD -> RED
     }
+
+    /** Fatigue bands in the same palette: fresh = optimal ... exhausted = unload. */
+    fun argb(level: FatigueLevel): Long = argb(
+        when (level) {
+            FatigueLevel.FRESH -> ReadinessState.OPTIMAL
+            FatigueLevel.MODERATE -> ReadinessState.MODERATE
+            FatigueLevel.PRONOUNCED -> ReadinessState.LIMITED
+            FatigueLevel.EXHAUSTED -> ReadinessState.UNLOAD
+        },
+    )
 }

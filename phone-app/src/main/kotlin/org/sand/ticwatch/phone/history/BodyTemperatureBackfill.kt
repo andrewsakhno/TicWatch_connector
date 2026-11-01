@@ -80,7 +80,7 @@ class BodyTemperatureBackfill(
         /** Covers the qualifiers' lookbacks; day-scale for sparse rows (sessions, daily resting HR). */
         val DEFAULT_CONTEXT_SPANS = listOf(
             ContextSpan(setOf(SensorType.HEART_RATE, SensorType.STEPS, SensorType.AMBIENT_TEMPERATURE), Duration.ofMinutes(45)),
-            ContextSpan(setOf(SensorType.EXERCISE, SensorType.RESTING_HEART_RATE, SensorType.SLEEP), Duration.ofDays(2)),
+            ContextSpan(setOf(SensorType.EXERCISE, SensorType.AUTO_EXERCISE, SensorType.RESTING_HEART_RATE, SensorType.SLEEP), Duration.ofDays(2)),
         )
     }
 }

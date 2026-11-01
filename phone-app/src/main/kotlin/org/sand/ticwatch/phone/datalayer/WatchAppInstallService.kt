@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.util.Log
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,8 +17,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.sand.ticwatch.phone.AppContainer
+import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
-import java.io.File
 
 /**
  * Runs [AppContainer.watchAppManager]'s `installApp` as a foreground service instead of
@@ -81,18 +82,20 @@ class WatchAppInstallService : Service() {
     private fun buildNotification(progress: ApkProgress? = null): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Watch app install", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_ID, getString(R.string.notif_install_channel), NotificationManager.IMPORTANCE_LOW),
         )
         val builder = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Updating watch app")
+            .setContentTitle(getString(R.string.notif_install_title))
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOnlyAlertOnce(true)
         val percent = progress?.percent
         return when {
-            progress == null -> builder.setContentText("Waiting for the watch link").setProgress(0, 0, true)
-            percent == null -> builder.setContentText("Sending APK to watch").setProgress(0, 0, true)
+            progress == null -> builder.setContentText(getString(R.string.notif_install_waiting)).setProgress(0, 0, true)
+            percent == null -> builder.setContentText(getString(R.string.notif_install_sending)).setProgress(0, 0, true)
             else -> builder
-                .setContentText("Sending APK: $percent% (${progress.bytesTransferred / BYTES_PER_MB} / ${(progress.totalBytes ?: 0) / BYTES_PER_MB} MB)")
+                .setContentText(
+                    getString(R.string.notif_install_progress, percent, progress.bytesTransferred / BYTES_PER_MB, (progress.totalBytes ?: 0) / BYTES_PER_MB),
+                )
                 .setProgress(PERCENT, percent, false)
         }.build()
     }

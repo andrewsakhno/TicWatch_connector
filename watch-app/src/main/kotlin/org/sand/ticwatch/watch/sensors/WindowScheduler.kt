@@ -50,6 +50,8 @@ class AlarmWindowScheduler(
     private companion object {
         const val WAKE_LOCK_TAG = "TicWatchConnector:AlarmHandoff"
         val ALARM_WINDOW: Duration = Duration.ofMinutes(1)
-        val HANDOFF_WAKE_LOCK: Duration = Duration.ofSeconds(15)
+
+        /** Held whole by every alarm, even one that finds nothing to do; covers the sleep check's 3 s flush settle. */
+        val HANDOFF_WAKE_LOCK: Duration = Duration.ofSeconds(5)
     }
 }

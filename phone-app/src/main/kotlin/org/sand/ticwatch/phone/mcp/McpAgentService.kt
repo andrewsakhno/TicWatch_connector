@@ -127,7 +127,7 @@ class McpAgentService : Service() {
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, TITLE, NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_ID, getString(R.string.screen_mcp_agent), NotificationManager.IMPORTANCE_LOW),
         )
         val openScreen = PendingIntent.getActivity(
             this,
@@ -143,12 +143,12 @@ class McpAgentService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle(TITLE)
-            .setContentText(NOTIFICATION_TEXT)
+            .setContentTitle(getString(R.string.screen_mcp_agent))
+            .setContentText(getString(R.string.notif_mcp_text))
             .setContentIntent(openScreen)
             // Action buttons are tinted with the notification color.
             .setColor(getColor(R.color.mcp_agent_notification_accent))
-            .addAction(Notification.Action.Builder(null as Icon?, STOP_ACTION_LABEL, stopAgent).build())
+            .addAction(Notification.Action.Builder(null as Icon?, getString(R.string.notif_turn_off), stopAgent).build())
             .setOngoing(true)
             .build()
     }
@@ -157,9 +157,6 @@ class McpAgentService : Service() {
         private const val TAG = "McpAgentService"
         private const val CHANNEL_ID = "mcp_agent"
         private const val NOTIFICATION_ID = 45
-        private const val TITLE = "MCP agent"
-        private const val NOTIFICATION_TEXT = "MCP server is running"
-        private const val STOP_ACTION_LABEL = "Turn off"
         private const val LOCK_TAG = "TicWatchConnector:McpAgent"
         private const val IDLE_TIMEOUT_MS = 30 * 60 * 1000L
         private const val IDLE_CHECK_MS = 10_000L

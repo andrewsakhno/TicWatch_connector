@@ -1,11 +1,11 @@
 package org.sand.ticwatch.phone.transport
 
-import android.bluetooth.BluetoothSocket
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 
 /** The receiver assembled the whole payload but its hash didn't match; it restarts from 0. */
 class ContentHashMismatchException(path: String) : IOException("Content hash mismatch for $path")
@@ -29,9 +29,9 @@ internal class ResumableUpload(
     var confirmedOffset: Long = NO_HANDSHAKE
         private set
 
-    fun runOn(socket: BluetoothSocket, pauseRequested: () -> Boolean): Outcome {
-        val output = DataOutputStream(BufferedOutputStream(socket.outputStream, TransportProtocol.RESUMABLE_CHUNK_SIZE))
-        val input = DataInputStream(socket.inputStream)
+    fun runOn(rawInput: InputStream, rawOutput: OutputStream, pauseRequested: () -> Boolean): Outcome {
+        val output = DataOutputStream(BufferedOutputStream(rawOutput, TransportProtocol.RESUMABLE_CHUNK_SIZE))
+        val input = DataInputStream(rawInput)
 
         output.writeUTF(TransportProtocol.RESUMABLE_FRAME_PATH)
         output.writeLong(TransportProtocol.RESUMABLE_FRAME_LEGACY_LENGTH)

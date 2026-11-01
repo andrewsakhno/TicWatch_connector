@@ -1,6 +1,8 @@
 package org.sand.ticwatch.phone.health
 
+import androidx.annotation.StringRes
 import java.time.Instant
+import org.sand.ticwatch.phone.R
 
 /** Wrist signals at the moment of a calibration or estimate; RMSSD/skin temperature are null without recent data. */
 data class WristSignals(
@@ -26,13 +28,13 @@ data class BloodPressureReading(
  * ESC/ESH office blood pressure categories; a reading falls in the highest category either value reaches.
  * [systolicFrom]/[diastolicFrom] are each category's lower bounds in mmHg.
  */
-enum class BloodPressureCategory(val label: String, val systolicFrom: Double, val diastolicFrom: Double) {
-    OPTIMAL("Optimal", 0.0, 0.0),
-    NORMAL("Normal", 120.0, 80.0),
-    HIGH_NORMAL("High normal", 130.0, 85.0),
-    HYPERTENSION_GRADE_1("Hypertension grade 1", 140.0, 90.0),
-    HYPERTENSION_GRADE_2("Hypertension grade 2", 160.0, 100.0),
-    HYPERTENSION_GRADE_3("Hypertension grade 3", 180.0, 110.0);
+enum class BloodPressureCategory(@StringRes val label: Int, val systolicFrom: Double, val diastolicFrom: Double) {
+    OPTIMAL(R.string.bp_category_optimal, 0.0, 0.0),
+    NORMAL(R.string.bp_category_normal, 120.0, 80.0),
+    HIGH_NORMAL(R.string.bp_category_high_normal, 130.0, 85.0),
+    HYPERTENSION_GRADE_1(R.string.bp_category_hypertension_grade_1, 140.0, 90.0),
+    HYPERTENSION_GRADE_2(R.string.bp_category_hypertension_grade_2, 160.0, 100.0),
+    HYPERTENSION_GRADE_3(R.string.bp_category_hypertension_grade_3, 180.0, 110.0);
 
     companion object {
         fun of(systolic: Double, diastolic: Double): BloodPressureCategory =

@@ -3,6 +3,9 @@ package org.sand.ticwatch.phone.advisor
 import kotlin.math.roundToInt
 import org.json.JSONObject
 import org.sand.ticwatch.phone.health.BloodPressureReading
+import org.sand.ticwatch.phone.insights.FatigueLevel
+import org.sand.ticwatch.phone.text.TextResolver
+import org.sand.ticwatch.phone.text.uiText
 
 /** How concerning a value on the watch's readiness tile is; [code] travels on the wire (never `ordinal`). */
 enum class VitalLevel(val code: Int) {
@@ -17,6 +20,13 @@ enum class VitalLevel(val code: Int) {
             ReadinessState.MODERATE -> FAIR
             ReadinessState.LIMITED -> ELEVATED
             ReadinessState.UNLOAD -> HIGH
+        }
+
+        fun of(fatigue: FatigueLevel): VitalLevel = when (fatigue) {
+            FatigueLevel.FRESH -> GOOD
+            FatigueLevel.MODERATE -> FAIR
+            FatigueLevel.PRONOUNCED -> ELEVATED
+            FatigueLevel.EXHAUSTED -> HIGH
         }
 
         /** ESC office bands: optimal/normal, high-normal, grade 1, grade 2+; the worse of both halves wins. */
@@ -48,8 +58,8 @@ enum class VitalLevel(val code: Int) {
 }
 
 /**
- * JSON of [CardioReadiness] for the watch's readiness tile: the score and the latest pressure and pulse, each with
- * its [VitalLevel] so the watch only maps levels to colours. Mirrors watch-app's `readiness/CardioReadinessPayload.kt`
+ * JSON of [CardioReadiness] for the watch's readiness tile, page and face: the score, the load readiness and the latest pressure and pulse, each with
+ * its [VitalLevel] so the watch only maps levels to colours, plus the state and advice labels. Mirrors watch-app's `readiness/CardioReadinessPayload.kt`
  * (no shared module, keep the keys in sync).
  */
 object CardioReadinessPayload {
@@ -60,13 +70,24 @@ object CardioReadinessPayload {
     const val PRESSURE_LEVEL = "bp_level"
     const val HEART_RATE = "hr"
     const val HEART_RATE_LEVEL = "hr_level"
+    const val STATE_LABEL = "state_label"
+    const val ADVICE = "advice"
+    const val LOAD_READINESS = "load_readiness"
+    const val LOAD_LEVEL = "load_level"
+    const val FATIGUE_LABEL = "fatigue_label"
     const val AT = "at"
 
-    fun encode(readiness: CardioReadiness): String {
+    /** The content of a payload apart from when it was computed, which differs on every read. */
+    fun withoutTimestamp(payload: String): String = JSONObject(payload).apply { remove(AT) }.toString()
+
+    /** [text] resolves the state, advice and fatigue labels, which the watch displays as they are. */
+    fun encode(readiness: CardioReadiness, text: TextResolver): String {
         val assessment = readiness.assessment
         val json = JSONObject()
             .put(SCORE, assessment.score)
             .put(SCORE_LEVEL, VitalLevel.of(assessment.state).code)
+            .put(STATE_LABEL, text.resolve(uiText(assessment.state.label)))
+            .put(ADVICE, text.resolve(uiText(assessment.advice.action.title)))
             .put(AT, assessment.at.toEpochMilli())
         readiness.vitals.pressure?.let {
             json.put(SYSTOLIC, it.systolic.roundToInt())
@@ -75,6 +96,11 @@ object CardioReadinessPayload {
         }
         readiness.vitals.heartRateBpm?.let {
             json.put(HEART_RATE, it.roundToInt()).put(HEART_RATE_LEVEL, VitalLevel.ofHeartRate(it).code)
+        }
+        readiness.fatigue?.let {
+            json.put(LOAD_READINESS, it.loadReadinessPercent)
+                .put(LOAD_LEVEL, VitalLevel.of(it.level).code)
+                .put(FATIGUE_LABEL, text.resolve(uiText(it.level.label)))
         }
         return json.toString()
     }

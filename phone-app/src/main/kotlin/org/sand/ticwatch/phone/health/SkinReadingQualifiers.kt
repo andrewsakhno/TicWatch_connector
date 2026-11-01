@@ -44,7 +44,11 @@ class ExerciseRecoveryQualifier(
 
     override fun accepts(skin: SensorSample, context: List<SensorSample>): Boolean {
         val span = TimeSpan.around(skin, recovery)
-        return context.none { it.type == SensorType.EXERCISE && TimeSpan.of(it).overlap(span) > Duration.ZERO }
+        return context.none { it.type in WORKOUT_TYPES && TimeSpan.of(it).overlap(span) > Duration.ZERO }
+    }
+
+    private companion object {
+        val WORKOUT_TYPES = setOf(SensorType.EXERCISE, SensorType.AUTO_EXERCISE)
     }
 }
 

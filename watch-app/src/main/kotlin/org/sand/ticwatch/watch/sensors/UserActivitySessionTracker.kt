@@ -19,7 +19,7 @@ fun interface UserActivitySessionTracker {
 
 /**
  * Opens a session on a transition into [trackedState] and closes it on the first
- * transition out of it. The open session (start and [valueAtOpen]) is persisted in
+ * transition out of it. The open session (start, [valueAtOpen] and [typeAtOpen]) is persisted in
  * [preferences] so a process restart mid-session (the hosting service is START_STICKY)
  * still yields one full session.
  */
@@ -30,17 +30,22 @@ class StateSessionTracker(
     private val minDuration: Duration,
     private val valueAtOpen: (UserActivityInfo) -> Double = { NO_SESSION_VALUE },
     private val startAtOpen: (UserActivityInfo) -> Instant = { it.stateChangeTime },
+    private val typeAtOpen: (UserActivityInfo) -> SensorType = { sensorType },
 ) : UserActivitySessionTracker {
 
     private val startKey = "${sensorType.name}$START_KEY_SUFFIX"
     private val valueKey = "${sensorType.name}$VALUE_KEY_SUFFIX"
+    private val typeKey = "${sensorType.name}$TYPE_KEY_SUFFIX"
 
     override fun onUserActivity(info: UserActivityInfo): SensorSample? {
         val openStart = preferences.getLong(startKey, NO_OPEN_SESSION)
 
         if (info.userActivityState == trackedState) {
             if (openStart == NO_OPEN_SESSION) {
+                // Before startAtOpen, which may consume what typeAtOpen looks at.
+                val type = typeAtOpen(info)
                 preferences.edit()
+                    .putString(typeKey, type.name)
                     .putLong(startKey, startAtOpen(info).toEpochMilli())
                     .putFloat(valueKey, valueAtOpen(info).toFloat())
                     .apply()
@@ -50,11 +55,12 @@ class StateSessionTracker(
         if (openStart == NO_OPEN_SESSION) return null
 
         val value = preferences.getFloat(valueKey, NO_SESSION_VALUE.toFloat()).toDouble()
-        preferences.edit().remove(startKey).remove(valueKey).apply()
+        val type = preferences.getString(typeKey, null)?.let(SensorType::valueOf) ?: sensorType
+        preferences.edit().remove(startKey).remove(valueKey).remove(typeKey).apply()
         val start = Instant.ofEpochMilli(openStart)
         if (Duration.between(start, info.stateChangeTime) < minDuration) return null
 
-        return SensorSample(type = sensorType, value = value, recordedAt = start, endedAt = info.stateChangeTime)
+        return SensorSample(type = type, value = value, recordedAt = start, endedAt = info.stateChangeTime)
     }
 
     companion object {
@@ -62,6 +68,7 @@ class StateSessionTracker(
         const val NO_SESSION_VALUE = 0.0
         private const val START_KEY_SUFFIX = "_start_epoch_ms"
         private const val VALUE_KEY_SUFFIX = "_value"
+        private const val TYPE_KEY_SUFFIX = "_type"
         private const val NO_OPEN_SESSION = -1L
     }
 }

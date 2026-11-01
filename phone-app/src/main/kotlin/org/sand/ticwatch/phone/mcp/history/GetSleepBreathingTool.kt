@@ -57,11 +57,18 @@ class GetSleepBreathingTool(
             .put("spo2_monitored_hours", format.number(epochHours(of(SensorType.SPO2))))
             .put("spo2_min", nullable(epochSpo2.minOrNull()))
             .put("spo2_mean", nullable(epochSpo2.takeIf { it.isNotEmpty() }?.average()))
+            .put("pulse_amplitude_drops", of(SensorType.PULSE_AMPLITUDE_DROP).size)
+            .put(
+                "pulse_drops_per_hour",
+                nullable(of(SensorType.PULSE_AMPLITUDE_DROP).size.takeIf { it > 0 }?.let { it / sessionHours(session) }),
+            )
             .put("snoring_minutes", nullable(of(SensorType.SNORING_DURATION).lastOrNull()?.value))
             .put("snore_epochs_measured", of(SensorType.SNORING).size)
             .put("breathing_rate_mean", nullable(of(SensorType.RESPIRATION_RATE).takeIf { it.isNotEmpty() }?.map { it.value }?.average()))
             .put("rmssd_mean_ms", nullable(of(SensorType.HRV_RMSSD).takeIf { it.isNotEmpty() }?.map { it.value }?.average()))
     }
+
+    private fun sessionHours(session: SleepSession): Double = Duration.between(session.start, session.end).toMillis() / MILLIS_PER_HOUR
 
     private fun epochHours(epochs: List<SensorSample>): Double =
         epochs.mapNotNull { epoch -> epoch.endedAt?.let { Duration.between(epoch.recordedAt, it).toMillis() } }.sum() / MILLIS_PER_HOUR
@@ -85,7 +92,7 @@ class GetSleepBreathingTool(
         val DEFAULT_SPAN: Duration = Duration.ofDays(DEFAULT_DAYS)
         val NIGHT_TYPES = setOf(
             SensorType.SPO2, SensorType.OXYGEN_DESATURATION, SensorType.OXYGEN_DESATURATION_INDEX, SensorType.SNORING,
-            SensorType.SNORING_DURATION, SensorType.RESPIRATION_RATE, SensorType.HRV_RMSSD,
+            SensorType.SNORING_DURATION, SensorType.RESPIRATION_RATE, SensorType.HRV_RMSSD, SensorType.PULSE_AMPLITUDE_DROP,
         )
     }
 }

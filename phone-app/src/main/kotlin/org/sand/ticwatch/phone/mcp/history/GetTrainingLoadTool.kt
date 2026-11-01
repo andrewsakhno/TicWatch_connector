@@ -20,7 +20,8 @@ class GetTrainingLoadTool(
     override val description =
         "Per local day: cardio load (Banister TRIMP summed over the day's workouts, watch and auto-detected), " +
             "acute load (7-day sum), chronic load (28-day weekly mean), ratio = acute / chronic (null without " +
-            "chronic load) with balance: Detraining < 0.8, Optimal 0.8-1.3, High 1.3-1.5, Overreaching > 1.5; and " +
+            "chronic load) with balance: Detraining < 0.8, Optimal 0.8-1.3, High 1.3-1.5, Overreaching > 1.5 (Optimal " +
+            "instead when acute load < 150 or over 85% of the 7-day zone minutes are in zones 1-2); and " +
             "minutes per Karvonen zone (1: 50-60%, 2: 60-70%, 3: 70-80%, 4: 80-90%, 5: >= 90% of HR reserve). " +
             "zone_minutes_total sums the range. Needs the birth year in the profile. Uses day rollups (kept " +
             "forever). The last entry is today. Default range: the last $DEFAULT_DAYS days."
@@ -46,7 +47,7 @@ class GetTrainingLoadTool(
         .put("acute_load", format.number(balance.acuteLoad))
         .put("chronic_weekly_load", format.number(balance.chronicWeeklyLoad))
         .put("ratio", balance.ratio?.let(format::number) ?: JSONObject.NULL)
-        .put("balance", balance.balance?.label ?: JSONObject.NULL)
+        .put("balance", balance.balance?.let { format.text(it.label) } ?: JSONObject.NULL)
         .put("zone_minutes", zones(zoneMinutes))
 
     private fun zones(minutes: Map<HeartRateZone, Double>): JSONObject = JSONObject().also { json ->

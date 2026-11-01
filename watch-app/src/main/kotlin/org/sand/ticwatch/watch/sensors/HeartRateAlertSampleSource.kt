@@ -13,9 +13,9 @@ import kotlinx.coroutines.flow.callbackFlow
 import java.time.Instant
 
 /**
- * `mobvoi_hr_alert` ("Mobvoi Inactive HR Sensor", wake-up only): registered for as long as the service runs
- * and expected to fire only when the resting heart rate crosses a vendor threshold, so it costs nothing
- * between events. Its layout is not decoded yet: every event goes raw to [rawEvents] and becomes a
+ * `mobvoi_hr_alert` ("Mobvoi Inactive HR Sensor", wake-up only): registered for as long as the flow is collected
+ * (only with "Log capture" on: each event wakes the watch and nothing reads them yet) and expected to fire only when
+ * the resting heart rate crosses a vendor threshold. Its layout is not decoded yet: every event goes raw to [rawEvents] and becomes a
  * [SensorType.HEART_RATE_ALERT] point whose value is values[0] as delivered. The reporting mode is
  * unknown too, so a one-shot sensor is armed as a trigger and re-armed after each event.
  */

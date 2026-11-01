@@ -94,6 +94,11 @@ class SensorMetricCatalog {
                 "% points", MetricKind.SESSION,
                 "SpO2 drop >= 3 points below the 2-min baseline for >= 10 s during sleep; value is the depth",
             ),
+            SensorType.PULSE_AMPLITUDE_DROP to MetricDescriptor(
+                "%", MetricKind.SESSION,
+                "pulse-wave height >= 30% below the 2-min baseline for >= 10 s during sleep (vessels constrict on an " +
+                    "apnea arousal); value is the depth; only with the watch's night pulse wave setting on",
+            ),
             SensorType.SNORING to MetricDescriptor(
                 "fraction", MetricKind.SESSION, "share (0..1) of a 5-min sleep epoch spent snoring, from 1 min of audio features",
             ),
@@ -117,7 +122,7 @@ class SensorMetricCatalog {
             SensorType.WEIGHT to MetricDescriptor("kg", MetricKind.INSTANTANEOUS, "from the profile, on change"),
             SensorType.HEIGHT to MetricDescriptor("cm", MetricKind.INSTANTANEOUS, "from the profile, on change"),
             SensorType.AUTO_EXERCISE to MetricDescriptor(
-                "session", MetricKind.SESSION, "walk/run detected from step cadence; value is the Health Services exercise type id",
+                "session", MetricKind.SESSION, "walk/run detected from step cadence or started automatically by the watch; value is the Health Services exercise type id",
             ),
             SensorType.VO2_MAX_EXERCISE to MetricDescriptor(
                 "ml/kg/min", MetricKind.INSTANTANEOUS, "estimate from an outdoor run's pace against heart-rate reserve",
@@ -137,6 +142,11 @@ class SensorMetricCatalog {
             ),
             SensorType.TRAINING_LOAD to MetricDescriptor(
                 "TRIMP", MetricKind.CUMULATIVE, "per workout: Banister training impulse from heart-rate reserve; sum per day",
+            ),
+            SensorType.FATIGUE_INDEX to MetricDescriptor(
+                "%", MetricKind.INSTANTANEOUS,
+                "heuristic fatigue, at most every 30 min: 24 h load, RMSSD vs baseline, resting HR vs the hour's norm, " +
+                    "last night's recovery (0-30 fresh, 31-60 moderate, 61-80 pronounced, 81-100 exhausted)",
             ),
         ) + HeartRateZone.entries.associate { zone ->
             zone.sensorType to MetricDescriptor(

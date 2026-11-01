@@ -190,6 +190,12 @@ private fun bloodPressureMetadata(measuredAt: Instant, source: SampleSource): Me
 )
 
 /** An automatically detected walk/run, keyed by its start so a re-derivation replaces it. */
+private fun sleepSessionMetadata(start: Instant): Metadata = Metadata.autoRecorded(
+    device = WATCH_DEVICE,
+    clientRecordId = "$SLEEP_SESSION_RECORD_ID_PREFIX${start.toEpochMilli()}",
+    clientRecordVersion = Instant.now().toEpochMilli(),
+)
+
 private fun autoExerciseMetadata(start: Instant): Metadata = Metadata.autoRecorded(
     device = WATCH_DEVICE,
     clientRecordId = "$AUTO_EXERCISE_RECORD_ID_PREFIX${start.toEpochMilli()}",
@@ -213,6 +219,7 @@ private const val RUN_VO2_MAX_RECORD_ID_PREFIX = "vo2_max_run_"
 private const val WEIGHT_RECORD_ID_PREFIX = "weight_"
 private const val HEIGHT_RECORD_ID_PREFIX = "height_"
 private const val AUTO_EXERCISE_RECORD_ID_PREFIX = "auto_exercise_"
+private const val SLEEP_SESSION_RECORD_ID_PREFIX = "sleep_session_"
 private const val CENTIMETERS_PER_METER = 100.0
 
 /** Blood pressure sources written to Health Connect; see the BLOOD_PRESSURE_SYSTOLIC mapper. */
@@ -361,7 +368,7 @@ fun defaultHealthRecordMappers(
                 endTime = span.end,
                 endZoneOffset = span.endOffset,
                 stages = sleepStages.stagesFor(span.start, span.end),
-                metadata = AUTOMATIC_METADATA,
+                metadata = sleepSessionMetadata(span.start),
             )
         }
     },

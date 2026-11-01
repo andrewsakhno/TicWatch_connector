@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -24,25 +25,38 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import org.sand.ticwatch.phone.advisor.Advice
 import org.sand.ticwatch.phone.advisor.AdvisorIntent
 import org.sand.ticwatch.phone.advisor.CardioAdvisorStore
@@ -50,22 +64,29 @@ import org.sand.ticwatch.phone.advisor.CardioReadinessSource
 import org.sand.ticwatch.phone.advisor.ReadinessAssessment
 import org.sand.ticwatch.phone.advisor.ReadinessFactor
 import org.sand.ticwatch.phone.advisor.ReadinessForecastHour
+import org.sand.ticwatch.phone.advisor.ReadinessGaugeArc
 import org.sand.ticwatch.phone.advisor.ReadinessPalette
 import org.sand.ticwatch.phone.advisor.ReadinessState
 import org.sand.ticwatch.phone.advisor.Vitals
 import org.sand.ticwatch.phone.health.SampleSource
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.insights.FatigueComponent
+import org.sand.ticwatch.phone.insights.FatigueIndex
+import org.sand.ticwatch.phone.insights.FatigueLevel
+import org.sand.ticwatch.phone.medication.MedicationProtection
+import org.sand.ticwatch.phone.sleep.VagalRecovery
+import org.sand.ticwatch.phone.sleep.VagalRecoveryStatus
+import org.sand.ticwatch.phone.text.asString
+import org.sand.ticwatch.phone.ui.rememberStore
 
-private const val MAX_SCORE = 100f
-private const val SWEEP_DEGREES = 270f
-private const val START_DEGREES = 135f
+private const val MAX_SCORE = ReadinessGaugeArc.MAX_SCORE
 private const val GAUGE_ANIMATION_MS = 900
 private const val ADVICE_TINT_ALPHA = 0.18f
 private const val MISSING_VALUE = "--"
-private val GAUGE_SIZE = 180.dp
-private val GAUGE_STROKE = 16.dp
+private val GAUGE_SIZE = 200.dp
+private val GAUGE_STROKE = 14.dp
+private val GAUGE_RING_GAP = 5.dp
+/** Material's default is 80 dp; the pull is damped by half, so this takes about 280 dp of finger travel. */
+private val PULL_REFRESH_THRESHOLD = 140.dp
 private val HOUR_CELL_WIDTH = 44.dp
 private val HOUR_BAR_HEIGHT = 28.dp
 private val HOUR_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH")
@@ -76,55 +97,154 @@ private fun ReadinessState.color(): Color = Color(ReadinessPalette.argb(this))
 
 /** Dashboard "Advisor" tab: cardio readiness now, the advice derived from it, its factors and the next hours. */
 @Composable
-internal fun CardioAdvisorScreen(source: CardioReadinessSource) {
-    val scope = rememberCoroutineScope()
-    val store = remember(source) { CardioAdvisorStore(source, scope, Dispatchers.IO) }
+internal fun CardioAdvisorScreen(source: CardioReadinessSource, changes: Flow<*>) {
+    val store = rememberStore(source) { scope, io -> CardioAdvisorStore(source, changes, scope, io) }
     val state by store.state.collectAsState()
-    LaunchedEffect(store) { store.dispatch(AdvisorIntent.Refresh) }
 
-    Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    SwipeDownToRefresh(
+        refresh = {
+            store.dispatch(AdvisorIntent.Refresh)
+            store.state.first { !it.loading }
+        },
     ) {
-        if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        state.error?.let { Text(text = "Could not load: $it", color = MaterialTheme.colorScheme.error) }
-        state.readiness?.let { readiness ->
-            ReadinessGaugeCard(readiness.assessment)
-            AdviceCard(readiness.assessment.advice, readiness.assessment.state)
-            VitalsCard(readiness.vitals)
-            FactorsCard(readiness.assessment, state.factorsExpanded) { store.dispatch(AdvisorIntent.ToggleFactors) }
-            ForecastCard(readiness.forecast)
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            state.error?.let { Text(text = stringResource(R.string.could_not_load, it), color = MaterialTheme.colorScheme.error) }
+            state.readiness?.let { readiness ->
+                ReadinessGaugeCard(readiness.assessment, readiness.fatigue)
+                AdviceCard(readiness.assessment.advice, readiness.assessment.state)
+                ProtectionCard(readiness.medication, readiness.recovery)
+                VitalsCard(readiness.vitals)
+                FactorsCard(readiness.assessment, state.factorsExpanded) { store.dispatch(AdvisorIntent.ToggleFactors) }
+                ForecastCard(readiness.forecast)
+            }
+            Text(
+                text = stringResource(R.string.advisor_disclaimer),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
-        OutlinedButton(onClick = { store.dispatch(AdvisorIntent.Refresh) }, enabled = !state.loading) { Text(text = "Refresh") }
-        Text(
-            text = "Heuristic guidance from wrist signals, not a diagnosis. Follow your doctor's advice.",
-            style = MaterialTheme.typography.bodySmall,
+    }
+}
+
+/**
+ * Swipe-down refresh with a raised threshold. The spinner shows only for a pull, not for the store's reloads on data
+ * pushes. The indicator hides only when `isRefreshing` goes from true to false, so [refresh] runs from an effect: the
+ * modifier has already seen true by then, however fast the load finishes.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeDownToRefresh(refresh: suspend () -> Unit, content: @Composable () -> Unit) {
+    val pullState = rememberPullToRefreshState()
+    var refreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(refreshing) {
+        if (refreshing) {
+            refresh()
+            refreshing = false
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pullToRefresh(
+                isRefreshing = refreshing,
+                state = pullState,
+                threshold = PULL_REFRESH_THRESHOLD,
+                onRefresh = { refreshing = true },
+            ),
+    ) {
+        content()
+        PullToRefreshDefaults.Indicator(
+            state = pullState,
+            isRefreshing = refreshing,
+            threshold = PULL_REFRESH_THRESHOLD,
+            modifier = Modifier.align(Alignment.TopCenter),
         )
     }
 }
 
+/** One gauge with two rings: cardio readiness outside, load readiness (the inverse of the fatigue index, itemised below) inside. */
 @Composable
-private fun ReadinessGaugeCard(assessment: ReadinessAssessment) = SectionCard("Cardio readiness") {
-    val progress by animateFloatAsState(
-        targetValue = assessment.score / MAX_SCORE,
-        animationSpec = tween(GAUGE_ANIMATION_MS),
-        label = "readiness",
+private fun ReadinessGaugeCard(assessment: ReadinessAssessment, fatigue: FatigueIndex?) = SectionCard(stringResource(R.string.card_readiness_gauge)) {
+    val cardioColor = assessment.state.color()
+    val loadColor = fatigue?.level.gaugeColor()
+    DualRingGauge(GaugeRing(assessment.score, cardioColor), GaugeRing(fatigue?.loadReadinessPercent, loadColor))
+    RingCaption(stringResource(R.string.ring_cardio_value, assessment.score, stringResource(assessment.state.label)), cardioColor)
+    RingCaption(
+        fatigue?.let { stringResource(R.string.ring_load_value, it.loadReadinessPercent, stringResource(it.level.label)) }
+            ?: stringResource(R.string.ring_load_no_data),
+        loadColor,
     )
-    val color = assessment.state.color()
+    fatigue?.let { index ->
+        FatigueComponent.entries.forEach { component ->
+            Detail(stringResource(component.label), index.components[component]?.let(::formatShare))
+        }
+    }
+}
+
+private fun FatigueLevel?.gaugeColor(): Color = this?.let { Color(ReadinessPalette.argb(it)) } ?: Color.LightGray
+
+/** A 0..100 ring of the gauge; a null [score] leaves it empty. */
+private data class GaugeRing(val score: Int?, val color: Color)
+
+/** Two concentric 0..100 arcs with their scores in the middle, [outer]'s on top. */
+@Composable
+private fun DualRingGauge(outer: GaugeRing, inner: GaugeRing) {
+    val outerProgress = animatedProgress(outer.score)
+    val innerProgress = animatedProgress(inner.score)
     val track = MaterialTheme.colorScheme.surfaceVariant
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(GAUGE_SIZE)) {
-            val stroke = Stroke(width = GAUGE_STROKE.toPx(), cap = StrokeCap.Round)
-            drawArc(track, START_DEGREES, SWEEP_DEGREES, useCenter = false, style = stroke)
-            drawArc(color, START_DEGREES, SWEEP_DEGREES * progress, useCenter = false, style = stroke)
+            val strokeWidth = GAUGE_STROKE.toPx()
+            val outerInset = strokeWidth / 2
+            drawRing(outer.color, track, outerProgress, outerInset, strokeWidth)
+            drawRing(inner.color, track, innerProgress, outerInset + strokeWidth + GAUGE_RING_GAP.toPx(), strokeWidth)
         }
-        Text(text = "${(progress * MAX_SCORE).roundToInt()}%", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            RingScore(outer, outerProgress)
+            RingScore(inner, innerProgress)
+        }
     }
+}
+
+@Composable
+private fun animatedProgress(score: Int?): Float {
+    val progress by animateFloatAsState(
+        targetValue = (score ?: 0) / MAX_SCORE,
+        animationSpec = tween(GAUGE_ANIMATION_MS),
+        label = "score",
+    )
+    return progress
+}
+
+private fun DrawScope.drawRing(color: Color, track: Color, progress: Float, inset: Float, strokeWidth: Float) {
+    val topLeft = Offset(inset, inset)
+    val arcSize = Size(size.width - 2 * inset, size.height - 2 * inset)
+    val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+    drawArc(track, ReadinessGaugeArc.START_DEGREES, ReadinessGaugeArc.SWEEP_DEGREES, useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+    drawArc(color, ReadinessGaugeArc.START_DEGREES, ReadinessGaugeArc.SWEEP_DEGREES * progress, useCenter = false, topLeft = topLeft, size = arcSize, style = stroke)
+}
+
+@Composable
+private fun RingScore(ring: GaugeRing, progress: Float) {
     Text(
-        text = "${assessment.score}% - ${assessment.state.label}",
-        style = MaterialTheme.typography.titleMedium,
+        text = if (ring.score == null) MISSING_VALUE else stringResource(R.string.percent_value, (progress * MAX_SCORE).roundToInt()),
+        color = ring.color,
+        fontSize = 32.sp,
+        fontWeight = FontWeight.Bold,
+    )
+}
+
+@Composable
+private fun RingCaption(text: String, color: Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
         color = color,
-        modifier = Modifier.align(Alignment.CenterHorizontally),
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
     )
 }
 
@@ -137,34 +257,62 @@ private fun AdviceCard(advice: Advice, state: ReadinessState) {
         Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(text = advice.action.icon, fontSize = 44.sp)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(text = advice.action.title, style = MaterialTheme.typography.titleMedium)
-                Text(text = advice.text, style = MaterialTheme.typography.bodyMedium)
-                advice.rationale?.let { Text(text = it, style = MaterialTheme.typography.bodySmall) }
+                Text(text = stringResource(advice.action.title), style = MaterialTheme.typography.titleMedium)
+                Text(text = advice.text.asString(), style = MaterialTheme.typography.bodyMedium)
+                advice.rationale?.let { Text(text = it.asString(), style = MaterialTheme.typography.bodySmall) }
             }
         }
     }
 }
 
 @Composable
-private fun VitalsCard(vitals: Vitals) = SectionCard("Latest vitals") {
+private fun ProtectionCard(medication: MedicationProtection, recovery: VagalRecovery?) = SectionCard(stringResource(R.string.card_medication_recovery)) {
+    MedicationPhaseText(medication)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(text = stringResource(R.string.night_recovery), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = recovery?.let { stringResource(R.string.recovery_vrr, stringResource(it.status.label), it.ratio) } ?: stringResource(R.string.no_rmssd_data),
+            style = MaterialTheme.typography.labelLarge,
+            color = Color.Black,
+            modifier = Modifier.background(recovery?.status.badgeColor(), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/** Badge colours reuse the readiness palette: excellent = optimal ... hidden stress = limited. */
+private fun VagalRecoveryStatus?.badgeColor(): Color = when (this) {
+    VagalRecoveryStatus.EXCELLENT -> ReadinessState.OPTIMAL.color()
+    VagalRecoveryStatus.MODERATE, VagalRecoveryStatus.BALANCED -> ReadinessState.MODERATE.color()
+    VagalRecoveryStatus.HIDDEN_STRESS -> ReadinessState.LIMITED.color()
+    null -> Color.LightGray
+}
+
+@Composable
+private fun VitalsCard(vitals: Vitals) = SectionCard(stringResource(R.string.card_latest_vitals)) {
     val pressure = vitals.pressure
     Text(
-        text = "Blood pressure: " + if (pressure == null) MISSING_VALUE else {
-            val origin = if (pressure.source == SampleSource.BLOOD_PRESSURE_CUFF) "cuff" else "wrist"
-            "${pressure.systolic.roundToInt()}/${pressure.diastolic.roundToInt()} mmHg ($origin, ${formatTime(pressure.measuredAt)})"
-        },
+        text = stringResource(
+            R.string.vital_blood_pressure,
+            if (pressure == null) MISSING_VALUE else {
+                val origin = if (pressure.source == SampleSource.BLOOD_PRESSURE_CUFF) R.string.origin_cuff else R.string.origin_wrist
+                stringResource(
+                    R.string.bp_with_origin, pressure.systolic.roundToInt(), pressure.diastolic.roundToInt(),
+                    stringResource(origin), formatTime(pressure.measuredAt),
+                )
+            },
+        ),
     )
-    Text(text = "Pulse: ${vitals.heartRateBpm?.let { "${it.roundToInt()} bpm" } ?: MISSING_VALUE}")
-    Text(text = "Body temperature: ${vitals.bodyTemperatureCelsius?.let { "%.1f °C".format(it) } ?: MISSING_VALUE}")
-    Text(text = "SpO2: ${vitals.spo2Percent?.let { "${it.roundToInt()} %" } ?: MISSING_VALUE}")
+    Text(text = stringResource(R.string.vital_pulse, vitals.heartRateBpm?.let { stringResource(R.string.bpm_int, it.roundToInt()) } ?: MISSING_VALUE))
+    Text(text = stringResource(R.string.vital_body_temperature, vitals.bodyTemperatureCelsius?.let { stringResource(R.string.celsius_value, it) } ?: MISSING_VALUE))
+    Text(text = stringResource(R.string.vital_spo2, vitals.spo2Percent?.let { stringResource(R.string.percent_spaced, it.roundToInt()) } ?: MISSING_VALUE))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FactorsCard(assessment: ReadinessAssessment, expanded: Boolean, onToggle: () -> Unit) = SectionCard("Factors") {
+private fun FactorsCard(assessment: ReadinessAssessment, expanded: Boolean, onToggle: () -> Unit) = SectionCard(stringResource(R.string.card_factors)) {
     val limiting = assessment.limitingFactors.size
     Text(
-        text = (if (limiting == 0) "Nothing limits you right now" else "$limiting limiting") + if (expanded) "  ▲" else "  ▼",
+        text = (if (limiting == 0) stringResource(R.string.nothing_limits) else stringResource(R.string.limiting_count, limiting)) + if (expanded) "  ▲" else "  ▼",
         style = MaterialTheme.typography.bodyMedium,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
     )
@@ -189,13 +337,13 @@ private fun FactorChip(factor: ReadinessFactor) {
     }
     AssistChip(
         onClick = {},
-        label = { Text(text = "${factor.kind.label}: ${factor.detail}$points") },
+        label = { Text(text = stringResource(R.string.factor_chip, stringResource(factor.kind.label), factor.detail.asString()) + points) },
         colors = AssistChipDefaults.assistChipColors(containerColor = container),
     )
 }
 
 @Composable
-private fun ForecastCard(hours: List<ReadinessForecastHour>) = SectionCard("Next hours") {
+private fun ForecastCard(hours: List<ReadinessForecastHour>) = SectionCard(stringResource(R.string.card_next_hours)) {
     val zone = ZoneId.systemDefault()
     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         hours.forEach { hour ->
@@ -213,15 +361,15 @@ private fun ForecastCard(hours: List<ReadinessForecastHour>) = SectionCard("Next
     val window = hours.dropWhile { !it.walkWindow }.takeWhile { it.walkWindow }
     Text(
         text = if (window.isEmpty()) {
-            "No favourable walking window expected in the next ${hours.size} hours."
+            stringResource(R.string.no_walk_window, hours.size)
         } else {
             val end = window.last().start.plusSeconds(SECONDS_PER_HOUR)
-            "Best walking window: ${WINDOW_FORMAT.format(window.first().start.atZone(zone))}-${WINDOW_FORMAT.format(end.atZone(zone))}"
+            stringResource(R.string.best_walk_window, WINDOW_FORMAT.format(window.first().start.atZone(zone)), WINDOW_FORMAT.format(end.atZone(zone)))
         },
         style = MaterialTheme.typography.bodyMedium,
     )
     Text(
-        text = "Projected from your medication timing, the hourly pulse profile, the morning pressure surge and the Kp forecast.",
+        text = stringResource(R.string.forecast_basis),
         style = MaterialTheme.typography.bodySmall,
     )
 }

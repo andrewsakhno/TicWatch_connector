@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.sand.ticwatch.phone.datalayer.WatchSyncRequester
 import org.sand.ticwatch.phone.health.BloodPressureLimits
 import org.sand.ticwatch.phone.health.BloodPressureMonitor
 import org.sand.ticwatch.phone.health.BloodPressureReading
@@ -15,12 +16,19 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import kotlin.time.Duration.Companion.seconds
+
+/** Runs after a new live cuff reading was stored. */
+fun interface CuffReadingFollowUp {
+    fun afterLiveReading()
+}
 
 /**
  * Stores each cuff result as a blood pressure reading plus its pulse (history + Health Connect, tagged with the cuff)
  * and recalibrates the wrist estimate with it when the watch has a heart rate within 5 min of it
  * ([BloodPressureMonitor.calibrateFromCuff]). Watch data reaches the phone in batches (<= 15 min apart), so a missing
- * heart rate is retried after each of [CALIBRATION_RETRY_DELAYS].
+ * heart rate first pulls the watch's buffer ([WatchSyncRequester]) and retries at once, then after each of
+ * [CALIBRATION_RETRY_DELAYS].
  *
  * The cuff clock is the reference, since [BiolandCuffClient] sets it on every connection: a reading is stamped with it
  * when it falls in [MAX_RECORD_AGE] .. now + [CLOCK_TOLERANCE]. Outside that the clock was lost (battery change before
@@ -30,6 +38,8 @@ import java.time.ZoneId
 class CuffReadingRecorder(
     private val monitor: BloodPressureMonitor,
     private val statusSink: CuffStatusSink,
+    private val watchSync: WatchSyncRequester,
+    private val followUp: CuffReadingFollowUp,
     private val scope: CoroutineScope,
     private val clock: Clock,
     private val zone: ZoneId,
@@ -63,17 +73,25 @@ class CuffReadingRecorder(
                     .onFailure { Log.w(TAG, "Failed to store cuff reading", it) }
                 true
             }
+            if (stored && live) followUp.afterLiveReading()
             if (stored) calibrate(systolic, diastolic, measuredAt)
         }
     }
 
     private suspend fun calibrate(systolic: Double, diastolic: Double, measuredAt: Instant) {
+        if (tryCalibrate(systolic, diastolic, measuredAt)) return
+        Log.i(TAG, "Watch sync for the cuff calibration: ${watchSync.syncNow(WATCH_SYNC_TIMEOUT)}")
         for (retryDelay in listOf(Duration.ZERO) + CALIBRATION_RETRY_DELAYS) {
             delay(retryDelay.toMillis())
-            val result = monitor.calibrateFromCuff(systolic, diastolic, measuredAt)
-            Log.i(TAG, "Calibration from cuff reading at $measuredAt: $result")
-            if (result != CalibrationResult.NoHeartRate) return
+            if (tryCalibrate(systolic, diastolic, measuredAt)) return
         }
+    }
+
+    /** False while the watch heart rate for [measuredAt] hasn't reached the phone yet. */
+    private suspend fun tryCalibrate(systolic: Double, diastolic: Double, measuredAt: Instant): Boolean {
+        val result = monitor.calibrateFromCuff(systolic, diastolic, measuredAt)
+        Log.i(TAG, "Calibration from cuff reading at $measuredAt: $result")
+        return result != CalibrationResult.NoHeartRate
     }
 
     override fun onDeviceInfo(info: BiolandFrame.DeviceInfo) =
@@ -93,5 +111,6 @@ class CuffReadingRecorder(
         val CLOCK_TOLERANCE: Duration = Duration.ofMinutes(10)
         val DUPLICATE_WINDOW: Duration = Duration.ofMinutes(3)
         val CALIBRATION_RETRY_DELAYS: List<Duration> = List(3) { Duration.ofMinutes(10) }
+        val WATCH_SYNC_TIMEOUT = 45.seconds
     }
 }

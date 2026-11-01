@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.dashboard
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
@@ -10,6 +11,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import org.sand.ticwatch.phone.R
+import org.sand.ticwatch.phone.insights.FatigueLevel
 import org.sand.ticwatch.phone.insights.HrvBaseline
 import org.sand.ticwatch.phone.insights.HrvStatusLevel
 import org.sand.ticwatch.phone.insights.LoadBalance
@@ -19,7 +22,7 @@ import org.sand.ticwatch.phone.insights.StressLevel
 import org.sand.ticwatch.phone.spaceweather.GeomagneticLevel
 
 /** One colored stretch of a [GaugeScale], covering values up to [upTo]. */
-data class GaugeBand(val label: String, val upTo: Double, val color: Color)
+data class GaugeBand(@StringRes val label: Int, val upTo: Double, val color: Color)
 
 /**
  * A value range split into colored [bands] (ascending [GaugeBand.upTo]), drawn by [ColorScaleBar].
@@ -30,6 +33,27 @@ class GaugeScale(val min: Double, val max: Double, val bands: List<GaugeBand>) {
     fun bandOf(value: Double): GaugeBand = bands.firstOrNull { value <= it.upTo } ?: bands.last()
 
     fun fraction(value: Double): Float = ((value - min) / (max - min)).coerceIn(0.0, 1.0).toFloat()
+
+    /**
+     * Gradient stops along the scale (0 = [min], 1 = [max]): each band's color is solid inside it and blends into
+     * the next one over [transition] value units centered on the shared edge.
+     */
+    fun gradientStops(transition: Double): Array<Pair<Float, Color>> {
+        var from = min
+        return bands.flatMap { band ->
+            val to = band.upTo.coerceAtMost(max)
+            val stops = if (to <= from) {
+                emptyList()
+            } else {
+                listOf(
+                    fraction(if (from == min) from else from + transition / 2) to band.color,
+                    fraction(if (to == max) to else to - transition / 2) to band.color,
+                )
+            }
+            from = maxOf(from, to)
+            stops
+        }.toTypedArray()
+    }
 }
 
 object GaugeColors {
@@ -63,6 +87,11 @@ object GaugeScales {
             GaugeBand(ReadinessStatus.NORMAL.label, ReadinessStatus.RECOVERED.minScore.toDouble(), GaugeColors.FAIR),
             GaugeBand(ReadinessStatus.RECOVERED.label, Double.POSITIVE_INFINITY, GaugeColors.GOOD),
         ),
+    )
+
+    val FATIGUE_INDEX = GaugeScale(
+        min = SCORE_MIN, max = SCORE_MAX,
+        bands = FatigueLevel.entries.map { level -> GaugeBand(level.label, level.maxPercent.toDouble(), fatigueColor(level)) },
     )
 
     /** Stress from RMSSD: higher vagal tone means lower stress. */
@@ -112,12 +141,18 @@ object GaugeScales {
         LoadBalance.VERY_HIGH -> GaugeColors.POOR
     }
 
+    private fun fatigueColor(level: FatigueLevel): Color = when (level) {
+        FatigueLevel.FRESH -> GaugeColors.GOOD
+        FatigueLevel.MODERATE -> GaugeColors.FAIR
+        FatigueLevel.PRONOUNCED, FatigueLevel.EXHAUSTED -> GaugeColors.POOR
+    }
+
     /** Morning bright-light minutes against the daily goal. */
     fun morningLight(goalMinutes: Double) = GaugeScale(
         min = 0.0, max = goalMinutes * LIGHT_SCALE_GOALS,
         bands = listOf(
-            GaugeBand("Below goal", goalMinutes, GaugeColors.FAIR),
-            GaugeBand("Goal reached", Double.POSITIVE_INFINITY, GaugeColors.GOOD),
+            GaugeBand(R.string.gauge_below_goal, goalMinutes, GaugeColors.FAIR),
+            GaugeBand(R.string.gauge_goal_reached, Double.POSITIVE_INFINITY, GaugeColors.GOOD),
         ),
     )
 
@@ -138,9 +173,9 @@ object GaugeScales {
     val SLEEP_HOURS = GaugeScale(
         min = SLEEP_MIN_HOURS, max = SLEEP_MAX_HOURS,
         bands = listOf(
-            GaugeBand("Short", SLEEP_SHORT_HOURS, GaugeColors.POOR),
-            GaugeBand("Fair", SLEEP_FAIR_HOURS, GaugeColors.FAIR),
-            GaugeBand("Good", Double.POSITIVE_INFINITY, GaugeColors.GOOD),
+            GaugeBand(R.string.gauge_short, SLEEP_SHORT_HOURS, GaugeColors.POOR),
+            GaugeBand(R.string.gauge_fair, SLEEP_FAIR_HOURS, GaugeColors.FAIR),
+            GaugeBand(R.string.gauge_good, Double.POSITIVE_INFINITY, GaugeColors.GOOD),
         ),
     )
 }

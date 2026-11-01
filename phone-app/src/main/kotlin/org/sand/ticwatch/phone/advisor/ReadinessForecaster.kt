@@ -10,8 +10,8 @@ import java.time.temporal.ChronoUnit
 data class ForecastContext(val heartRateNormByHour: Map<Int, Double>, val kpSlots: List<KpSlot>)
 
 /**
- * Antihypertensive effect as a share of its peak by hours since the morning dose (nebivolol / perindopril order of
- * magnitude): ramps up over [ONSET_HOURS], plateaus until [PLATEAU_END_HOURS], then fades to [TROUGH_SHARE] at 24 h.
+ * Antihypertensive effect as a share of its peak by hours since the logged morning intake (typical
+ * once-daily antihypertensive order of magnitude): ramps up over [ONSET_HOURS], plateaus until [PLATEAU_END_HOURS], then fades to [TROUGH_SHARE] at 24 h.
  */
 class MedicationEffectCurve {
 
@@ -35,7 +35,8 @@ class MedicationEffectCurve {
 /**
  * Projects the inputs to a later hour and re-scores them with the same engine: the medication's additional effect
  * since now lowers diastolic and the HR excess, the morning surge raises diastolic, the HR norm and Kp follow the
- * hour. The HR excess over the norm and the other signals are carried over unchanged. Heuristic.
+ * hour, fatigue creeps up through the evening. The HR excess over the norm and the other signals are carried over
+ * unchanged. Heuristic.
  */
 class ReadinessForecaster(
     private val engine: CardioReadinessEngine,
@@ -79,7 +80,17 @@ class ReadinessForecaster(
             // Keeps the reading's current age: a projected value stands in for it, so it must not age out mid-forecast.
             pressureMeasuredAt = inputs.pressureMeasuredAt?.plus(Duration.between(inputs.at, at)),
             kp = context.kpSlots.kpAt(at) ?: inputs.kp,
+            fatiguePercent = inputs.fatiguePercent?.let { (it + eveningFatigueRise(inputs.at, at)).coerceAtMost(MAX_FATIGUE_PERCENT) },
         )
+    }
+
+    /** Whole evening hours spent awake between [now] and [at]; sleep is not modelled, so the night reverts to the current value. */
+    private fun eveningFatigueRise(now: Instant, at: Instant): Int {
+        val local = at.atZone(zone)
+        if (local.hour !in EVENING_WAKING_HOURS) return 0
+        val eveningStart = local.withHour(EVENING_WAKING_HOURS.first).truncatedTo(ChronoUnit.HOURS).toInstant()
+        val awakeSince = if (eveningStart.isAfter(now)) eveningStart else now
+        return Duration.between(awakeSince, at).toHours().toInt() * FATIGUE_RISE_PERCENT_PER_HOUR
     }
 
     private fun hoursBetween(from: Instant, to: Instant): Double = Duration.between(from, to).toMinutes() / MINUTES_PER_HOUR
@@ -91,6 +102,9 @@ class ReadinessForecaster(
         const val HEART_RATE_RELIEF_BPM = 8.0
         const val MORNING_SURGE_MMHG = 5.0
         val MORNING_SURGE_HOURS = 6..9
+        val EVENING_WAKING_HOURS = 18..22
+        const val FATIGUE_RISE_PERCENT_PER_HOUR = 1
+        const val MAX_FATIGUE_PERCENT = 100
         val WALK_HOURS = 7..20
     }
 }

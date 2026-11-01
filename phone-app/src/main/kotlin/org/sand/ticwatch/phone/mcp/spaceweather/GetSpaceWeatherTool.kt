@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.mcp.spaceweather
 
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -10,17 +11,19 @@ import org.sand.ticwatch.phone.spaceweather.GeomagneticLevel
 import org.sand.ticwatch.phone.spaceweather.KpSlot
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherDay
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherStore
-import java.time.ZoneId
+import org.sand.ticwatch.phone.text.TextResolver
+import org.sand.ticwatch.phone.text.uiText
 
 /** The space weather the phone last fetched from NOAA SWPC (refreshed every 3 h). */
 class GetSpaceWeatherTool(
     private val store: SpaceWeatherStore,
     private val zone: ZoneId,
+    private val texts: TextResolver,
 ) : McpTool {
     override val name = "get_space_weather"
     override val description =
         "Geomagnetic and solar activity from NOAA SWPC, as last fetched by the phone (every 3 h; fetched_at says " +
-            "when). current: the planetary Kp (0-9) of the current 3-hour UTC slot. days: today + up to 5 local days " +
+            "when). current: the planetary Kp (0-9) of the current 3-hour UTC slot. days: today + up to 6 local days " +
             "with the day's max Kp, NOAA G-scale level (Kp >= 5 is a storm, G1-G5), F10.7 radio flux in sfu " +
             "(solar activity proxy, from the 27-day outlook) and forecast=false only for a fully observed day; days " +
             "4-5 come from the outlook's daily largest Kp only. slots: every 3-hour Kp NOAA returned (about the past " +
@@ -44,13 +47,13 @@ class GetSpaceWeatherTool(
         .put("start", slot.start.atZone(zone).toOffsetDateTime().toString())
         .put("kp", slot.kp)
         .put("origin", slot.origin.noaaName)
-        .put("level", GeomagneticLevel.of(slot.kp).label)
+        .put("level", texts.resolve(uiText(GeomagneticLevel.of(slot.kp).label)))
 
     private fun day(day: SpaceWeatherDay): JSONObject = JSONObject()
         .put("date", day.date.toString())
         .put("max_kp", day.maxKp)
-        .put("level", day.level.label)
+        .put("level", texts.resolve(uiText(day.level.label)))
         .put("radio_flux_sfu", day.radioFlux ?: JSONObject.NULL)
-        .put("solar_activity", day.solarActivity?.label ?: JSONObject.NULL)
+        .put("solar_activity", day.solarActivity?.let { texts.resolve(uiText(it.label)) } ?: JSONObject.NULL)
         .put("forecast", day.forecast)
 }

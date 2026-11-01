@@ -2,6 +2,7 @@ package org.sand.ticwatch.phone.transport
 
 import android.content.Context
 import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.flow.StateFlow
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
 
 /**
@@ -23,19 +24,37 @@ import org.sand.ticwatch.phone.sync.SyncStatusRepository
 object TransportFactory {
     /** Shared by every transport this factory builds: callers each create their own instance. */
     private val arbiter = LinkArbiter()
+    private val heldLink = HeldRfcommLink()
 
-    fun create(context: Context): DeviceLinkTransport = ArbitratedDeviceLinkTransport(
-        delegate = ProgressReportingDeviceLinkTransport(
-            delegate = FallbackDeviceLinkTransport(
-                primary = BluetoothClassicTransport(context),
-                fallback = DataLayerTransport(
-                    nodeClient = Wearable.getNodeClient(context),
-                    messageClient = Wearable.getMessageClient(context),
-                    channelClient = Wearable.getChannelClient(context),
-                ),
+    /** Process-wide hold on the phone->watch socket, for live sync. */
+    val linkHold: LinkHold get() = heldLink
+
+    val bulkTransferActive: StateFlow<Boolean> get() = arbiter.bulkActive
+
+    fun create(context: Context): DeviceLinkTransport {
+        val link = FallbackDeviceLinkTransport(
+            primary = BluetoothClassicTransport(context, heldLink),
+            fallback = DataLayerTransport(
+                nodeClient = Wearable.getNodeClient(context),
+                messageClient = Wearable.getMessageClient(context),
+                channelClient = Wearable.getChannelClient(context),
             ),
-            reporter = SyncStatusRepository,
-        ),
-        arbiter = arbiter,
-    )
+        )
+        return ArbitratedDeviceLinkTransport(
+            delegate = ProgressReportingDeviceLinkTransport(
+                delegate = LargePayloadRoutingTransport(
+                    large = FallbackDeviceLinkTransport(
+                        primary = WifiLanTransport(
+                            networks = ConnectivityWifiNetworkSource(context),
+                            endpoints = RfcommWifiEndpointRequester(context),
+                        ),
+                        fallback = link,
+                    ),
+                    regular = link,
+                ),
+                reporter = SyncStatusRepository,
+            ),
+            arbiter = arbiter,
+        )
+    }
 }

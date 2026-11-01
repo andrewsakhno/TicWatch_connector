@@ -6,4 +6,5 @@
     <color name="advisor_widget_background">#E61B1B1F</color>
     <color name="advisor_widget_text">#FFFFFFFF</color>
     <color name="advisor_widget_secondary_text">#B3FFFFFF</color>
+    <color name="advisor_widget_gauge_track">#33FFFFFF</color>
 </resources>

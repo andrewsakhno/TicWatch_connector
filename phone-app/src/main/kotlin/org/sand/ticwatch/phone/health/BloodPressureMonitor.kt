@@ -213,11 +213,18 @@ class BloodPressureMonitor(
      * Calibrates from a cuff reading taken at [measuredAt], but only if the watch has a heart rate within
      * [CUFF_SIGNAL_MAX_GAP] of it (no resting-HR fallback: the pair must describe the same moment) and the reading is
      * newer than the current calibration. Watch data arrives in batches, so NoHeartRate may just mean "not yet".
+     * [liveHeartRate] (the watch's on-screen reading) is preferred when it is fresh, see [WristSignalsReader.current].
      */
-    suspend fun calibrateFromCuff(systolic: Double, diastolic: Double, measuredAt: Instant): CalibrationResult {
+    suspend fun calibrateFromCuff(
+        systolic: Double,
+        diastolic: Double,
+        measuredAt: Instant,
+        liveHeartRate: HeartRateReading? = null,
+    ): CalibrationResult {
         if (!BloodPressureLimits.isPlausible(systolic, diastolic)) return CalibrationResult.Implausible
         if (calibration()?.calibratedAt?.isBefore(measuredAt) == false) return CalibrationResult.Outdated
-        val current = signals.current(measuredAt.plus(CUFF_SIGNAL_MAX_GAP))
+        val signalsAt = minOf(clock.instant(), measuredAt.plus(CUFF_SIGNAL_MAX_GAP))
+        val current = signals.current(signalsAt, liveHeartRate)
             ?.takeIf { Duration.between(measuredAt, it.heartRateAt).abs() <= CUFF_SIGNAL_MAX_GAP }
             ?: return CalibrationResult.NoHeartRate
         return store(systolic, diastolic, current.heartRate, current, measuredAt)
@@ -252,10 +259,23 @@ class BloodPressureMonitor(
         return BloodPressureMeasurement.Estimated(estimator.estimate(calibration, current, now), current)
     }
 
-    /** [measure], then saves an estimate straight to the log (a measurement started on the watch has no Save step). */
+    /**
+     * [measure], then saves an estimate straight to the log (a measurement started on the watch has no Save step).
+     * A cuff reading of the last [CUFF_SIGNAL_MAX_GAP] that the calibration doesn't include yet (its watch heart rate
+     * was still in the watch's buffer) is applied first, paired with [liveHeartRate].
+     */
     override suspend fun measureAndSave(liveHeartRate: HeartRateReading?): SavedMeasurement {
+        calibrateFromRecentCuff(liveHeartRate)
         val measurement = measure(liveHeartRate)
         return SavedMeasurement(measurement, (measurement as? BloodPressureMeasurement.Estimated)?.let { log.save(it.reading) })
+    }
+
+    private suspend fun calibrateFromRecentCuff(liveHeartRate: HeartRateReading?) {
+        val now = clock.instant()
+        val cuff = log.readings(now.minus(CUFF_SIGNAL_MAX_GAP), now.plusMillis(1))
+            .lastOrNull { it.source == SampleSource.BLOOD_PRESSURE_CUFF }
+            ?: return
+        calibrateFromCuff(cuff.systolic, cuff.diastolic, cuff.measuredAt, liveHeartRate)
     }
 
     override suspend fun recent(limit: Int): List<BloodPressureReading> {

@@ -1,10 +1,12 @@
 package org.sand.ticwatch.phone.insights
 
+import androidx.annotation.StringRes
+import java.time.Duration
+import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.health.SleepStageType
 import org.sand.ticwatch.phone.insights.ScoreCurves.linear
 import org.sand.ticwatch.phone.insights.ScoreCurves.plateau
-import java.time.Duration
-import kotlin.math.roundToInt
 
 /** One weighted part of the [SleepScore]; [key] is how the MCP tool reports it. */
 enum class SleepScoreComponent(val key: String, val weight: Double) {
@@ -56,11 +58,11 @@ data class SleepScoreInputs(
 data class SleepScore(val score: Int, val components: Map<SleepScoreComponent, Double>, val inputs: SleepScoreInputs)
 
 /** Sleep score bands; [minScore] is where each starts. */
-enum class SleepQuality(val label: String, val minScore: Int) {
-    EXCELLENT("Excellent", 90),
-    GOOD("Good", 80),
-    FAIR("Fair", 60),
-    POOR("Poor", 0);
+enum class SleepQuality(@StringRes val label: Int, val minScore: Int) {
+    EXCELLENT(R.string.sleep_quality_excellent, 90),
+    GOOD(R.string.sleep_quality_good, 80),
+    FAIR(R.string.sleep_quality_fair, 60),
+    POOR(R.string.sleep_quality_poor, 0);
 
     companion object {
         fun of(score: Int): SleepQuality = entries.first { score >= it.minScore }

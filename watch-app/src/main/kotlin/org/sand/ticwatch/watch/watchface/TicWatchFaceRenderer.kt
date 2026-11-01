@@ -14,6 +14,9 @@ import androidx.wear.watchface.DrawMode
 import androidx.wear.watchface.Renderer
 import androidx.wear.watchface.WatchState
 import androidx.wear.watchface.style.CurrentUserStyleRepository
+import kotlinx.coroutines.flow.StateFlow
+import org.sand.ticwatch.watch.readiness.CardioReadinessSnapshot
+import org.sand.ticwatch.watch.readiness.readinessValueColor
 import org.sand.ticwatch.watch.sensors.LatestReadings
 import org.sand.ticwatch.watch.sensors.SensorType
 import java.time.ZonedDateTime
@@ -24,7 +27,7 @@ import kotlin.math.sin
 
 /**
  * Draws the face: a dial of minute ticks with a gradient seconds arc, the time and date in the
- * middle, and heart rate / ambient temperature side by side below. Every size is a fraction of
+ * middle, and heart rate / cardio readiness / ambient temperature side by side below. Every size is a fraction of
  * the dial radius, so the layout scales to any round screen. Paints are allocated once; only
  * their colours change per frame.
  */
@@ -33,6 +36,7 @@ class TicWatchFaceRenderer(
     watchState: WatchState,
     currentUserStyleRepository: CurrentUserStyleRepository,
     private val readings: LatestReadings,
+    private val cardioReadiness: StateFlow<CardioReadinessSnapshot?>,
     private val is24Hour: () -> Boolean,
 ) : Renderer.CanvasRenderer2<TicWatchFaceRenderer.Assets>(
     surfaceHolder,
@@ -74,7 +78,7 @@ class TicWatchFaceRenderer(
         drawTicks(canvas, cx, cy, radius, palette)
         if (!ambient) drawSecondsArc(canvas, cx, cy, radius, zonedDateTime)
         drawTimeAndDate(canvas, cx, cy, radius, zonedDateTime, palette)
-        drawReadings(canvas, cx, cy, radius, palette)
+        drawReadings(canvas, cx, cy, radius, zonedDateTime, palette)
     }
 
     override fun renderHighlightLayer(canvas: Canvas, bounds: Rect, zonedDateTime: ZonedDateTime, sharedAssets: Assets) {
@@ -117,7 +121,7 @@ class TicWatchFaceRenderer(
         val arcRadius = radius * ARC_RADIUS
         arcPaint.strokeWidth = radius * ARC_WIDTH
         arcBounds.set(cx - arcRadius, cy - arcRadius, cx + arcRadius, cy + arcRadius)
-        val seconds = time.second + time.nano / NANOS_PER_SECOND
+        val seconds = time.second.toDouble()
         canvas.save()
         // The sweep gradient starts at 3 o'clock; rotate so both it and the arc start at 12.
         canvas.rotate(ARC_START_DEGREES, cx, cy)
@@ -138,9 +142,13 @@ class TicWatchFaceRenderer(
         canvas.drawText(time.format(DATE).uppercase(Locale.getDefault()), cx, cy - radius * DATE_RAISE, datePaint)
     }
 
-    private fun drawReadings(canvas: Canvas, cx: Float, cy: Float, radius: Float, palette: WatchFacePalette) {
+    private fun drawReadings(
+        canvas: Canvas, cx: Float, cy: Float, radius: Float, now: ZonedDateTime, palette: WatchFacePalette,
+    ) {
         val heartRate = ReadingText.heartRate(readings)
         val ambient = ReadingText.ambientTemperature(readings)
+        val snapshot = cardioReadiness.value
+        val score = snapshot?.score
 
         val glyphY = cy + radius * GLYPH_DROP
         val glyphSize = radius * GLYPH_SIZE
@@ -148,15 +156,21 @@ class TicWatchFaceRenderer(
         glyphPaint.strokeWidth = radius * GLYPH_STROKE
         glyphPaint.color = palette.heart
         ReadingGlyphs.drawHeart(canvas, cx - radius * READING_SPREAD, glyphY, glyphSize, glyphPaint)
+        glyphPaint.color = palette.readiness
+            ?: readinessValueColor(score, snapshot?.isStale(now.toInstant().toEpochMilli()) ?: true, palette.label)
+        ReadingGlyphs.drawBolt(canvas, cx, glyphY, glyphSize, glyphPaint)
         glyphPaint.color = palette.thermometer
         ReadingGlyphs.drawThermometer(canvas, cx + radius * READING_SPREAD, glyphY, glyphSize, glyphPaint)
 
         drawReading(canvas, cx - radius * READING_SPREAD, cy, radius, heartRate, ReadingText.HEART_RATE_UNIT, palette)
+        drawReading(canvas, cx, cy, radius, score?.text ?: ReadingText.NO_VALUE, ReadingText.READINESS_UNIT, palette)
         drawReading(canvas, cx + radius * READING_SPREAD, cy, radius, ambient, ReadingText.TEMPERATURE_UNIT, palette)
 
         tickPaint.color = palette.divider
         tickPaint.strokeWidth = radius * MINUTE_TICK_WIDTH
-        canvas.drawLine(cx, cy + radius * DIVIDER_TOP, cx, cy + radius * DIVIDER_BOTTOM, tickPaint)
+        val dividerOffset = radius * READING_SPREAD / 2
+        canvas.drawLine(cx - dividerOffset, cy + radius * DIVIDER_TOP, cx - dividerOffset, cy + radius * DIVIDER_BOTTOM, tickPaint)
+        canvas.drawLine(cx + dividerOffset, cy + radius * DIVIDER_TOP, cx + dividerOffset, cy + radius * DIVIDER_BOTTOM, tickPaint)
     }
 
     private fun drawReading(
@@ -176,8 +190,8 @@ class TicWatchFaceRenderer(
     }
 
     private companion object {
-        /** The seconds arc moves smoothly at ~15 fps; ambient mode redraws once a minute regardless. */
-        const val FRAME_PERIOD_MS = 66L
+        /** The seconds arc ticks once a second; ambient mode redraws once a minute regardless. */
+        const val FRAME_PERIOD_MS = 1_000L
 
         const val TIME_FONT = "sans-serif-thin"
         const val VALUE_FONT = "sans-serif-condensed"
@@ -206,7 +220,6 @@ class TicWatchFaceRenderer(
         const val ARC_START_DEGREES = -90f
         const val FULL_CIRCLE = 360.0
         const val SECONDS_PER_MINUTE = 60.0
-        const val NANOS_PER_SECOND = 1_000_000_000.0
 
         const val GLOW_OFFSET = 0.15f
         const val GLOW_REACH = 0.75f
@@ -217,7 +230,7 @@ class TicWatchFaceRenderer(
         const val DATE_RAISE = 0.36f
         const val DATE_LETTER_SPACING = 0.12f
 
-        const val READING_SPREAD = 0.3f
+        const val READING_SPREAD = 0.38f
         const val GLYPH_DROP = 0.3f
         const val GLYPH_SIZE = 0.12f
         const val GLYPH_STROKE = 0.012f

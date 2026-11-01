@@ -4,8 +4,9 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** User-selectable transfer-history retention periods. */
+/** User-selectable transfer-history retention periods; short ones rely on the cloud server keeping the rest. */
 enum class HistoryRetention(val days: Long) {
+    ONE_DAY(1),
     THREE_DAYS(3),
     SEVEN_DAYS(7),
     FIFTEEN_DAYS(15),
@@ -44,6 +45,7 @@ private const val PREFS_NAME = "sensor_history_settings"
 object HistorySettingKeys {
     const val RETENTION = "retention"
     const val SLEEP_SESSION_RETENTION = "sleep_session_retention"
+    const val ECG_RETENTION = "ecg_retention"
 }
 
 /** Enum-valued [SettingStore] over SharedPreferences; every access hops to [Dispatchers.IO] (first read hits disk). */

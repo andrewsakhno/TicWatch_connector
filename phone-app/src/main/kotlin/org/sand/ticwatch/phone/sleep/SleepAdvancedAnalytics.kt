@@ -6,6 +6,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Collections
 import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.health.SampleSource
 import org.sand.ticwatch.phone.health.SampleWindowReader
@@ -234,6 +235,7 @@ data class SleepNightData(
     val rmssd: List<SensorSample>,
     val eveningSkinTemperature: List<SensorSample>,
     val odiPerHour: Double?,
+    val snoringMinutes: Double?,
     val nightRmssdMs: Double?,
     val dayRmssdMs: Double?,
 )
@@ -246,6 +248,7 @@ data class SleepAdvancedInsights(
     val recovery: VagalRecovery?,
     val vasodilationAt: Instant?,
     val odiPerHour: Double?,
+    val snoringMinutes: Double?,
     val apneaRisk: ApneaRiskLevel,
 )
 
@@ -269,6 +272,7 @@ class SleepAdvancedAnalytics(
             recovery = recovery.calculate(night.nightRmssdMs, night.dayRmssdMs),
             vasodilationAt = vasodilation.detect(night.eveningSkinTemperature, sleepContinuity?.onset ?: night.session.start),
             odiPerHour = night.odiPerHour,
+            snoringMinutes = night.snoringMinutes,
             apneaRisk = apnea.classify(night.odiPerHour, arousal),
         )
     }
@@ -277,6 +281,39 @@ class SleepAdvancedAnalytics(
 /** The latest night's vagal recovery, for the Advisor badge (ISP: the screen needs nothing else). */
 fun interface VagalRecoverySource {
     suspend fun lastNightRecovery(): VagalRecovery?
+}
+
+/** Advanced analytics of one given session, for the sleep cards (ISP: they need nothing else). */
+fun interface SleepNightInsightsSource {
+    suspend fun night(session: SleepSession): SleepAdvancedInsights
+}
+
+/**
+ * Keeps the insights of nights that ended over [settleAfter] ago: their summaries have arrived by then, and every
+ * history change re-reads the journal's latest span (every few seconds during live sync).
+ */
+class SettledNightInsightsCache(
+    private val delegate: SleepNightInsightsSource,
+    private val clock: Clock,
+    private val settleAfter: Duration = Duration.ofHours(24),
+    private val capacity: Int = 128,
+) : SleepNightInsightsSource {
+    private val settled = Collections.synchronizedMap(
+        object : LinkedHashMap<SleepSession, SleepAdvancedInsights>(capacity, LOAD_FACTOR, true) {
+            override fun removeEldestEntry(eldest: Map.Entry<SleepSession, SleepAdvancedInsights>): Boolean = size > capacity
+        },
+    )
+
+    override suspend fun night(session: SleepSession): SleepAdvancedInsights {
+        settled[session]?.let { return it }
+        val insights = delegate.night(session)
+        if (session.end.isBefore(clock.instant().minus(settleAfter))) settled[session] = insights
+        return insights
+    }
+
+    private companion object {
+        const val LOAD_FACTOR = 0.75f
+    }
 }
 
 /**
@@ -292,9 +329,9 @@ class SleepAdvancedInsightsReader(
     private val analytics: SleepAdvancedAnalytics,
     private val clock: Clock,
     private val zone: ZoneId,
-) : VagalRecoverySource {
+) : VagalRecoverySource, SleepNightInsightsSource {
 
-    suspend fun night(session: SleepSession): SleepAdvancedInsights {
+    override suspend fun night(session: SleepSession): SleepAdvancedInsights {
         val nightStages = stages.sleepStages(session.start, session.end)
         val onset = nightStages.filter { it.type != SleepStageType.AWAKE }.minOfOrNull { it.start } ?: session.start
         val nightSamples = samples.samples(NIGHT_TYPES, session.start, session.end, emptyList())
@@ -309,6 +346,7 @@ class SleepAdvancedInsightsReader(
                 rmssd = of(SensorType.HRV_RMSSD),
                 eveningSkinTemperature = skin,
                 odiPerHour = of(SensorType.OXYGEN_DESATURATION_INDEX).lastOrNull()?.value,
+                snoringMinutes = of(SensorType.SNORING_DURATION).lastOrNull()?.value,
                 nightRmssdMs = rmssdMean(session.start, session.end),
                 dayRmssdMs = daytimeWindow(session.start)?.let { (from, to) -> rmssdMean(from, to) },
             ),
@@ -369,7 +407,9 @@ class SleepAdvancedInsightsReader(
         val MAX_SESSION: Duration = Duration.ofHours(16)
         val MIN_NIGHT: Duration = Duration.ofHours(3)
         val LATEST_LOOKBACK: Duration = Duration.ofDays(3)
-        val NIGHT_TYPES = setOf(SensorType.SNORING, SensorType.HEART_RATE, SensorType.HRV_RMSSD, SensorType.OXYGEN_DESATURATION_INDEX)
+        val NIGHT_TYPES = setOf(
+            SensorType.SNORING, SensorType.SNORING_DURATION, SensorType.HEART_RATE, SensorType.HRV_RMSSD, SensorType.OXYGEN_DESATURATION_INDEX,
+        )
         val SKIN_TYPES = setOf(SensorType.SKIN_TEMPERATURE)
     }
 }

@@ -21,22 +21,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.sand.ticwatch.phone.datalayer.WATCH_APP_PACKAGE_NAME
-import org.sand.ticwatch.phone.datalayer.WatchNode
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.sand.ticwatch.phone.ui.rememberStore
 
 /**
  * Lets the user pick a watch-app APK from local storage and push it to a paired watch
@@ -46,40 +41,36 @@ import java.io.File
 @Composable
 fun SettingsScreen(appContainer: AppContainer) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
-    var watches by remember { mutableStateOf<List<WatchNode>>(emptyList()) }
-    var selectedWatchId by remember { mutableStateOf<String?>(null) }
-    var selectedApkUri by remember { mutableStateOf<Uri?>(null) }
-    var isUpdating by remember { mutableStateOf(false) }
-    var statusMessage by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        watches = appContainer.watchAppManager.listPairedWatches()
+    val store = rememberStore(appContainer) { scope, io ->
+        WatchAppUpdateStore(appContainer.watchAppManager, { uri -> copyUriToCacheFile(context, uri) }, scope, io)
     }
+    val state by store.state.collectAsState()
+    val watches = state.watches
+    val selectedWatchId = state.selectedWatchId
+    val selectedApkUri = state.selectedApkUri
 
     val pickApkLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        selectedApkUri = uri
-        statusMessage = null
-    }
+        onResult = store::selectApk,
+    )
 
     Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Text(text = "Settings", style = MaterialTheme.typography.headlineSmall)
+        Text(text = stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(16.dp))
+        LanguageSettingsSection(appContainer)
+        Spacer(modifier = Modifier.height(24.dp))
 
-        Text(text = "Watch-app APK", style = MaterialTheme.typography.titleMedium)
+        Text(text = stringResource(R.string.watch_app_apk), style = MaterialTheme.typography.titleMedium)
         Button(onClick = { pickApkLauncher.launch(arrayOf("application/vnd.android.package-archive")) }) {
-            Text(text = "Select APK")
+            Text(text = stringResource(R.string.select_apk))
         }
-        Text(text = selectedApkUri?.lastPathSegment ?: "No APK selected")
+        Text(text = selectedApkUri?.lastPathSegment ?: stringResource(R.string.no_apk_selected))
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(text = "Target watch", style = MaterialTheme.typography.titleMedium)
+        Text(text = stringResource(R.string.target_watch), style = MaterialTheme.typography.titleMedium)
         if (watches.isEmpty()) {
-            Text(text = "No paired watches found.")
+            Text(text = stringResource(R.string.no_paired_watches))
         } else {
             Column(modifier = Modifier.selectableGroup()) {
                 watches.forEach { watch ->
@@ -88,14 +79,14 @@ fun SettingsScreen(appContainer: AppContainer) {
                             .fillMaxWidth()
                             .selectable(
                                 selected = watch.id == selectedWatchId,
-                                onClick = { selectedWatchId = watch.id },
+                                onClick = { store.selectWatch(watch.id) },
                             )
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = watch.id == selectedWatchId, onClick = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "${watch.displayName} (${if (watch.isNearby) "nearby" else "reachable"})")
+                        Text(text = stringResource(if (watch.isNearby) R.string.watch_nearby else R.string.watch_reachable, watch.displayName))
                     }
                 }
             }
@@ -104,37 +95,25 @@ fun SettingsScreen(appContainer: AppContainer) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            enabled = selectedApkUri != null && selectedWatchId != null && !isUpdating,
-            onClick = {
-                val apkUri = selectedApkUri ?: return@Button
-                val watchId = selectedWatchId ?: return@Button
-                isUpdating = true
-                statusMessage = null
-                coroutineScope.launch {
-                    val result = runCatching {
-                        val stagedApk = copyUriToCacheFile(context, apkUri)
-                        appContainer.watchAppManager.installApp(watchId, stagedApk, WATCH_APP_PACKAGE_NAME).getOrThrow()
-                    }
-                    isUpdating = false
-                    statusMessage = if (result.isSuccess) {
-                        "Watch app updated."
-                    } else {
-                        "Update failed: ${result.exceptionOrNull()?.message}"
-                    }
-                }
-            },
+            enabled = state.canUpdate,
+            onClick = store::update,
         ) {
-            Text(text = "Update app on watch")
+            Text(text = stringResource(R.string.update_app_on_watch))
         }
 
-        if (isUpdating) {
+        if (state.updating) {
             Spacer(modifier = Modifier.height(8.dp))
             CircularProgressIndicator()
         }
 
-        statusMessage?.let {
+        state.outcome?.let { outcome ->
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = it)
+            Text(
+                text = when (outcome) {
+                    WatchAppUpdateOutcome.Updated -> stringResource(R.string.watch_app_updated)
+                    is WatchAppUpdateOutcome.Failed -> stringResource(R.string.watch_app_update_failed, outcome.reason.orEmpty())
+                },
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -144,6 +123,8 @@ fun SettingsScreen(appContainer: AppContainer) {
 
         Spacer(modifier = Modifier.height(24.dp))
         HistorySettingsSection(appContainer)
+        Spacer(modifier = Modifier.height(24.dp))
+        CloudSettingsSection(appContainer)
     }
 }
 

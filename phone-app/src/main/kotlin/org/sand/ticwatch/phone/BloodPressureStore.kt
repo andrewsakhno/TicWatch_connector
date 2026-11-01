@@ -134,7 +134,7 @@ class BloodPressureStore(
 
     private fun reload() {
         loadJob?.cancel()
-        loadJob = launchIo(::read) { result ->
+        loadJob = launchLocalFirstRead(::read) { result ->
             result.onSuccess { read ->
                 setState {
                     it.copy(

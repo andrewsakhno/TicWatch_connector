@@ -1,12 +1,14 @@
 package org.sand.ticwatch.watch.autoworkout
 
 import android.content.Context
+import androidx.annotation.StringRes
+import org.sand.ticwatch.watch.R
 
 /** What happens when a long brisk walk is detected. */
-enum class AutoWorkoutMode(val key: String, val label: String) {
-    OFF("off", "Off"),
-    ASK("ask", "Ask first"),
-    AUTO("auto", "Automatic");
+enum class AutoWorkoutMode(val key: String, @StringRes val label: Int) {
+    OFF("off", R.string.auto_workout_off),
+    ASK("ask", R.string.auto_workout_ask),
+    AUTO("auto", R.string.auto_workout_auto);
 
     /** The mode a tap on the setting switches to. */
     fun next(): AutoWorkoutMode = entries[(ordinal + 1) % entries.size]

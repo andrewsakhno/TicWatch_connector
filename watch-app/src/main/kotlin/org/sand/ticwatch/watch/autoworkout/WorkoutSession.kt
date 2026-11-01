@@ -14,6 +14,7 @@ import androidx.health.services.client.getCurrentExerciseInfo
 import androidx.health.services.client.startExercise
 import java.time.Duration
 import java.time.Instant
+import org.sand.ticwatch.watch.sensors.SensorType
 
 /** Who runs the watch's current Health Services workout, if anyone. */
 enum class WorkoutOwner { NONE, THIS_APP, OTHER_APP }
@@ -81,11 +82,16 @@ class AutoWorkoutStartLedger(
         preferences.edit().putLong(KEY_WALK_START, walkStart.toEpochMilli()).apply()
     }
 
+    /** The session's type for [info], which [sessionStart] consumes: read this first. */
+    fun sessionType(info: UserActivityInfo): SensorType = if (isAutomatic(info)) SensorType.AUTO_EXERCISE else SensorType.EXERCISE
+
+    private fun isAutomatic(info: UserActivityInfo): Boolean =
+        info.exerciseInfo?.exerciseTrackedStatus == ExerciseTrackedStatus.OWNED_EXERCISE_IN_PROGRESS && preferences.contains(KEY_WALK_START)
+
     /** Session start for [info]: the recorded walk start for this app's own workout, else the state change. */
     fun sessionStart(info: UserActivityInfo): Instant {
         val stateChange = info.stateChangeTime
-        if (info.exerciseInfo?.exerciseTrackedStatus != ExerciseTrackedStatus.OWNED_EXERCISE_IN_PROGRESS) return stateChange
-        if (!preferences.contains(KEY_WALK_START)) return stateChange
+        if (!isAutomatic(info)) return stateChange
         val walkStart = Instant.ofEpochMilli(preferences.getLong(KEY_WALK_START, 0L))
         preferences.edit().remove(KEY_WALK_START).apply()
         val backdate = Duration.between(walkStart, stateChange)

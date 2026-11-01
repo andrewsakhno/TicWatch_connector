@@ -12,7 +12,8 @@ import java.util.UUID
  * Each send opens a fresh RFCOMM socket, writes `path` (UTF), then `length` (unused by
  * the reader - the payload simply runs to end-of-stream when the sender closes the
  * socket), then the payload bytes, then waits for the receiver's one-byte [ACK]/[NACK]
- * reply before closing. One socket carries exactly one payload.
+ * reply. A sender normally closes the socket then; one holding the link ([HeldRfcommLink], live sync) writes its
+ * next frame on the same socket instead, so a receiver keeps reading frames until the socket closes.
  *
  * Large phone->watch payloads (APKs, > [RESUMABLE_THRESHOLD]) use the resumable frame
  * instead, so a dropped link costs one chunk rather than the whole transfer:
@@ -28,6 +29,13 @@ import java.util.UUID
  * A receiver that predates this frame treats the marker as an empty unknown message and
  * replies a plain [ACK] instead of [RESUME_READY]; the sender then falls back to the
  * one-shot frame.
+ *
+ * Wi-Fi link, phone->watch payloads over [RESUMABLE_THRESHOLD] only: the phone sends the legacy
+ * header with path [WIFI_OFFER_FRAME_PATH] over RFCOMM; the watch brings up Wi-Fi and replies
+ * [WIFI_READY] + host (UTF) + port (int) + a session key of [WIFI_KEY_BYTES], or [NACK] when it
+ * can't. An older watch replies a plain [ACK], which means the same. The phone then runs the
+ * resumable frame over TCP to that endpoint inside `SealedLinkStreams`; the partial file is shared
+ * with RFCOMM, so a dropped Wi-Fi transfer resumes over Bluetooth.
  */
 object TransportProtocol {
     val SERVICE_UUID: UUID = UUID.fromString("7b1e6b9e-6e0a-4c9b-9e2e-6a2a2f7a9b10")
@@ -59,6 +67,15 @@ object TransportProtocol {
 
     /** Chunk size that terminates a resumable payload. */
     const val END_OF_CHUNKS = 0
+
+    /** Legacy-header path asking the watch to open its Wi-Fi link. */
+    const val WIFI_OFFER_FRAME_PATH = "/transport/wifi-offer/v1"
+
+    /** Reply to a Wi-Fi offer, followed by the endpoint and key. */
+    const val WIFI_READY: Int = 3
+
+    /** AES-256 session key of the Wi-Fi link. */
+    const val WIFI_KEY_BYTES = 32
 
     /** Finds the bonded device that looks like the phone (major device class = Phone). */
     fun findBondedPhone(adapter: BluetoothAdapter): BluetoothDevice? =

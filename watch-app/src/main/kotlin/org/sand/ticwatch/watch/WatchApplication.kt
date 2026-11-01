@@ -9,11 +9,14 @@ import kotlinx.coroutines.launch
 import org.sand.ticwatch.watch.logging.LogCaptureController
 import org.sand.ticwatch.watch.logging.LogcatFileRecorder
 import org.sand.ticwatch.watch.logging.RotatingLogStore
+import org.sand.ticwatch.watch.settings.LocaleManagerAppLocaleApplier
 import org.sand.ticwatch.watch.settings.SharedPreferencesWatchSettingsStore
+import org.sand.ticwatch.watch.settings.WatchLanguageFollower
 
 /**
  * Records crashes from the start; the full on-watch log capture (for the debug bridge) runs only while the
- * user's "Log capture" setting is on, since a continuously running logcat reader costs battery.
+ * user's "Log capture" setting is on, since a continuously running logcat reader costs battery. The app language
+ * follows the one picked on the phone.
  */
 class WatchApplication : Application() {
 
@@ -26,6 +29,7 @@ class WatchApplication : Application() {
         scope.launch {
             val settings = SharedPreferencesWatchSettingsStore.get(this@WatchApplication).settings
             LogCaptureController(recorder, settings.map { it.logCapture }).bind(scope)
+            WatchLanguageFollower(settings.map { it.language }, LocaleManagerAppLocaleApplier(this@WatchApplication)).bind(scope)
         }
     }
 }

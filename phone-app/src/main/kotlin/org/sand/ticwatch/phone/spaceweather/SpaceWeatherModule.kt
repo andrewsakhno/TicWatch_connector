@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.sand.ticwatch.phone.datalayer.WatchSpaceWeatherPublisher
 import org.sand.ticwatch.phone.history.SensorHistoryModule
+import org.sand.ticwatch.phone.text.ResourcesTextResolver
+import org.sand.ticwatch.phone.text.TextResolver
 import org.sand.ticwatch.phone.transport.DeviceLinkTransport
 import org.sand.ticwatch.phone.transport.TransportFactory
 
@@ -14,8 +16,8 @@ object SpaceWeatherModule {
 
     fun store(context: Context): SpaceWeatherStore = SharedPreferencesSpaceWeatherStore(context)
 
-    fun publisher(store: SpaceWeatherStore, transport: DeviceLinkTransport): WatchSpaceWeatherPublisher =
-        WatchSpaceWeatherPublisher(store, transport, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+    fun publisher(store: SpaceWeatherStore, transport: DeviceLinkTransport, texts: TextResolver): WatchSpaceWeatherPublisher =
+        WatchSpaceWeatherPublisher(store, transport, CoroutineScope(SupervisorJob() + Dispatchers.IO), texts)
 
     fun refresher(context: Context): SpaceWeatherRefresher {
         val store = store(context)
@@ -27,7 +29,7 @@ object SpaceWeatherModule {
                 SensorHistoryModule.clock,
             ),
             store = store,
-            publisher = publisher(store, TransportFactory.create(context)),
+            publisher = publisher(store, TransportFactory.create(context), ResourcesTextResolver { context.applicationContext.resources }),
             alerter = GeomagneticAlerter(
                 GeomagneticAlertPolicy(),
                 SharedPreferencesGeomagneticAlertLedger(context),

@@ -35,9 +35,9 @@ interface EcgRecordingDao {
     @Query("SELECT * FROM ecg_recording ORDER BY started_at DESC")
     suspend fun newestFirst(): List<EcgRecordingEntity>
 
-    /** Deletes strips started before [beforeMs] the cloud holds, and any started before [unsyncedBeforeMs]. */
-    @Query("DELETE FROM ecg_recording WHERE started_at < :beforeMs AND (cloud_synced = 1 OR started_at < :unsyncedBeforeMs)")
-    suspend fun deleteBefore(beforeMs: Long, unsyncedBeforeMs: Long): Int
+    /** Deletes strips started before [beforeMs] the cloud holds, and those it doesn't unless [keepUnsynced]. */
+    @Query("DELETE FROM ecg_recording WHERE started_at < :beforeMs AND (cloud_synced = 1 OR :keepUnsynced = 0)")
+    suspend fun deleteBefore(beforeMs: Long, keepUnsynced: Boolean): Int
 
     @Query("SELECT * FROM ecg_recording WHERE cloud_synced = 0 ORDER BY id LIMIT :limit")
     suspend fun pendingUpload(limit: Int): List<EcgRecordingEntity>
@@ -61,8 +61,8 @@ interface EcgRecordingLog {
 
     suspend fun delete(id: Long)
 
-    /** Deletes recordings started before [cutoff] the cloud holds, and any before [unsyncedCutoff]; returns how many. */
-    suspend fun purgeBefore(cutoff: Instant, unsyncedCutoff: Instant): Int
+    /** Deletes recordings started before [cutoff] the cloud holds, and those it doesn't unless [keepUnsynced]; returns how many. */
+    suspend fun purgeBefore(cutoff: Instant, keepUnsynced: Boolean): Int
 }
 
 /** [EcgRecordingLog] and its [CloudOutbox] over the `ecg_recording` table of `cardio.db`. */
@@ -91,8 +91,8 @@ class RoomEcgRecordingLog(private val dao: EcgRecordingDao) : EcgRecordingLog, C
         dao.delete(id)
     }
 
-    override suspend fun purgeBefore(cutoff: Instant, unsyncedCutoff: Instant): Int =
-        dao.deleteBefore(cutoff.toEpochMilli(), unsyncedCutoff.toEpochMilli())
+    override suspend fun purgeBefore(cutoff: Instant, keepUnsynced: Boolean): Int =
+        dao.deleteBefore(cutoff.toEpochMilli(), keepUnsynced)
 
     override suspend fun pendingUpload(limit: Int): List<EcgRecordingEntity> = dao.pendingUpload(limit)
 
@@ -112,6 +112,6 @@ class EcgRecordingPurger(
 ) {
     suspend fun purge(): Int {
         val cutoff = clock.instant().minus(Duration.ofDays(retention.get().days))
-        return log.purgeBefore(cutoff, cloudHold.unsyncedCutoff(cutoff))
+        return log.purgeBefore(cutoff, cloudHold.keepsUnsynced())
     }
 }

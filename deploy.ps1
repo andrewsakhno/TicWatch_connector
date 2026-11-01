@@ -39,8 +39,8 @@ $PushAttempts = 3
 $PushRetryDelaySec = 3
 
 $Apps = @(
-    @{ Name = 'phone'; Dir = 'phone-app'; Apk = 'phone-app\build\outputs\apk\debug\phone-app-debug.apk' },
-    @{ Name = 'watch'; Dir = 'watch-app'; Apk = 'watch-app\build\outputs\apk\debug\watch-app-debug.apk' }
+    @{ Name = 'phone'; Dir = 'phone-app'; Task = 'assembleDebug'; Apk = 'phone-app\build\outputs\apk\debug\phone-app-debug.apk' },
+    @{ Name = 'watch'; Dir = 'watch-app'; Task = 'assembleRelease'; Apk = 'watch-app\build\outputs\apk\release\watch-app-release.apk' }
 )
 
 function Invoke-Checked([string]$What, [scriptblock]$Command) {
@@ -56,7 +56,7 @@ function Build-App($App) {
     Write-Host "==> Building $($App.Dir)" -ForegroundColor Cyan
     Push-Location (Join-Path $RepoRoot $App.Dir)
     try {
-        & .\gradlew.bat assembleDebug --quiet
+        & .\gradlew.bat $App.Task --quiet
         if ($LASTEXITCODE -ne 0) { throw "$($App.Dir) build failed" }
     } finally { Pop-Location }
     $apk = Join-Path $RepoRoot $App.Apk
@@ -68,8 +68,15 @@ function Read-State {
     # Manual conversion: -AsHashtable is unavailable in Windows PowerShell 5.1.
     $state = @{}
     if (Test-Path $StateFile) {
-        (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties |
-            ForEach-Object { $state[$_.Name] = $_.Value }
+        # Only a cache of the last deployed hashes: a corrupt file (a crash can leave it
+        # all NUL bytes) just means both apps count as changed.
+        try {
+            (Get-Content $StateFile -Raw | ConvertFrom-Json).PSObject.Properties |
+                ForEach-Object { $state[$_.Name] = $_.Value }
+        } catch {
+            Write-Host "Ignoring unreadable $StateFile`: $_" -ForegroundColor Yellow
+            return @{}
+        }
     }
     return $state
 }

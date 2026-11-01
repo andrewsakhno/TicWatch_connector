@@ -46,13 +46,15 @@ class WatchSettingsSync(
     }
 
     override fun publish() {
-        scope.launch {
-            val payload = WatchSettingsPayload.encode(store.settings.value)
-            if (payload == lastSent.get()) return@launch
-            transport.sendMessage(DataLayerPaths.MESSAGE_WATCH_SETTINGS, payload.toByteArray(Charsets.UTF_8))
-                .onSuccess { lastSent.set(payload) }
-                .onFailure { Log.w(TAG, "Sending watch settings to the watch failed", it) }
-        }
+        scope.launch { publishAndWait() }
+    }
+
+    override suspend fun publishAndWait() {
+        val payload = WatchSettingsPayload.encode(store.settings.value)
+        if (payload == lastSent.get()) return
+        transport.sendMessage(DataLayerPaths.MESSAGE_WATCH_SETTINGS, payload.toByteArray(Charsets.UTF_8))
+            .onSuccess { lastSent.set(payload) }
+            .onFailure { Log.w(TAG, "Sending watch settings to the watch failed", it) }
     }
 
     private companion object {

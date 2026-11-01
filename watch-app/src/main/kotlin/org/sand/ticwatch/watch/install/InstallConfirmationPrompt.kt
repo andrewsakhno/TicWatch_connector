@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.util.Log
+import org.sand.ticwatch.watch.R
 
 /**
  * Surfaces PackageInstaller's confirmation activity. A direct `startActivity` from a
@@ -31,7 +32,7 @@ class InstallConfirmationPrompt(private val context: Context) {
     private fun postNotification(sessionId: Int, confirmationIntent: Intent) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "App update confirmation", NotificationManager.IMPORTANCE_HIGH),
+            NotificationChannel(CHANNEL_ID, context.getString(R.string.install_channel), NotificationManager.IMPORTANCE_HIGH),
         )
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -40,8 +41,8 @@ class InstallConfirmationPrompt(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = Notification.Builder(context, CHANNEL_ID)
-            .setContentTitle("TicWatch Connector update")
-            .setContentText("Tap to confirm installing the new version")
+            .setContentTitle(context.getString(R.string.install_title))
+            .setContentText(context.getString(R.string.install_text))
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setCategory(Notification.CATEGORY_STATUS)
             .setContentIntent(pendingIntent)

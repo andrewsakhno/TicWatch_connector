@@ -12,12 +12,14 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
-import org.sand.ticwatch.watch.sensors.TimedReading
 import java.time.Duration
 import java.time.Instant
+import org.sand.ticwatch.watch.R
+import org.sand.ticwatch.watch.sensors.TimedReading
 
 private val LINE_WIDTH = 2.dp
 private val LAST_POINT_RADIUS = 3.dp
@@ -33,7 +35,7 @@ private const val MIN_POINTS = 2
 fun Sparkline(points: List<TimedReading>, color: Color, window: Duration, modifier: Modifier = Modifier) {
     if (points.size < MIN_POINTS) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            Text("Collecting trend…", style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+            Text(stringResource(R.string.collecting_trend), style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
         }
         return
     }

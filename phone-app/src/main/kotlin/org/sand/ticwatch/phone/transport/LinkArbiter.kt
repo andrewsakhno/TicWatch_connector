@@ -2,6 +2,8 @@ package org.sand.ticwatch.phone.transport
 
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
@@ -51,6 +53,10 @@ class LinkArbiter {
     private val link = Mutex()
     private val bulkQueue = Mutex()
     private val interactiveInFlight = MutableStateFlow(0)
+    private val bulkRunning = MutableStateFlow(false)
+
+    /** A bulk send (an APK going to the watch) is in progress, paused or not. */
+    val bulkActive: StateFlow<Boolean> = bulkRunning.asStateFlow()
 
     suspend fun <T> withLink(priority: LinkPriority, block: suspend () -> T): T = when (priority) {
         LinkPriority.INTERACTIVE -> interactive(block)
@@ -67,7 +73,12 @@ class LinkArbiter {
     }
 
     private suspend fun <T> bulk(block: suspend () -> T): T = bulkQueue.withLock {
-        link.withLock { withContext(Preemption()) { block() } }
+        bulkRunning.value = true
+        try {
+            link.withLock { withContext(Preemption()) { block() } }
+        } finally {
+            bulkRunning.value = false
+        }
     }
 
     private inner class Preemption : LinkPreemption {

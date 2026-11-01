@@ -108,6 +108,9 @@ class DebugBridgeReceiver : BroadcastReceiver() {
         const val ACTION_PROBE_WATCH_VENDOR_DATA = "org.sand.ticwatch.phone.action.DEBUG_PROBE_WATCH_VENDOR_DATA"
         const val ACTION_PULL_WATCH_SLEEP_LOG = "org.sand.ticwatch.phone.action.DEBUG_PULL_WATCH_SLEEP_LOG"
 
+        /** Records the watch's raw PPG next to its beats for 40 s; saved by [FileWatchProbeDumpSink]. */
+        const val ACTION_PROBE_WATCH_RAW_PPG = "org.sand.ticwatch.phone.action.DEBUG_PROBE_WATCH_RAW_PPG"
+
         /** Phone-local maintenance: deletes the per-sample resting-HR records older builds wrote. */
         const val ACTION_CLEANUP_LEGACY_RESTING_HR = "org.sand.ticwatch.phone.action.DEBUG_CLEANUP_LEGACY_RESTING_HR"
 
@@ -160,6 +163,7 @@ class DebugBridgeReceiver : BroadcastReceiver() {
             ACTION_PROBE_WATCH_CAPABILITIES to DataLayerPaths.MESSAGE_DEBUG_CAPABILITIES_REQUEST,
             ACTION_PROBE_WATCH_VENDOR_DATA to DataLayerPaths.MESSAGE_DEBUG_VENDOR_DATA_REQUEST,
             ACTION_PULL_WATCH_SLEEP_LOG to DataLayerPaths.MESSAGE_DEBUG_SLEEP_LOG_REQUEST,
+            ACTION_PROBE_WATCH_RAW_PPG to DataLayerPaths.MESSAGE_DEBUG_RAW_PPG_REQUEST,
         )
         private const val TAG = "DebugBridgeReceiver"
     }

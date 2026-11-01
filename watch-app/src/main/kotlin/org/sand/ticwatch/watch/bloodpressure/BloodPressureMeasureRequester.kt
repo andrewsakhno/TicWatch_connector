@@ -1,15 +1,17 @@
 package org.sand.ticwatch.watch.bloodpressure
 
 import android.util.Log
+import java.time.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.sand.ticwatch.watch.R
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
 import org.sand.ticwatch.watch.phonedata.PhonePayloadSink
 import org.sand.ticwatch.watch.sensors.ReadingHistory
 import org.sand.ticwatch.watch.sensors.SensorType
+import org.sand.ticwatch.watch.text.Strings
 import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
-import java.time.Clock
 
 /** Asks the phone to estimate and save blood pressure now. */
 fun interface BloodPressureMeasureRequester {
@@ -39,6 +41,7 @@ class PhoneBloodPressureMeasureRequester(
     private val results: PhonePayloadSink,
     private val clock: Clock,
     private val scope: CoroutineScope,
+    private val strings: Strings,
 ) : BloodPressureMeasureRequester, AwaitedBloodPressureRequester {
 
     override fun request() {
@@ -53,12 +56,11 @@ class PhoneBloodPressureMeasureRequester(
             .onSuccess { Log.i(TAG, "Blood pressure requested (HR $heartRate)") }
             .onFailure { error ->
                 Log.w(TAG, "Blood pressure request not delivered", error)
-                results.accept(BloodPressurePayloads.encodeResult(BloodPressureMeasureResult(false, PHONE_UNREACHABLE, clock.instant())))
+                results.accept(BloodPressurePayloads.encodeResult(BloodPressureMeasureResult(false, strings.get(R.string.phone_unreachable), clock.instant())))
             }
     }
 
     private companion object {
         const val TAG = "BloodPressureRequester"
-        const val PHONE_UNREACHABLE = "Phone unreachable"
     }
 }

@@ -10,6 +10,9 @@ import org.sand.ticwatch.phone.history.SensorHistoryDatabase.SleepStageTable
  * Copies [SensorType.SLEEP] sessions into `sleep_session`, kept for the sleep retention chosen
  * in Settings (months) instead of the raw-row days. Keyed by start, so a session the watch
  * re-sends replaces itself instead of duplicating. Stages already stored inside a session are linked to it.
+ * A session also supersedes any it overlaps (one the phone restored from orphan stages, see
+ * `OrphanSleepSessionDeriver`, before the watch's own arrived with another start); their stages go back to orphans
+ * until re-linked here.
  */
 class SleepSessionWriter : HistoryProjection {
 
@@ -29,6 +32,7 @@ class SleepSessionWriter : HistoryProjection {
                 sessions.forEach { session ->
                     val start = session.recordedAt.toEpochMilli()
                     val end = checkNotNull(session.endedAt).toEpochMilli()
+                    supersedeOverlapped(db, start, end)
                     statement.clearBindings()
                     statement.bindLong(1, start)
                     statement.bindLong(2, end)
@@ -40,5 +44,17 @@ class SleepSessionWriter : HistoryProjection {
                 }
             }
         }
+    }
+
+    private fun supersedeOverlapped(db: SQLiteDatabase, start: Long, end: Long) {
+        val overlapping = "${SleepSessionTable.START} < ?2 AND ${SleepSessionTable.END} > ?1"
+        val range = arrayOf<Any>(start, end)
+        // Stages first: the subquery reads the rows the delete removes.
+        db.execSQL(
+            "UPDATE ${SleepStageTable.NAME} SET ${SleepStageTable.SESSION_START} = NULL WHERE ${SleepStageTable.SESSION_START} IN " +
+                "(SELECT ${SleepSessionTable.START} FROM ${SleepSessionTable.NAME} WHERE $overlapping)",
+            range,
+        )
+        db.execSQL("DELETE FROM ${SleepSessionTable.NAME} WHERE $overlapping", range)
     }
 }

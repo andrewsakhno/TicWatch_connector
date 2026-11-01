@@ -39,14 +39,20 @@ interface SensorHistoryStorageSize {
 
 /** Maintenance side of the transfer history: retention purge, wipe and on-disk size. */
 interface SensorHistoryMaintenance : SensorHistoryStorageSize {
-    /** Deletes raw rows received before [cutoff]; returns the number of deleted rows. */
-    suspend fun purgeReceivedBefore(cutoff: Instant): Int
+    /**
+     * Deletes raw rows received before [cutoff] that the cloud server already holds, and those it doesn't
+     * unless [keepUnsynced]; returns the number of deleted rows.
+     */
+    suspend fun purgeReceivedBefore(cutoff: Instant, keepUnsynced: Boolean): Int
 
     /** Deletes [resolution] rollup buckets starting before [cutoff]; returns the number of deleted buckets. */
     suspend fun purgeRollupsBefore(resolution: RollupResolution, cutoff: Instant): Int
 
-    /** Deletes sleep sessions and sleep stages starting before [cutoff]; returns the number of deleted sessions. */
-    suspend fun purgeSleepSessionsBefore(cutoff: Instant): Int
+    /**
+     * Deletes sleep sessions and sleep stages starting before [cutoff] that the cloud server already holds, and
+     * those it doesn't unless [keepUnsynced]; returns the number of deleted sessions.
+     */
+    suspend fun purgeSleepSessionsBefore(cutoff: Instant, keepUnsynced: Boolean): Int
 
     /** Shrinks the file after deletes (DELETE alone never returns space to the filesystem). */
     suspend fun compact()
@@ -105,6 +111,12 @@ data class StoredSample(
     val statusUpdatedAt: Instant?,
 ) {
     val cursor: SampleCursor get() = SampleCursor(sample.recordedAt, id)
+}
+
+/** Where the local raw rows begin: older data of a type lives only on the cloud server (and in the rollups). */
+fun interface RawHistoryHorizon {
+    /** Earliest recorded_at among the raw rows of [types], or null when none is stored. */
+    suspend fun oldestRecordedAt(types: Set<SensorType>): Instant?
 }
 
 /** Read side of the transfer history, used by the MCP tools. Ranges are half-open: [from, to). */

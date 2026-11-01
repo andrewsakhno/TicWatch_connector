@@ -24,10 +24,10 @@ class CardioAdvisorWidgetProvider : AppWidgetProvider() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val container = AppContainer(appContext)
-                val renderer = CardioAdvisorWidgetRenderer(appContext, MainActivity.advisorIntent(appContext), ZoneId.systemDefault())
-                val views = runCatching { renderer.render(container.cardioReadiness.load(), SensorHistoryModule.clock.instant()) }
+                val renderer = CardioAdvisorWidgetRenderer(appContext, MainActivity.advisorIntent(appContext), ZoneId.systemDefault(), ReadinessGaugeBitmap(appContext))
+                val views = runCatching { renderer.render(container.cardioReadiness.load(), container.watchBatteryStore.status.value, SensorHistoryModule.clock.instant()) }
                     .onFailure { Log.w(TAG, "Readiness unavailable", it) }
-                    .getOrElse { renderer.unavailable(UNAVAILABLE) }
+                    .getOrElse { renderer.unavailable() }
                 widgetIds.forEach { manager.updateAppWidget(it, views) }
             } finally {
                 pending.finish()
@@ -37,7 +37,6 @@ class CardioAdvisorWidgetProvider : AppWidgetProvider() {
 
     private companion object {
         const val TAG = "CardioAdvisorWidget"
-        const val UNAVAILABLE = "No readiness data yet"
     }
 }
 

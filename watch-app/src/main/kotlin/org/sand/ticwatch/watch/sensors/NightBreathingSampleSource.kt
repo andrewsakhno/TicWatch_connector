@@ -18,7 +18,8 @@ import java.time.Instant
 /**
  * Night-time breathing monitor: while [sleepState] reports a sleep session and the watch is worn, it
  * listens continuously and reports every [epoch] - SpO2, HRV and breathing rate from [epochAggregators]
- * as intervals spanning the epoch, completed events from [detectors] (oxygen desaturations), and the
+ * as intervals spanning the epoch, completed events from [detectors] (oxygen desaturations, pulse-wave amplitude
+ * drops when switched on), and the
  * share of the epoch spent snoring, measured over its first [snoreSlot] by [snoreMeter].
  *
  * Unlike the daytime [VendorWindowSampleSource] the sensors stay registered across epochs: re-registering
@@ -26,7 +27,8 @@ import java.time.Instant
  * per-epoch aggregators are swapped. A partial wake lock is held for the whole night (renewed every epoch)
  * because these sensors are non-wakeup - this is the feature's battery cost. An epoch [epochQualifiers]
  * reject (wrist movement reads as desaturation on PPG) drops its body results and its events, not the
- * snoring.
+ * snoring. When [rest] gives a pause (the "intermittent" setting) each epoch is followed by that long with
+ * sensors and wake lock off: far less PPG, at the price of every desaturation that falls into a pause.
  */
 class NightBreathingSampleSource(
     private val sensorManager: SensorManager,
@@ -34,30 +36,39 @@ class NightBreathingSampleSource(
     private val scheduler: WindowScheduler,
     private val sleepState: SleepState,
     private val wearState: WearStateSource,
-    private val epochAggregators: List<() -> VendorReadingAggregator>,
+    /** Built at each night's start, like [detectors]. */
+    private val epochAggregators: () -> List<() -> VendorReadingAggregator>,
     private val epochQualifiers: List<() -> WindowQualifier>,
-    private val detectors: List<() -> NightEventDetector>,
+    /** Built at each night's start, so a settings change applies from the next night. */
+    private val detectors: () -> List<NightEventDetector>,
     private val snoreMeter: SnoreMeter,
     private val epoch: Duration,
     private val snoreSlot: Duration,
-    private val idleCheckInterval: Duration,
+    private val idleCheckInterval: () -> Duration,
+    private val rest: () -> Duration?,
 ) : SampleSource {
 
     override fun samples(): Flow<SensorSample> = flow {
         while (true) {
-            if (shouldMonitor()) monitorNight() else scheduler.awaitNext(idleCheckInterval)
+            if (shouldMonitor()) {
+                monitorNight()
+                rest()?.let { scheduler.awaitNext(it) }
+            } else {
+                scheduler.awaitNext(idleCheckInterval())
+            }
         }
     }
 
     private fun shouldMonitor(): Boolean = sleepState.isAsleep() && wearState.isWorn()
 
     private suspend fun FlowCollector<SensorSample>.monitorNight() {
-        val nightDetectors = detectors.map { it() }
-        val router = EpochRouter(nightDetectors, newEpoch())
+        val nightDetectors = detectors()
+        val aggregators = epochAggregators()
+        val router = EpochRouter(nightDetectors, newEpoch(aggregators))
         val listeners = router.sensorTypes().mapNotNull { type ->
             val sensor = sensorManager.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.type == type && !it.isWakeUpSensor }
                 ?: return@mapNotNull null.also { Log.w(TAG, "Sensor $type not found") }
-            RoutingListener(router).takeIf { sensorManager.registerListener(it, sensor, SensorManager.SENSOR_DELAY_NORMAL) }
+            RoutingListener(router).takeIf { sensorManager.registerListener(it, sensor, router.samplingPeriodUs(type)) }
         }
         // Not reference counted: each epoch's timed acquire just extends the one hold.
         val wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply { setReferenceCounted(false) }
@@ -72,10 +83,11 @@ class NightBreathingSampleSource(
                     slot.await()
                 }
                 val end = Instant.now()
-                val samples = router.closeEpoch(newEpoch(), start, end) +
+                val samples = router.closeEpoch(newEpoch(aggregators), start, end) +
                     listOfNotNull(snoring?.let { SensorSample(SensorType.SNORING, it, start, end) })
                 Log.i(TAG, "Night epoch done: ${samples.map { "${it.type}=${"%.2f".format(it.value)}" }}")
                 samples.forEach { emit(it) }
+                if (rest() != null) break
             }
         } finally {
             listeners.forEach { sensorManager.unregisterListener(it) }
@@ -84,7 +96,7 @@ class NightBreathingSampleSource(
         }
     }
 
-    private fun newEpoch() = Epoch(epochAggregators.map { it() }, epochQualifiers.map { it() })
+    private fun newEpoch(aggregators: List<() -> VendorReadingAggregator>) = Epoch(aggregators.map { it() }, epochQualifiers.map { it() })
 
     private class Epoch(val aggregators: List<VendorReadingAggregator>, val qualifiers: List<WindowQualifier>) {
         val listeners: List<WindowSensorListener> get() = aggregators + qualifiers
@@ -98,6 +110,9 @@ class NightBreathingSampleSource(
         private val lock = Any()
 
         fun sensorTypes(): Set<Int> = (detectors + current.listeners).map { it.sensorType }.toSet()
+
+        /** The fastest rate any listener of [type] asks for (a smaller period is faster). */
+        fun samplingPeriodUs(type: Int): Int = (detectors + current.listeners).filter { it.sensorType == type }.minOf { it.samplingPeriodUs }
 
         fun dispatch(type: Int, values: FloatArray, at: Instant) = synchronized(lock) {
             detectors.forEach { if (it.sensorType == type) it.onEvent(values, at) }

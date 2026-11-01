@@ -44,7 +44,7 @@ class GetHrvStatusTool(
         }
         return JSONObject()
             .put("date", status.date.toString())
-            .put("status", status.level?.label ?: JSONObject.NULL)
+            .put("status", status.level?.let { format.text(it.label) } ?: JSONObject.NULL)
             .put("weekly_mean_ms", status.weeklyMean?.let(format::number) ?: JSONObject.NULL)
             .put("weekly_nights", status.weeklyNights)
             .put("baseline", baseline ?: JSONObject.NULL)

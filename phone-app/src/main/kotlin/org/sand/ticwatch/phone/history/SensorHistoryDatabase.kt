@@ -47,6 +47,36 @@ class SensorHistoryDatabase private constructor(
         if (oldVersion < VERSION_SLEEP_SESSIONS) addSleepSessions(db)
         if (oldVersion < VERSION_EXERCISE_ROUTES) createRoutePointTable(db)
         if (oldVersion < VERSION_SLEEP_STAGES) createSleepStageTable(db)
+        if (oldVersion in VERSION_COMPACT_SCHEMA until VERSION_CLOUD_SYNC) addCloudSyncColumn(db)
+        if (oldVersion in VERSION_EXERCISE_ROUTES until VERSION_CLOUD_SYNC) addRouteCloudSyncColumn(db)
+        if (oldVersion in VERSION_SLEEP_SESSIONS until VERSION_SLEEP_CLOUD_SYNC) addSleepCloudSyncColumn(db, SleepSessionTable.NAME)
+        if (oldVersion in VERSION_SLEEP_STAGES until VERSION_SLEEP_CLOUD_SYNC) addSleepCloudSyncColumn(db, SleepStageTable.NAME)
+    }
+
+    /** v9 tracks the sleep tables' upload too; they outlive their raw rows, so every existing row is still to be uploaded. */
+    private fun addSleepCloudSyncColumn(db: SQLiteDatabase, table: String) {
+        db.execSQL("ALTER TABLE $table ADD COLUMN $SLEEP_CLOUD_SYNCED INTEGER NOT NULL DEFAULT $NOT_CLOUD_SYNCED")
+    }
+
+    /** v8 tracks the cloud upload; every existing row is still to be uploaded. */
+    private fun addCloudSyncColumn(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE ${Table.NAME} ADD COLUMN ${Table.CLOUD_SYNCED} INTEGER NOT NULL DEFAULT $NOT_CLOUD_SYNCED")
+        createCloudOutboxIndex(db)
+    }
+
+    private fun addRouteCloudSyncColumn(db: SQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE ${RoutePointTable.NAME} ADD COLUMN ${RoutePointTable.CLOUD_SYNCED} INTEGER NOT NULL " +
+                "DEFAULT $NOT_CLOUD_SYNCED",
+        )
+    }
+
+    /** Partial index: only rows not yet on the server, so the uploader never scans the whole table. */
+    private fun createCloudOutboxIndex(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_${Table.NAME}_cloud_outbox ON ${Table.NAME}(${Table.ID}) " +
+                "WHERE ${Table.CLOUD_SYNCED} = $NOT_CLOUD_SYNCED",
+        )
     }
 
     /** v6 records the measuring device; every earlier row came from the watch (or was derived from its data). */
@@ -70,7 +100,8 @@ class SensorHistoryDatabase private constructor(
                 ${SleepStageTable.START} INTEGER PRIMARY KEY,
                 ${SleepStageTable.END} INTEGER NOT NULL,
                 ${SleepStageTable.STAGE_TYPE} INTEGER NOT NULL,
-                ${SleepStageTable.SESSION_START} INTEGER
+                ${SleepStageTable.SESSION_START} INTEGER,
+                $SLEEP_CLOUD_SYNCED INTEGER NOT NULL DEFAULT $NOT_CLOUD_SYNCED
             )
             """.trimIndent(),
         )
@@ -88,6 +119,7 @@ class SensorHistoryDatabase private constructor(
                 ${RoutePointTable.LONGITUDE} REAL NOT NULL,
                 ${RoutePointTable.ALTITUDE} REAL,
                 ${RoutePointTable.ACCURACY} REAL,
+                ${RoutePointTable.CLOUD_SYNCED} INTEGER NOT NULL DEFAULT $NOT_CLOUD_SYNCED,
                 PRIMARY KEY (${RoutePointTable.RECORDED_AT}, ${RoutePointTable.SOURCE})
             ) WITHOUT ROWID
             """.trimIndent(),
@@ -106,7 +138,8 @@ class SensorHistoryDatabase private constructor(
             """
             CREATE TABLE IF NOT EXISTS ${SleepSessionTable.NAME} (
                 ${SleepSessionTable.START} INTEGER PRIMARY KEY,
-                ${SleepSessionTable.END} INTEGER NOT NULL
+                ${SleepSessionTable.END} INTEGER NOT NULL,
+                $SLEEP_CLOUD_SYNCED INTEGER NOT NULL DEFAULT $NOT_CLOUD_SYNCED
             )
             """.trimIndent(),
         )
@@ -126,7 +159,8 @@ class SensorHistoryDatabase private constructor(
                 ${Table.DELIVERY_STATUS} INTEGER NOT NULL,
                 ${Table.DELIVERY_UPDATED_AT} INTEGER,
                 ${Table.SOURCE} INTEGER NOT NULL DEFAULT ${SampleSource.WATCH.code},
-                ${Table.IS_SNAPSHOT} INTEGER NOT NULL DEFAULT $NOT_SNAPSHOT
+                ${Table.IS_SNAPSHOT} INTEGER NOT NULL DEFAULT $NOT_SNAPSHOT,
+                ${Table.CLOUD_SYNCED} INTEGER NOT NULL DEFAULT $NOT_CLOUD_SYNCED
             )
             """.trimIndent(),
         )
@@ -139,6 +173,7 @@ class SensorHistoryDatabase private constructor(
             "CREATE INDEX idx_${Table.NAME}_failed ON ${Table.NAME}(${Table.ID}) " +
                 "WHERE ${Table.DELIVERY_STATUS} = ${DeliveryStatus.FAILED.code}",
         )
+        createCloudOutboxIndex(db)
         db.execSQL(
             """
             CREATE TABLE ${RollupTable.NAME} (
@@ -223,6 +258,9 @@ class SensorHistoryDatabase private constructor(
 
         /** 1 for a Baseline Snapshot reading ([SensorSample.snapshot]), else 0. */
         const val IS_SNAPSHOT = "is_snapshot"
+
+        /** [CLOUD_SYNCED] once the cloud server acknowledged the row, else [NOT_CLOUD_SYNCED]. */
+        const val CLOUD_SYNCED = "cloud_synced"
     }
 
     object RollupTable {
@@ -262,6 +300,7 @@ class SensorHistoryDatabase private constructor(
         const val LONGITUDE = "longitude"
         const val ALTITUDE = "altitude_m"
         const val ACCURACY = "horizontal_accuracy_m"
+        const val CLOUD_SYNCED = "cloud_synced"
     }
 
     companion object {
@@ -272,15 +311,26 @@ class SensorHistoryDatabase private constructor(
         private const val VERSION_SLEEP_STAGES = 5
         private const val VERSION_SAMPLE_SOURCE = 6
         private const val VERSION_SNAPSHOT_FLAG = 7
-        private const val DATABASE_VERSION = VERSION_SNAPSHOT_FLAG
+        private const val VERSION_CLOUD_SYNC = 8
+        private const val VERSION_SLEEP_CLOUD_SYNC = 9
+        private const val DATABASE_VERSION = VERSION_SLEEP_CLOUD_SYNC
         const val NOT_SNAPSHOT = 0
         const val SNAPSHOT = 1
+        const val NOT_CLOUD_SYNCED = 0
+        const val CLOUD_SYNCED = 1
+
+        /** Upload mark of `sleep_session` and `sleep_stage`: [CLOUD_SYNCED] once the server acknowledged the row. */
+        const val SLEEP_CLOUD_SYNCED = "cloud_synced"
         private const val LEGACY_TABLE = "sensor_history_v1"
         private const val BACKFILL_PAGE_SIZE = 2000
         private val SIDE_FILE_SUFFIXES = listOf("-wal", "-shm", "-journal")
 
         /** Columns [readSample] needs. */
         val SAMPLE_COLUMNS = arrayOf(Table.TYPE, Table.VALUE, Table.RECORDED_AT, Table.ENDED_AT, Table.SOURCE, Table.IS_SNAPSHOT)
+
+        /** Tail of a retention purge's WHERE: with [keepUnsynced], rows the server hasn't acknowledged are spared. */
+        fun purgeableClause(syncedColumn: String, keepUnsynced: Boolean): String =
+            if (keepUnsynced) " AND $syncedColumn = $CLOUD_SYNCED" else ""
 
         @Volatile
         private var instance: SensorHistoryDatabase? = null

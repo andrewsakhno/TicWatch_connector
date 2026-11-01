@@ -3,6 +3,7 @@ package org.sand.ticwatch.phone.insights
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.sand.ticwatch.phone.health.HeartRateZone
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -11,6 +12,7 @@ import java.time.ZoneOffset
 class DailySummariesTest {
 
     private val date = LocalDate.of(2026, 10, 27)
+    private val hardWeek = (0L until 7L).associate { date.minusDays(it) to 100.0 }
 
     @Test
     fun `equal chronic and acute load is optimal`() {
@@ -30,6 +32,44 @@ class DailySummariesTest {
 
         assertEquals(LoadBalance.VERY_HIGH, calculator.balance(date, loads).balance)
         assertNull(calculator.balance(date, emptyMap()).ratio)
+    }
+
+    @Test
+    fun `a small first workout without chronic history is not overreaching`() {
+        val balance = TrainingLoadBalanceCalculator().balance(date, mapOf(date to 40.0))
+
+        assertEquals(4.0, balance.ratio!!, DELTA)
+        assertEquals(LoadBalance.OPTIMAL, balance.balance)
+        assertEquals(LoadBalance.OPTIMAL.maxRatio, balance.gaugeRatio!!, DELTA)
+    }
+
+    @Test
+    fun `acute load at the minimum volume can be overreaching`() {
+        val balance = TrainingLoadBalanceCalculator().balance(date, mapOf(date to 150.0))
+
+        assertEquals(LoadBalance.VERY_HIGH, balance.balance)
+    }
+
+    @Test
+    fun `a big week mostly in zones 1 and 2 is not overreaching`() {
+        val zones = mapOf(date to mapOf(HeartRateZone.ZONE_1 to 200.0, HeartRateZone.ZONE_2 to 70.0, HeartRateZone.ZONE_3 to 30.0))
+
+        val balance = TrainingLoadBalanceCalculator().balance(date, hardWeek, zones)
+
+        assertEquals(LoadBalance.OPTIMAL, balance.balance)
+    }
+
+    @Test
+    fun `a big week reaching zones 3 to 5 is overreaching`() {
+        val zones = mapOf(
+            date to mapOf(HeartRateZone.ZONE_2 to 100.0, HeartRateZone.ZONE_3 to 60.0, HeartRateZone.ZONE_4 to 30.0, HeartRateZone.ZONE_5 to 10.0),
+            date.minusDays(7) to mapOf(HeartRateZone.ZONE_1 to 1_000.0), // before the acute week: not counted
+        )
+
+        val balance = TrainingLoadBalanceCalculator().balance(date, hardWeek, zones)
+
+        assertEquals(LoadBalance.VERY_HIGH, balance.balance)
+        assertEquals(balance.ratio!!, balance.gaugeRatio!!, DELTA)
     }
 
     @Test

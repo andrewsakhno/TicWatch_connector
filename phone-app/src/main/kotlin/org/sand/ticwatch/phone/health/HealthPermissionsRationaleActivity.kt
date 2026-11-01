@@ -11,7 +11,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import org.sand.ticwatch.phone.R
 
 /**
  * Privacy-policy / rationale screen Health Connect requires before it will show its
@@ -28,20 +30,12 @@ class HealthPermissionsRationaleActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.safeDrawingPadding().padding(24.dp)) {
-                        Text(TITLE, style = MaterialTheme.typography.headlineSmall)
-                        Text(BODY, modifier = Modifier.padding(top = 16.dp))
+                        Text(stringResource(R.string.hc_rationale_title), style = MaterialTheme.typography.headlineSmall)
+                        Text(stringResource(R.string.hc_rationale_body), modifier = Modifier.padding(top = 16.dp))
                     }
                 }
             }
         }
     }
 
-    private companion object {
-        const val TITLE = "How TicWatch Connector uses health data"
-        const val BODY =
-            "Heart-rate samples measured by your TicWatch are written to Health Connect, " +
-                "and a resting heart rate is derived from them on this phone. " +
-                "The app only writes data; it does not read your Health Connect records " +
-                "or share them with third parties."
-    }
 }

@@ -9,17 +9,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import org.sand.ticwatch.phone.health.BiologicalSex
 import java.time.Year
+import org.sand.ticwatch.phone.health.BiologicalSex
+import org.sand.ticwatch.phone.ui.rememberStore
 
 /**
  * Profile data for the profile-dependent estimates: the birth year drives the age-predicted max
@@ -29,77 +29,61 @@ import java.time.Year
  */
 @Composable
 fun ProfileSettingsSection(appContainer: AppContainer) {
-    val coroutineScope = rememberCoroutineScope()
-    val profile = appContainer.userProfileStore
-    val patientNames = appContainer.patientNameStore
-    var nameText by remember { mutableStateOf("") }
-    var birthYearText by remember { mutableStateOf("") }
-    var heightText by remember { mutableStateOf("") }
-    var weightText by remember { mutableStateOf("") }
-    var sex by remember { mutableStateOf<BiologicalSex?>(null) }
-
-    LaunchedEffect(Unit) {
-        nameText = patientNames.patientName().orEmpty()
-        birthYearText = profile.birthYear()?.toString().orEmpty()
-        heightText = profile.heightCm()?.let(::formatMeasurement).orEmpty()
-        weightText = profile.weightKg()?.let(::formatMeasurement).orEmpty()
-        sex = profile.sex()
+    val store = rememberStore(appContainer) { scope, io ->
+        ProfileSettingsStore(appContainer.userProfileStore, appContainer.patientNameStore, ::formatMeasurement, scope, io)
     }
+    val state by store.state.collectAsState()
+    val sex = state.sex
 
     Column(verticalArrangement = Arrangement.spacedBy(FIELD_SPACING.dp)) {
-        Text(text = "Profile", style = MaterialTheme.typography.titleMedium)
+        Text(text = stringResource(R.string.profile_title), style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
-            value = nameText,
-            onValueChange = { name ->
-                nameText = name.take(MAX_NAME_CHARS)
-                coroutineScope.launch { patientNames.setPatientName(nameText) }
-            },
-            label = { Text(text = "Name") },
-            supportingText = { Text(text = "Shown on the report for your doctor") },
+            value = state.text(ProfileTextField.NAME),
+            onValueChange = { name -> store.setName(name.take(MAX_NAME_CHARS)) },
+            label = { Text(text = stringResource(R.string.profile_name)) },
+            supportingText = { Text(text = stringResource(R.string.profile_name_hint)) },
             singleLine = true,
         )
         ProfileNumberField(
-            text = birthYearText,
-            label = "Year of birth",
-            supportingText = "Needed for the VO2 max and basal metabolic rate estimates",
+            text = state.text(ProfileTextField.BIRTH_YEAR),
+            label = stringResource(R.string.profile_birth_year),
+            supportingText = stringResource(R.string.profile_birth_year_hint),
             keyboardType = KeyboardType.Number,
             sanitize = { it.filter(Char::isDigit).take(YEAR_DIGITS) },
             parse = ::plausibleBirthYear,
-            onTextChange = { birthYearText = it },
-            onValueChange = { year -> coroutineScope.launch { profile.setBirthYear(year) } },
+            onTextChange = { store.edit(ProfileTextField.BIRTH_YEAR, it) },
+            onValueChange = { year -> store.save { setBirthYear(year) } },
         )
         Row(horizontalArrangement = Arrangement.spacedBy(FIELD_SPACING.dp)) {
             BiologicalSex.entries.forEach { option ->
                 FilterChip(
                     selected = sex == option,
                     onClick = {
-                        val selected = option.takeUnless { sex == option }
-                        sex = selected
-                        coroutineScope.launch { profile.setSex(selected) }
+                        store.setSex(option.takeUnless { sex == option })
                     },
-                    label = { Text(text = SEX_LABELS.getValue(option)) },
+                    label = { Text(text = stringResource(SEX_LABELS.getValue(option))) },
                 )
             }
         }
         ProfileNumberField(
-            text = heightText,
-            label = "Height (cm)",
-            supportingText = "Needed for the basal metabolic rate estimate",
+            text = state.text(ProfileTextField.HEIGHT),
+            label = stringResource(R.string.profile_height),
+            supportingText = stringResource(R.string.profile_bmr_hint),
             keyboardType = KeyboardType.Decimal,
             sanitize = ::sanitizeDecimal,
             parse = { plausibleMeasurement(it, HEIGHT_CM_RANGE) },
-            onTextChange = { heightText = it },
-            onValueChange = { height -> coroutineScope.launch { profile.setHeightCm(height) } },
+            onTextChange = { store.edit(ProfileTextField.HEIGHT, it) },
+            onValueChange = { height -> store.save { setHeightCm(height) } },
         )
         ProfileNumberField(
-            text = weightText,
-            label = "Weight (kg)",
-            supportingText = "Needed for the basal metabolic rate estimate",
+            text = state.text(ProfileTextField.WEIGHT),
+            label = stringResource(R.string.profile_weight),
+            supportingText = stringResource(R.string.profile_bmr_hint),
             keyboardType = KeyboardType.Decimal,
             sanitize = ::sanitizeDecimal,
             parse = { plausibleMeasurement(it, WEIGHT_KG_RANGE) },
-            onTextChange = { weightText = it },
-            onValueChange = { weight -> coroutineScope.launch { profile.setWeightKg(weight) } },
+            onTextChange = { store.edit(ProfileTextField.WEIGHT, it) },
+            onValueChange = { weight -> store.save { setWeightKg(weight) } },
         )
     }
 }
@@ -150,7 +134,7 @@ private fun sanitizeDecimal(text: String): String {
 private fun formatMeasurement(value: Double): String =
     if (value % 1.0 == 0.0) value.toLong().toString() else value.toString()
 
-private val SEX_LABELS = mapOf(BiologicalSex.MALE to "Male", BiologicalSex.FEMALE to "Female")
+private val SEX_LABELS = mapOf(BiologicalSex.MALE to R.string.sex_male, BiologicalSex.FEMALE to R.string.sex_female)
 private val HEIGHT_CM_RANGE = 50.0..272.0
 private val WEIGHT_KG_RANGE = 20.0..400.0
 private const val DECIMAL_SEPARATOR = '.'

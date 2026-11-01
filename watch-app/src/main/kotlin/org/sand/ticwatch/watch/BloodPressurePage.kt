@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
@@ -23,19 +24,20 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Switch
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.ToggleChip
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import org.sand.ticwatch.watch.bloodpressure.BloodPressureEntry
-import org.sand.ticwatch.watch.bloodpressure.BloodPressureHistory
-import org.sand.ticwatch.watch.bloodpressure.BloodPressureMeasureResult
-import org.sand.ticwatch.watch.dashboard.BloodPressureChart
-import org.sand.ticwatch.watch.dashboard.BloodPressureChartColors
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import org.sand.ticwatch.watch.R
+import org.sand.ticwatch.watch.bloodpressure.BloodPressureEntry
+import org.sand.ticwatch.watch.bloodpressure.BloodPressureHistory
+import org.sand.ticwatch.watch.bloodpressure.BloodPressureMeasureResult
+import org.sand.ticwatch.watch.dashboard.BloodPressureChart
+import org.sand.ticwatch.watch.dashboard.BloodPressureChartColors
 
 /**
  * What the blood pressure page shows: the phone's saved readings (cuff and wrist estimates), the last measure
@@ -63,7 +65,7 @@ private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM 
 
 /** The phone sends the last day's readings; the chart spans the same day. */
 private val CHART_WINDOW: Duration = Duration.ofHours(24)
-private val CHART_HEIGHT = 72.dp
+private val CHART_HEIGHT = 88.dp
 private val LEGEND_SPACING = 6.dp
 
 /**
@@ -90,14 +92,16 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
     val latest = readings.firstOrNull()
     ScalingLazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
-            Text("Blood pressure", style = MaterialTheme.typography.caption1, color = MaterialTheme.colors.onSurfaceVariant)
+            Text(stringResource(R.string.blood_pressure), style = MaterialTheme.typography.caption1, color = MaterialTheme.colors.onSurfaceVariant)
         }
         item {
             Text(latest?.let { "${it.systolic}/${it.diastolic}" } ?: MISSING, style = MaterialTheme.typography.display2)
         }
         item {
             Text(
-                latest?.let { entry -> listOfNotNull("mmHg", entry.pulse?.let { "pulse $it" }).joinToString(" · ") } ?: "mmHg",
+                latest?.let { entry ->
+                    listOfNotNull(stringResource(R.string.mmhg), entry.pulse?.let { stringResource(R.string.pulse_value, it) }).joinToString(" · ")
+                } ?: stringResource(R.string.mmhg),
                 style = MaterialTheme.typography.caption2,
             )
         }
@@ -124,10 +128,10 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(LEGEND_SPACING)) {
-                Text("SYS", style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.SYSTOLIC)
-                Text("DIA", style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.DIASTOLIC)
-                Text("CUFF", style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.CUFF)
-                Text("last 24 h", style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+                Text(stringResource(R.string.bp_sys), style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.SYSTOLIC)
+                Text(stringResource(R.string.bp_dia), style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.DIASTOLIC)
+                Text(stringResource(R.string.bp_cuff), style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.CUFF)
+                Text(stringResource(R.string.last_24h), style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
             }
         }
         item { SelectedReading(selected) }
@@ -138,7 +142,7 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
                     state.onMeasure?.invoke()
                 },
                 enabled = state.onMeasure != null && !measuring,
-                label = { Text(if (measuring) "Measuring..." else "Measure") },
+                label = { Text(stringResource(if (measuring) R.string.measuring else R.string.measure)) },
                 colors = ChipDefaults.primaryChipColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -158,8 +162,8 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
                 checked = state.autoMeasure == true,
                 onCheckedChange = state.onAutoMeasureChange,
                 enabled = state.autoMeasure != null,
-                label = { Text("Auto at rest") },
-                secondaryLabel = { Text("Every 5 min") },
+                label = { Text(stringResource(R.string.auto_at_rest)) },
+                secondaryLabel = { Text(stringResource(R.string.every_5_min)) },
                 toggleControl = { Switch(checked = state.autoMeasure == true) },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -173,10 +177,10 @@ private fun SelectedReading(entry: BloodPressureEntry?) {
         entry?.let { reading ->
             listOfNotNull(
                 "${formatTime(reading.measuredAt)}  ${reading.systolic}/${reading.diastolic}",
-                reading.pulse?.let { "pulse $it" },
+                reading.pulse?.let { stringResource(R.string.pulse_value, it) },
                 reading.source,
             ).joinToString(" · ") + "\n${reading.category}"
-        } ?: "Tap the chart for a reading",
+        } ?: stringResource(R.string.tap_chart),
         style = MaterialTheme.typography.caption3,
         color = MaterialTheme.colors.onSurfaceVariant,
         textAlign = TextAlign.Center,

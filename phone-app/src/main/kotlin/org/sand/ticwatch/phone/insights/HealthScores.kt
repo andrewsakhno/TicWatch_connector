@@ -20,6 +20,7 @@ data class HealthScores(
     val weeklyZoneMinutes: Map<HeartRateZone, Double>,
     val stress: DailyStressSummary?,
     val morningLight: MorningLightExposure,
+    val fatigue: FatigueIndex?,
 )
 
 fun interface HealthScoresSource {
@@ -38,6 +39,9 @@ internal suspend fun SensorHistoryQueries.allSleepSessions(from: Instant, to: In
 }
 
 private const val SLEEP_PAGE = 200
+
+/** The span of the weekly zone minutes and the workout list, today included. */
+internal const val WEEK_DAYS = 7L
 
 /** Nightly mean RMSSD per sleep session of at least [minNight], from the 5-minute rollups (kept 90 days). */
 class NightlyRmssdHistory(
@@ -81,7 +85,8 @@ class TrainingLoadHistory(
 
     suspend fun balances(from: LocalDate, to: LocalDate): List<TrainingLoadBalance> {
         val loads = dailyLoads(from.minusDays(lookbackDays), to)
-        return generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }.map { calculator.balance(it, loads) }.toList()
+        val zoneMinutes = dailyZoneMinutes(from.minusDays(calculator.acuteDays - 1), to)
+        return generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }.map { calculator.balance(it, loads, zoneMinutes) }.toList()
     }
 
     /** Minutes per zone summed over [from]..[to]; zones never reached are left out. */
@@ -143,6 +148,7 @@ class HistoryHealthScoresSource(
     private val training: TrainingLoadHistory,
     private val stress: DailyStressHistory,
     private val light: MorningLightHistory,
+    private val fatigue: FatigueIndexSource,
     private val clock: Clock,
     private val zone: ZoneId,
     private val sleepLookback: Duration = Duration.ofHours(36),
@@ -160,10 +166,7 @@ class HistoryHealthScoresSource(
             weeklyZoneMinutes = training.zoneMinutes(today.minusDays(WEEK_DAYS - 1), today),
             stress = stress.summary(today),
             morningLight = light.exposure(today),
+            fatigue = fatigue.current(emptyList()),
         )
-    }
-
-    private companion object {
-        const val WEEK_DAYS = 7L
     }
 }

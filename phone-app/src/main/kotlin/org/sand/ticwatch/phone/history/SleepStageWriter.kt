@@ -11,7 +11,8 @@ import org.sand.ticwatch.phone.history.SensorHistoryDatabase.SleepStageTable
 /**
  * Copies [SensorType.SLEEP_STAGE] intervals into `sleep_stage`, kept for the sleep retention like
  * `sleep_session`. Each stage is linked to the session containing its start when that session is
- * already stored; [SleepSessionWriter] links stages that arrived before their session. Keyed by
+ * already stored; [SleepSessionWriter] links stages that arrived before their session, and
+ * `OrphanSleepSessionDeriver` restores the session of stages it never reached. Keyed by
  * start, so a re-sent stage replaces itself. Stage codes outside [SleepStageType] are skipped.
  */
 class SleepStageWriter : HistoryProjection {

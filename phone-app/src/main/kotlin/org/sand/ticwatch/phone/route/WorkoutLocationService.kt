@@ -12,12 +12,14 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.ServiceCompat
 import com.google.android.gms.location.LocationServices
+import java.time.Duration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.history.SensorHistoryModule
-import java.time.Duration
+import org.sand.ticwatch.phone.transport.TransportFactory
 
 /**
  * Foreground `location` service hosting [WorkoutLocationTracker] for the duration of a watch
@@ -36,6 +38,7 @@ class WorkoutLocationService : Service() {
             locationSource = FusedLocationSource(LocationServices.getFusedLocationProviderClient(this)),
             routeLog = SensorHistoryModule.routeStore(this),
             scope = serviceScope,
+            announcer = PhoneRouteTrackAnnouncer(TransportFactory.create(this), serviceScope),
         )
     }
 
@@ -72,11 +75,11 @@ class WorkoutLocationService : Service() {
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Workout route", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_ID, getString(R.string.notif_route_channel), NotificationManager.IMPORTANCE_LOW),
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Recording workout route")
-            .setContentText("GPS track for the workout running on the watch")
+            .setContentTitle(getString(R.string.notif_route_title))
+            .setContentText(getString(R.string.notif_route_text))
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .build()

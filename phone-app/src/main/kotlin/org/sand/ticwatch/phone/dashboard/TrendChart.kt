@@ -1,6 +1,8 @@
 package org.sand.ticwatch.phone.dashboard
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -19,6 +25,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -37,18 +45,28 @@ data class TrendSeries(val label: String, val trend: Trend, val color: Color)
 private val LINE_WIDTH = 2.dp
 private val POINT_RADIUS = 3.dp
 private val GRID_WIDTH = 1.dp
+private val SCRUB_LINE_WIDTH = 1.dp
 private val AXIS_GUTTER = 36.dp
 private val LEGEND_SWATCH = 10.dp
 private val AXIS_TEXT_SIZE = 10.sp
 private const val VERTICAL_PADDING_FRACTION = 0.1f
 private const val GRID_ALPHA = 0.3f
+private const val NO_SCRUB_VALUE = "–"
 
 /**
- * Several [series] over their shared start..end on one value axis (min..max of all points, labelled at the left),
- * a dot per value since the points are sparse, the time span below and a legend when there is more than one line.
+ * Several [series] over their shared start..end on one value axis ([valueRange], else min..max of all points, labelled
+ * at the left), a dot per value since the points are sparse, the time span below and a legend when there is more than one line.
+ * With [formatScrubValue], a tap or a horizontal drag places a vertical line and shows its time and each line's value there;
+ * a vertical drag stays with the surrounding list.
  */
 @Composable
-fun TrendChart(series: List<TrendSeries>, formatTime: (Instant) -> String, modifier: Modifier = Modifier) {
+fun TrendChart(
+    series: List<TrendSeries>,
+    formatTime: (Instant) -> String,
+    modifier: Modifier = Modifier,
+    valueRange: ClosedFloatingPointRange<Double>? = null,
+    formatScrubValue: ((Double) -> String)? = null,
+) {
     val points = series.flatMap { it.trend.points }
     if (points.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
@@ -58,14 +76,15 @@ fun TrendChart(series: List<TrendSeries>, formatTime: (Instant) -> String, modif
     }
     val start = series.minOf { it.trend.start }
     val end = series.maxOf { it.trend.end }
-    val low = points.minOf { it.value }
-    val high = points.maxOf { it.value }
+    val low = valueRange?.start ?: points.minOf { it.value }
+    val high = valueRange?.endInclusive ?: points.maxOf { it.value }
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
     val measurer = rememberTextMeasurer()
     val axisStyle = TextStyle(fontSize = AXIS_TEXT_SIZE, color = axisColor)
+    var scrubbedAt by remember { mutableStateOf<Instant?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Canvas(modifier) {
+        Canvas(if (formatScrubValue == null) modifier else modifier.timeScrubbing(start, end) { scrubbedAt = it }) {
             val gutter = AXIS_GUTTER.toPx()
             val padding = size.height * VERTICAL_PADDING_FRACTION
             val usable = size.height - 2 * padding
@@ -90,6 +109,7 @@ fun TrendChart(series: List<TrendSeries>, formatTime: (Instant) -> String, modif
                 drawPath(path, line.color, style = Stroke(LINE_WIDTH.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 linePoints.forEach { drawCircle(line.color, POINT_RADIUS.toPx(), Offset(x(it.at), y(it.value))) }
             }
+            scrubbedAt?.let { at -> drawLine(Color.Black, Offset(x(at), 0f), Offset(x(at), size.height), SCRUB_LINE_WIDTH.toPx()) }
         }
         Row(modifier = Modifier.fillMaxWidth().padding(start = AXIS_GUTTER)) {
             Text(text = formatTime(start), style = MaterialTheme.typography.labelSmall, color = axisColor, modifier = Modifier.weight(1f))
@@ -97,13 +117,44 @@ fun TrendChart(series: List<TrendSeries>, formatTime: (Instant) -> String, modif
         }
         if (series.size > 1) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(start = AXIS_GUTTER)) {
-                series.forEach { line ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Canvas(Modifier.size(LEGEND_SWATCH)) { drawCircle(line.color) }
-                        Text(text = line.label, style = MaterialTheme.typography.labelSmall)
-                    }
+                series.forEach { line -> SeriesMark(line.color, line.label) }
+            }
+        }
+        if (formatScrubValue != null) {
+            scrubbedAt?.let { at ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(start = AXIS_GUTTER),
+                ) {
+                    Text(text = formatTime(at), style = MaterialTheme.typography.labelLarge)
+                    series.forEach { line -> SeriesMark(line.color, line.trend.valueAt(at)?.let(formatScrubValue) ?: NO_SCRUB_VALUE) }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SeriesMark(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Canvas(Modifier.size(LEGEND_SWATCH)) { drawCircle(color) }
+        Text(text = text, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** Reports the time under the finger on a tap or along a horizontal drag; the chart's area starts after the value axis. */
+private fun Modifier.timeScrubbing(start: Instant, end: Instant, onScrub: (Instant) -> Unit): Modifier {
+    fun PointerInputScope.timeAt(x: Float): Instant {
+        val gutter = AXIS_GUTTER.toPx()
+        val fraction = ((x - gutter) / (size.width - gutter)).coerceIn(0f, 1f)
+        return start.plusMillis((Duration.between(start, end).toMillis() * fraction).toLong())
+    }
+    return pointerInput(start, end) { detectTapGestures(onTap = { onScrub(timeAt(it.x)) }) }
+        .pointerInput(start, end) {
+            detectHorizontalDragGestures(onDragStart = { onScrub(timeAt(it.x)) }) { change, _ ->
+                change.consume()
+                onScrub(timeAt(change.position.x))
+            }
+        }
 }

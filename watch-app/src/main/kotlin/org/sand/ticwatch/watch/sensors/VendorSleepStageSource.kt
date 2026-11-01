@@ -5,9 +5,16 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 
@@ -16,7 +23,11 @@ enum class SleepStage(val code: Int) {
     AWAKE(1),
     LIGHT(2),
     DEEP(3),
-    REM(4),
+    REM(4);
+
+    companion object {
+        fun fromCode(code: Int): SleepStage? = entries.firstOrNull { it.code == code }
+    }
 }
 
 /** Decodes one sleep-sensor event into a stage, or null when it reports no sleep (Strategy: one layout per decoder). */
@@ -53,59 +64,101 @@ class MobvoiSleepStageDecoder : SleepStageDecoder {
 }
 
 /**
+ * The night in progress: everything [SleepStageSegmenter] must not lose across a service restart. A wake inside
+ * it (the sensor's AWAKE, or a non-sleep event) is an [SleepStage.AWAKE] stage. [sensorLeftSleep] = the last event
+ * reported no sleep at all; [slept] = the finished non-AWAKE stages.
+ */
+data class OpenSleepSession(
+    val start: Instant,
+    val stage: SleepStage,
+    val stageStart: Instant,
+    val lastEventAt: Instant,
+    val slept: Duration,
+    val sensorLeftSleep: Boolean,
+)
+
+/**
  * Turns a stream of per-event stages into completed samples: one [SensorType.SLEEP_STAGE] interval
- * per run of equal stages, and - once a non-sleep event (null) ends the night - the [SensorType.SLEEP]
- * session spanning all its stages, if it lasted [minSession]. A silence longer than [maxGap] (watch
- * off, sensor stopped) ends the night at the last event. Not thread-safe: feed it from one thread.
+ * per run of equal stages, and - once the night is over - the [SensorType.SLEEP] session spanning all its
+ * stages, if it holds [minSession] of actual sleep. A wake no longer than [wakeMerge] allows stays inside the
+ * session as an AWAKE stage; a longer one ends it where the wake began. A silence longer than [maxGap] (watch
+ * off, sensor stopped) ends it at the last event, as does [endSession] on outside evidence. Not thread-safe:
+ * the caller serializes access.
  */
 class SleepStageSegmenter(
     private val minSession: Duration,
     private val maxGap: Duration,
+    private val wakeMerge: WakeMergePolicy,
 ) {
-    private var stage: SleepStage? = null
-    private var stageStart: Instant? = null
-    private var sessionStart: Instant? = null
-    private var lastEventAt: Instant? = null
+    /** Persist this and [restore] it after a restart, or the night is lost. */
+    var openSession: OpenSleepSession? = null
+        private set
 
-    /** Whether a night is open (an AWAKE stage inside it included). */
-    val inSession: Boolean get() = sessionStart != null
+    /** Whether the sensor reports the wearer inside a night (its own AWAKE stage included). */
+    val asleep: Boolean get() = openSession?.sensorLeftSleep == false
+
+    fun restore(session: OpenSleepSession?) {
+        openSession = session
+    }
 
     fun onStage(next: SleepStage?, at: Instant): List<SensorSample> {
-        val previousEventAt = lastEventAt
-        val completed = mutableListOf<SensorSample>()
-        if (previousEventAt != null && Duration.between(previousEventAt, at) > maxGap) {
-            completed += closeSession(previousEventAt)
+        val completed = expire(at).toMutableList()
+        val current = openSession
+        if (current == null) {
+            // Only a sleep state opens a session; AWAKE outside one is just daytime noise.
+            if (next != null && next != SleepStage.AWAKE) {
+                openSession = OpenSleepSession(at, next, at, at, Duration.ZERO, sensorLeftSleep = false)
+            }
+            return completed
         }
-        lastEventAt = at
-        if (next == stage) return completed
-        if (next == null) return completed + closeSession(at)
-        // Only a sleep state opens a session; AWAKE outside one is just daytime noise.
-        if (next == SleepStage.AWAKE && sessionStart == null) return completed
-
-        closeStage(at)?.let(completed::add)
-        stage = next
-        stageStart = at
-        if (sessionStart == null) sessionStart = at
+        val reported = next ?: SleepStage.AWAKE
+        if (reported == current.stage) {
+            openSession = current.copy(lastEventAt = at, sensorLeftSleep = next == null)
+            return completed
+        }
+        stageSample(current, at)?.let(completed::add)
+        openSession = current.copy(
+            stage = reported,
+            stageStart = at,
+            lastEventAt = at,
+            slept = current.slept + sleptIn(current, at),
+            sensorLeftSleep = next == null,
+        )
         return completed
     }
 
-    private fun closeStage(at: Instant): SensorSample? {
-        val current = stage ?: return null
-        val start = stageStart ?: return null
-        if (!at.isAfter(start)) return null
-        return SensorSample(SensorType.SLEEP_STAGE, current.code.toDouble(), start, at)
+    /** Ends the session if, by [now], its wake outlasted [wakeMerge] or the sensor has been silent past [maxGap]. */
+    fun expire(now: Instant): List<SensorSample> {
+        val current = openSession ?: return emptyList()
+        val expired = if (current.stage == SleepStage.AWAKE) {
+            Duration.between(current.stageStart, now) > wakeMerge.maxWake(current.stageStart)
+        } else {
+            Duration.between(current.lastEventAt, now) > maxGap
+        }
+        return if (expired) endSession() else emptyList()
     }
 
-    private fun closeSession(at: Instant): List<SensorSample> {
-        val lastStage = closeStage(at)
-        val start = sessionStart
-        stage = null
-        stageStart = null
-        sessionStart = null
-        if (start == null) return emptyList()
-        val session = SensorSample(SensorType.SLEEP, StateSessionTracker.NO_SESSION_VALUE, start, at)
-            .takeIf { Duration.between(start, at) >= minSession }
-        return listOfNotNull(lastStage, session)
+    /** Ends the session at its last sleep event: where the wake began, else the sensor's last event. */
+    fun endSession(): List<SensorSample> {
+        val current = openSession ?: return emptyList()
+        openSession = null
+        if (current.stage == SleepStage.AWAKE) return listOfNotNull(sessionSample(current, current.stageStart, current.slept))
+        val slept = current.slept + sleptIn(current, current.lastEventAt)
+        return listOfNotNull(stageSample(current, current.lastEventAt), sessionSample(current, current.lastEventAt, slept))
+    }
+
+    private fun sleptIn(session: OpenSleepSession, until: Instant): Duration =
+        if (session.stage == SleepStage.AWAKE || !until.isAfter(session.stageStart)) Duration.ZERO
+        else Duration.between(session.stageStart, until)
+
+    private fun stageSample(session: OpenSleepSession, until: Instant): SensorSample? {
+        if (!until.isAfter(session.stageStart)) return null
+        return SensorSample(SensorType.SLEEP_STAGE, session.stage.code.toDouble(), session.stageStart, until)
+    }
+
+    private fun sessionSample(session: OpenSleepSession, end: Instant, slept: Duration): SensorSample? {
+        if (slept < minSession) return null
+        return SensorSample(SensorType.SLEEP, StateSessionTracker.NO_SESSION_VALUE, session.start, end)
     }
 }
 
@@ -116,6 +169,11 @@ class SleepStageSegmenter(
  * two sensors describing the same night don't interleave. Registered non-wakeup with a long report
  * latency, so the hub batches events instead of waking the CPU through the night. Every event also
  * updates [sleepState], which gates the night-time breathing monitor.
+ *
+ * The sensor often just stops when the wearer gets up, so while a session is open it is re-checked every
+ * [checkInterval] on [scheduler]: the hub's batch is flushed first (events may be waiting in it), then the
+ * session ends if [wakeEvidence] says the wearer is up or the segmenter's timeouts ran out. The open session
+ * lives in [store], so a restart or a flat battery resumes the night, or closes it on the first check.
  */
 class VendorSleepStageSource(
     private val sensorManager: SensorManager,
@@ -123,10 +181,29 @@ class VendorSleepStageSource(
     private val decoder: SleepStageDecoder,
     private val segmenter: SleepStageSegmenter,
     private val sleepState: SleepStateSink,
+    private val store: OpenSleepSessionStore,
+    private val scheduler: WindowScheduler,
+    private val wakeEvidence: List<WakeEvidence>,
+    private val checkInterval: Duration,
+    private val clock: Clock,
     private val preferenceWindow: Duration = Duration.ofMinutes(15),
 ) : SampleSource {
 
     override fun samples(): Flow<SensorSample> = callbackFlow {
+        val restored = withContext(Dispatchers.IO) { store.load() }
+        val sessionOpen = MutableStateFlow(restored != null)
+        synchronized(segmenter) {
+            segmenter.restore(restored)
+            restored?.let { sleepState.update(segmenter.asleep, it.lastEventAt) }
+        }
+
+        fun publish(completed: List<SensorSample>, at: Instant) {
+            completed.forEach { trySend(it) }
+            sleepState.update(segmenter.asleep, at)
+            store.save(segmenter.openSession)
+            sessionOpen.value = segmenter.openSession != null
+        }
+
         val lastEventBySensor = mutableMapOf<Int, Instant>()
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
@@ -134,8 +211,7 @@ class VendorSleepStageSource(
                 val type = event.sensor.type
                 lastEventBySensor[type] = at
                 if (isShadowed(type, at, lastEventBySensor)) return
-                segmenter.onStage(decoder.decode(event.values), at).forEach { trySend(it) }
-                sleepState.update(segmenter.inSession, at)
+                synchronized(segmenter) { publish(segmenter.onStage(decoder.decode(event.values), at), at) }
             }
 
             override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
@@ -146,6 +222,24 @@ class VendorSleepStageSource(
                 listener, sensor, SensorManager.SENSOR_DELAY_NORMAL, MAX_REPORT_LATENCY_MICROS,
             )
             Log.i(TAG, "Sleep sensor $type registered=$registered")
+        }
+        launch {
+            while (true) {
+                sessionOpen.first { it }
+                sensorManager.flush(listener)
+                // Inside the alarm's hand-off wake lock.
+                delay(FLUSH_SETTLE.toMillis())
+                val now = clock.instant()
+                synchronized(segmenter) {
+                    val up = wakeEvidence.any { it.isUp() }
+                    val completed = if (up) segmenter.endSession() else segmenter.expire(now)
+                    if (segmenter.openSession == null) {
+                        Log.i(TAG, "Open sleep session closed by its check: wearerUp=$up, samples=${completed.size}")
+                        publish(completed, now)
+                    }
+                }
+                if (sessionOpen.value) scheduler.awaitNext(checkInterval)
+            }
         }
         awaitClose { sensorManager.unregisterListener(listener) }
     }
@@ -158,5 +252,6 @@ class VendorSleepStageSource(
     private companion object {
         const val TAG = "VendorSleepStageSource"
         val MAX_REPORT_LATENCY_MICROS = Duration.ofMinutes(5).toNanos().div(1_000L).toInt()
+        val FLUSH_SETTLE: Duration = Duration.ofSeconds(3)
     }
 }

@@ -34,6 +34,9 @@ class PhoneDataLayerListenerService : WearableListenerService() {
             appContainer.snoreMonitorControl,
             appContainer.watchScreenshotSink,
             appContainer.snapshotResultReceiver,
+            appContainer.watchBatteryReceiver,
+            appContainer.ecgMessageReceiver,
+            appContainer.watchProbeDumpSink,
         )
     }
 

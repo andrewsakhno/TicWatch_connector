@@ -12,146 +12,106 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.Flow
+import org.sand.ticwatch.phone.bpm.CuffStatus
+import org.sand.ticwatch.phone.bpm.CuffStatusSource
 import org.sand.ticwatch.phone.dashboard.BloodPressureDayChart
 import org.sand.ticwatch.phone.dashboard.GaugeColors
 import org.sand.ticwatch.phone.dashboard.categoryColor
-import org.sand.ticwatch.phone.bpm.CuffStatus
-import org.sand.ticwatch.phone.bpm.CuffStatusSource
+import org.sand.ticwatch.phone.datalayer.WatchSyncRequester
 import org.sand.ticwatch.phone.health.BloodPressureCalibration
 import org.sand.ticwatch.phone.health.BloodPressureCategory
 import org.sand.ticwatch.phone.health.BloodPressureMeasurement
 import org.sand.ticwatch.phone.health.BloodPressureMonitor
 import org.sand.ticwatch.phone.health.BloodPressureReading
+import org.sand.ticwatch.phone.health.CalibrationResult
+import org.sand.ticwatch.phone.health.WristSignalsReader
 import org.sand.ticwatch.phone.medication.MedicationDose
 import org.sand.ticwatch.phone.medication.MedicationEffect
 import org.sand.ticwatch.phone.medication.MedicationEffectReader
 import org.sand.ticwatch.phone.medication.MedicationIntake
 import org.sand.ticwatch.phone.medication.MedicationIntakeLog
-import org.sand.ticwatch.phone.medication.MedicationRegimen
+import org.sand.ticwatch.phone.medication.MedicationProtection
+import org.sand.ticwatch.phone.medication.MedicationProtectionReader
 import org.sand.ticwatch.phone.report.CardioReportComposer
-import org.sand.ticwatch.phone.health.CalibrationResult
-import org.sand.ticwatch.phone.health.WristSignalsReader
-import java.time.Duration
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.text.asString
+import org.sand.ticwatch.phone.ui.rememberStore
 
 /**
- * Dashboard "Blood Pressure" tab: calibrate against a cuff reading, estimate at rest from the wrist signals,
- * save the estimate (history + Health Connect) and chart the last [HISTORY_WINDOW] of readings (tap one to delete it).
+ * Dashboard "Blood Pressure / ECG" tab: calibrate against a cuff reading, estimate at rest from the wrist signals,
+ * auto-save each estimate (history + Health Connect), record a watch rhythm strip ([EcgCard]) and chart the last [HISTORY_WINDOW] of readings (tap one to delete it).
  */
 @Composable
 fun BloodPressureScreen(
     monitor: BloodPressureMonitor,
+    watchSync: WatchSyncRequester,
     cuffStatus: CuffStatusSource,
     medication: MedicationTracking,
     reports: CardioReportComposer,
+    ecg: EcgDependencies,
+    changes: Flow<*>,
 ) {
-    val coroutineScope = rememberCoroutineScope()
-    var calibration by remember { mutableStateOf<BloodPressureCalibration?>(null) }
-    var measurement by remember { mutableStateOf<BloodPressureMeasurement?>(null) }
-    var recent by remember { mutableStateOf<List<BloodPressureReading>>(emptyList()) }
-    var historyEnd by remember { mutableStateOf(Instant.now()) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var cuff by remember { mutableStateOf<CuffStatus?>(null) }
-    var intakes by remember { mutableStateOf<List<MedicationIntake>>(emptyList()) }
-    var latestEffect by remember { mutableStateOf<MedicationEffect?>(null) }
-
-    suspend fun reload() {
-        calibration = monitor.calibration()
-        historyEnd = Instant.now()
-        recent = monitor.since(historyEnd.minus(HISTORY_WINDOW))
-        cuff = withContext(Dispatchers.IO) { cuffStatus.cuffStatus() }
-        intakes = medication.intakes.intakes(historyEnd.minus(HISTORY_WINDOW), historyEnd.plusMillis(1))
-        latestEffect = intakes.lastOrNull()?.let { medication.effects.effect(it) }
-    }
-
-    LaunchedEffect(Unit) { reload() }
+    val store = rememberStore(monitor) { scope, io -> BloodPressureStore(monitor, watchSync, cuffStatus, medication, changes, scope, io) }
+    val state by store.state.collectAsState()
 
     Column(
         modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(CARD_SPACING.dp),
     ) {
-        CalibrationCard(calibration, monitor) { systolic, diastolic ->
-            coroutineScope.launch {
-                message = when (val result = monitor.calibrate(systolic, diastolic)) {
-                    is CalibrationResult.Saved -> "Calibration saved at ${result.calibration.heartRate.roundToInt()} bpm"
-                    CalibrationResult.Implausible -> "Enter a plausible cuff reading (systolic above diastolic)"
-                    CalibrationResult.NoHeartRate -> "No recent heart rate from the watch - wear it and sync first"
-                    CalibrationResult.Outdated -> "A newer calibration is already in use"
-                }
-                reload()
-            }
-        }
-        MeasurementCard(
-            measurement = measurement,
-            onMeasure = { coroutineScope.launch { measurement = monitor.measure() } },
-            onSave = { reading ->
-                coroutineScope.launch {
-                    message = if (monitor.log.save(reading).isSuccess) "Saved to history" else "Save failed"
-                    measurement = null
-                    reload()
-                }
-            },
+        CalibrationCard(state.calibration, monitor, store::calibrate)
+        MeasurementCard(measurement = state.measurement, onMeasure = store::measure)
+        state.message?.let { Text(text = it.asString(), style = MaterialTheme.typography.bodyMedium) }
+        EcgCard(ecg)
+        MedicationCard(state.latestEffect, state.protection, state.historyEnd, store::logIntake)
+        state.cuff?.let { CuffCard(it) }
+        HistoryCard(
+            state.recent, state.historyEnd.minus(HISTORY_WINDOW), state.historyEnd, state.intakes.map { it.takenAt },
+            store::delete,
         )
-        message?.let { Text(text = it, style = MaterialTheme.typography.bodyMedium) }
-        MedicationCard(medication.regimen.medications(MedicationDose.MORNING), latestEffect, historyEnd) {
-            coroutineScope.launch {
-                message = medication.intakes.record(MedicationDose.MORNING).fold(
-                    onSuccess = { "Intake logged at ${formatTime(it.takenAt)}" },
-                    onFailure = { "Logging the intake failed: ${it.message}" },
-                )
-                reload()
-            }
-        }
-        cuff?.let { CuffCard(it) }
-        HistoryCard(recent, historyEnd.minus(HISTORY_WINDOW), historyEnd, intakes.map { it.takenAt }) { reading ->
-            coroutineScope.launch {
-                runCatching { monitor.log.delete(reading) }.onFailure { message = "Delete failed: ${it.message}" }
-                reload()
-            }
-        }
         ReportExportCard(reports)
     }
 }
 
-/** What the medication card needs: the regimen, the intake log and the effect reader. */
-class MedicationTracking(val regimen: MedicationRegimen, val intakes: MedicationIntakeLog, val effects: MedicationEffectReader)
+/** What the medication card needs: the intake log and the effect reader. */
+class MedicationTracking(
+    val intakes: MedicationIntakeLog,
+    val effects: MedicationEffectReader,
+    val protection: MedicationProtectionReader,
+)
 
 @Composable
 private fun CalibrationCard(
     calibration: BloodPressureCalibration?,
     monitor: BloodPressureMonitor,
     onSave: (Double, Double) -> Unit,
-) = SectionCard("Calibration") {
+) = SectionCard(stringResource(R.string.card_calibration)) {
     var systolicText by remember { mutableStateOf("") }
     var diastolicText by remember { mutableStateOf("") }
     Text(
-        text = "Enter a cuff reading taken just now, sitting at rest with the watch on.",
+        text = stringResource(R.string.calibration_hint),
         style = MaterialTheme.typography.bodySmall,
     )
     Row(horizontalArrangement = Arrangement.spacedBy(FIELD_SPACING.dp)) {
-        PressureField(systolicText, "SYS, mmHg", Modifier.weight(1f)) { systolicText = it }
-        PressureField(diastolicText, "DIA, mmHg", Modifier.weight(1f)) { diastolicText = it }
+        PressureField(systolicText, stringResource(R.string.field_sys), Modifier.weight(1f)) { systolicText = it }
+        PressureField(diastolicText, stringResource(R.string.field_dia), Modifier.weight(1f)) { diastolicText = it }
     }
     Button(
         onClick = {
@@ -160,18 +120,20 @@ private fun CalibrationCard(
             if (systolic != null && diastolic != null) onSave(systolic, diastolic)
         },
         enabled = systolicText.isNotEmpty() && diastolicText.isNotEmpty(),
-    ) { Text(text = "Save calibration") }
+    ) { Text(text = stringResource(R.string.save_calibration)) }
     if (calibration == null) {
-        Text(text = "Not calibrated yet.", style = MaterialTheme.typography.bodyMedium)
+        Text(text = stringResource(R.string.not_calibrated), style = MaterialTheme.typography.bodyMedium)
     } else {
         Text(
-            text = "${calibration.systolic.roundToInt()}/${calibration.diastolic.roundToInt()} mmHg at " +
-                "${calibration.heartRate.roundToInt()} bpm, ${formatTime(calibration.calibratedAt)}",
+            text = stringResource(
+                R.string.calibration_summary, calibration.systolic.roundToInt(), calibration.diastolic.roundToInt(),
+                calibration.heartRate.roundToInt(), formatTime(calibration.calibratedAt),
+            ),
             style = MaterialTheme.typography.bodyMedium,
         )
         if (monitor.isStale(calibration)) {
             Text(
-                text = "Calibration is older than ${BloodPressureMonitor.CALIBRATION_MAX_AGE.toDays()} days - recalibrate with a cuff.",
+                text = stringResource(R.string.calibration_stale, BloodPressureMonitor.CALIBRATION_MAX_AGE.toDays()),
                 color = GaugeColors.POOR,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -183,50 +145,48 @@ private fun CalibrationCard(
 private fun MeasurementCard(
     measurement: BloodPressureMeasurement?,
     onMeasure: () -> Unit,
-    onSave: (BloodPressureReading) -> Unit,
-) = SectionCard("Estimate") {
-    Button(onClick = onMeasure) { Text(text = "Calculate blood pressure") }
+) = SectionCard(stringResource(R.string.card_estimate)) {
+    Button(onClick = onMeasure) { Text(text = stringResource(R.string.calculate_bp)) }
     when (measurement) {
         null -> Unit
-        BloodPressureMeasurement.NotCalibrated -> Text(text = "Save a calibration first.")
+        BloodPressureMeasurement.NotCalibrated -> Text(text = stringResource(R.string.save_calibration_first))
         BloodPressureMeasurement.NoHeartRate ->
-            Text(text = "No heart rate in the last ${WristSignalsReader.HEART_RATE_LOOKBACK.toMinutes()} min - sync the watch first.")
+            Text(text = stringResource(R.string.no_hr_wear_watch,WristSignalsReader.HEART_RATE_LOOKBACK.toMinutes()))
         is BloodPressureMeasurement.NotAtRest -> Text(
-            text = "To measure, sit down and rest for ${WristSignalsReader.REST_WINDOW.toMinutes()} minutes " +
-                "(${measurement.stepsPerMinute.roundToInt()} steps/min recently).",
+            text = stringResource(R.string.rest_to_measure, WristSignalsReader.REST_WINDOW.toMinutes(), measurement.stepsPerMinute.roundToInt()),
             color = GaugeColors.POOR,
         )
         is BloodPressureMeasurement.Estimated -> {
             val reading = measurement.reading
             Text(
-                text = "${reading.systolic.roundToInt()} / ${reading.diastolic.roundToInt()}",
+                text = stringResource(R.string.bp_big, reading.systolic.roundToInt(), reading.diastolic.roundToInt()),
                 style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.Bold,
                 color = categoryColor(reading.category),
             )
-            Text(text = "mmHg · ${reading.category.label}", color = categoryColor(reading.category))
+            Text(text = stringResource(R.string.mmhg_with_category, stringResource(reading.category.label)), color = categoryColor(reading.category))
             Text(
-                text = "Pulse ${measurement.signals.heartRate.roundToInt()} bpm (watch, ${formatTime(measurement.signals.heartRateAt)})" +
-                    " · calculated ${formatTime(reading.measuredAt)}",
+                text = stringResource(
+                    R.string.estimate_pulse_line, measurement.signals.heartRate.roundToInt(),
+                    formatTime(measurement.signals.heartRateAt), formatTime(reading.measuredAt),
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                text = "Estimate from the watch, not a cuff measurement.",
+                text = stringResource(R.string.estimate_disclaimer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = { onSave(reading) }) { Text(text = "Save to Health Connect") }
         }
     }
 }
 
 @Composable
-private fun CuffCard(status: CuffStatus) = SectionCard("Bioland cuff") {
-    Text(text = "Battery ${status.batteryPercent}%, serial ${status.serial}")
-    Text(text = "Last connected ${formatTime(status.seenAt)}", style = MaterialTheme.typography.bodySmall)
+private fun CuffCard(status: CuffStatus) = SectionCard(stringResource(R.string.card_cuff)) {
+    Text(text = stringResource(R.string.cuff_battery, status.batteryPercent, status.serial))
+    Text(text = stringResource(R.string.cuff_last_connected, formatTime(status.seenAt)), style = MaterialTheme.typography.bodySmall)
     Text(
-        text = "Readings sync when the cuff is on near the phone; one with watch heart rate within " +
-            "${BloodPressureMonitor.CUFF_SIGNAL_MAX_GAP.toMinutes()} min recalibrates the estimate.",
+        text = stringResource(R.string.cuff_hint, BloodPressureMonitor.CUFF_SIGNAL_MAX_GAP.toMinutes()),
         style = MaterialTheme.typography.bodySmall,
     )
 }
@@ -238,10 +198,10 @@ private fun HistoryCard(
     end: Instant,
     intakes: List<Instant>,
     onDelete: (BloodPressureReading) -> Unit,
-) = SectionCard("Last 24 hours") {
+) = SectionCard(stringResource(R.string.card_last_days, HISTORY_WINDOW.toDays())) {
     BloodPressureDayChart(
         readings, start, end,
-        selectedActions = { reading -> TextButton(onClick = { onDelete(reading) }) { Text(text = "Delete") } },
+        selectedActions = { reading -> TextButton(onClick = { onDelete(reading) }) { Text(text = stringResource(R.string.delete)) } },
         markers = intakes,
     )
 }
@@ -268,7 +228,6 @@ internal fun SectionCard(title: String, content: @Composable ColumnScope.() -> U
 
 internal fun formatTime(instant: Instant): String = TIME_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
 
-private val HISTORY_WINDOW: Duration = Duration.ofHours(24)
 private const val PRESSURE_DIGITS = 3
 private const val CARD_SPACING = 12
 private const val FIELD_SPACING = 8

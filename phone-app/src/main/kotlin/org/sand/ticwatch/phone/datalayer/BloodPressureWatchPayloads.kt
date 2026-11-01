@@ -1,12 +1,14 @@
 package org.sand.ticwatch.phone.datalayer
 
+import java.time.Instant
+import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
 import org.sand.ticwatch.phone.health.BloodPressureReading
 import org.sand.ticwatch.phone.health.HeartRateReading
 import org.sand.ticwatch.phone.health.SampleSource
-import java.time.Instant
-import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.text.TextResolver
+import org.sand.ticwatch.phone.text.uiText
 
 /**
  * JSON of the blood pressure messages exchanged with the watch; mirrors watch-app's
@@ -27,15 +29,16 @@ object BloodPressureWatchPayloads {
     const val HEART_RATE = "heart_rate"
     const val HEART_RATE_AT = "heart_rate_at"
 
-    fun encodeHistory(readings: List<BloodPressureReading>): String {
+    /** [texts] resolves the source and category labels the watch shows as they are. */
+    fun encodeHistory(readings: List<BloodPressureReading>, texts: TextResolver): String {
         val entries = JSONArray()
         readings.forEach { reading ->
             val entry = JSONObject()
                 .put(SYSTOLIC, reading.systolic.roundToInt())
                 .put(DIASTOLIC, reading.diastolic.roundToInt())
                 .put(AT, reading.measuredAt.toEpochMilli())
-                .put(SOURCE, reading.source.label)
-                .put(CATEGORY, reading.category.label)
+                .put(SOURCE, texts.resolve(uiText(reading.source.label)))
+                .put(CATEGORY, texts.resolve(uiText(reading.category.label)))
                 .put(CUFF, reading.source == SampleSource.BLOOD_PRESSURE_CUFF)
             reading.pulse?.let { entry.put(PULSE, it.roundToInt()) }
             entries.put(entry)

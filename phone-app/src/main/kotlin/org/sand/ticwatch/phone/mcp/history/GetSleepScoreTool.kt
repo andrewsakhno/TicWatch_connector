@@ -53,7 +53,7 @@ class GetSleepScoreTool(
         inputs.stageDurations.forEach { (stage, time) -> stages.put(stage.name.lowercase(), format.number(time.toMinutes().toDouble())) }
         return JSONObject()
             .put("score", score.score)
-            .put("quality", SleepQuality.of(score.score).label)
+            .put("quality", format.text(SleepQuality.of(score.score).label))
             .put("components", components)
             .put(
                 "inputs",

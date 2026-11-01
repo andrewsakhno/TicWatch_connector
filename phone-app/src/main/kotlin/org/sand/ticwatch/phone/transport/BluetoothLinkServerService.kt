@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.transport
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,7 +8,6 @@ import android.app.Service
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -15,6 +15,7 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.ServiceCompat
+import java.io.DataInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,10 +23,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.AppContainer
+import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.datalayer.PhoneMessageRouter
 import org.sand.ticwatch.phone.datalayer.WatchReplies
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
-import java.io.DataInputStream
 
 /**
  * Long-running counterpart to [BluetoothClassicTransport] on the watch side: listens
@@ -52,6 +53,9 @@ class BluetoothLinkServerService : Service() {
             appContainer.snoreMonitorControl,
             appContainer.watchScreenshotSink,
             appContainer.snapshotResultReceiver,
+            appContainer.watchBatteryReceiver,
+            appContainer.ecgMessageReceiver,
+            appContainer.watchProbeDumpSink,
         )
     }
 
@@ -123,14 +127,18 @@ class BluetoothLinkServerService : Service() {
         runCatching {
             socket.use {
                 val input = DataInputStream(it.inputStream)
-                val path = input.readUTF()
-                val length = input.readLong()
-                val payload = BoundedInputStream(input, length)
-                val handled = router.handleMessage(path, payload.readBytes())
-                // ACK only once handled, so the watch keeps (and later resends) anything
-                // that didn't make it into Health Connect instead of deleting it.
-                it.outputStream.write(if (handled) TransportProtocol.ACK else TransportProtocol.NACK)
-                it.outputStream.flush()
+                var path = input.readUTF()
+                while (true) {
+                    val length = input.readLong()
+                    val payload = BoundedInputStream(input, length)
+                    val handled = router.handleMessage(path, payload.readBytes())
+                    // ACK only once handled, so the watch keeps (and later resends) anything
+                    // that didn't make it into Health Connect instead of deleting it.
+                    it.outputStream.write(if (handled) TransportProtocol.ACK else TransportProtocol.NACK)
+                    it.outputStream.flush()
+                    // A sender holding the link sends its next frame here; any other has closed the socket by now.
+                    path = runCatching { input.readUTF() }.getOrNull() ?: return@use
+                }
             }
         }.onFailure { Log.w(TAG, "Failed to handle incoming Bluetooth connection", it) }
     }
@@ -138,11 +146,11 @@ class BluetoothLinkServerService : Service() {
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Watch link bridge", NotificationManager.IMPORTANCE_MIN),
+            NotificationChannel(CHANNEL_ID, getString(R.string.notif_bridge_channel), NotificationManager.IMPORTANCE_MIN),
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("TicWatch Connector")
-            .setContentText("Listening for watch requests over Bluetooth")
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.notif_bridge_text))
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .build()
     }

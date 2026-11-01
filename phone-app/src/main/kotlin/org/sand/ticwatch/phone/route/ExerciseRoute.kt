@@ -41,6 +41,9 @@ interface ExerciseRouteQueries {
 
 /** Retention side of the route history, run by the daily purge ("Clear history" wipes the whole database). */
 interface ExerciseRouteMaintenance {
-    /** Deletes points recorded before [cutoff]; returns the number of deleted points. */
-    suspend fun purgeRecordedBefore(cutoff: Instant): Int
+    /**
+     * Deletes points recorded before [cutoff] that the cloud server already holds, and those it doesn't
+     * unless [keepUnsynced]; returns the number of deleted points.
+     */
+    suspend fun purgeRecordedBefore(cutoff: Instant, keepUnsynced: Boolean): Int
 }

@@ -1,11 +1,16 @@
 package org.sand.ticwatch.phone.report
 
-import org.sand.ticwatch.phone.medication.MedicationEffectAnalyzer
+import androidx.annotation.StringRes
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.R
+import org.sand.ticwatch.phone.health.BiologicalSex
+import org.sand.ticwatch.phone.medication.MedicationEffectAnalyzer
+import org.sand.ticwatch.phone.text.TextResolver
+import org.sand.ticwatch.phone.text.uiText
 
 /** Format-neutral report layout: [CardioReportFormatter] fills it, each [CardioReportRenderer] only typesets it. */
 data class ReportDocument(val title: String, val subtitle: String, val sections: List<ReportSection>, val footer: String)
@@ -21,92 +26,124 @@ data class ReportRow(val label: String, val value: String)
 
 data class ReportTable(val headers: List<String>, val rows: List<List<String>>)
 
-/** Turns a [CardioReport] into a [ReportDocument] (wording, units, rounding). */
-class CardioReportFormatter {
+/** Turns a [CardioReport] into a [ReportDocument] (wording in the app language, units, rounding). */
+class CardioReportFormatter(private val texts: TextResolver) {
 
     fun format(report: CardioReport): ReportDocument {
         val time = DateTimeFormatter.ofPattern(DATE_TIME_PATTERN).withZone(report.zone)
         return ReportDocument(
-            title = TITLE,
-            subtitle = "${time.format(report.from)} - ${time.format(report.to)} (${report.zone.id})",
+            title = t(R.string.report_title),
+            subtitle = t(R.string.report_subtitle, time.format(report.from), time.format(report.to), report.zone.id),
             sections = listOf(
                 patient(report),
-                therapy(report),
+                medication(report),
                 pressure(report.pressure),
                 heartRate(report.heartRate),
+                sleep(report.sleep),
                 accuracy(report.accuracy, time),
             ),
-            footer = "Generated ${time.format(report.generatedAt)} by TicWatch Connector. Wrist values are calibrated " +
-                "cuffless estimates (trends only); cuff readings are from the Bioland monitor.",
+            footer = t(R.string.report_footer, time.format(report.generatedAt)),
         )
     }
 
     private fun patient(report: CardioReport): ReportSection {
         val patient = report.patient
         return ReportSection(
-            heading = "Patient",
+            heading = t(R.string.report_patient),
             rows = listOf(
-                ReportRow("Name", patient.name ?: NOT_SET),
-                ReportRow("Age", patient.ageYears?.let { "$it years" } ?: NOT_SET),
-                ReportRow("Sex", patient.sex?.key ?: NOT_SET),
-                ReportRow("Height", patient.heightCm?.let { "${it.roundToInt()} cm" } ?: NOT_SET),
-                ReportRow("Weight", patient.weightKg?.let { "%.1f kg".format(it) } ?: NOT_SET),
+                ReportRow(t(R.string.report_name), patient.name ?: notSet()),
+                ReportRow(t(R.string.report_age), patient.ageYears?.let { t(R.string.report_age_years, it) } ?: notSet()),
+                ReportRow(t(R.string.report_sex), patient.sex?.let { t(sexLabel(it)) } ?: notSet()),
+                ReportRow(t(R.string.report_height), patient.heightCm?.let { t(R.string.report_height_cm, it.roundToInt()) } ?: notSet()),
+                ReportRow(t(R.string.report_weight), patient.weightKg?.let { t(R.string.report_weight_kg, it) } ?: notSet()),
             ),
         )
     }
 
-    private fun therapy(report: CardioReport) = ReportSection(
-        heading = "Current therapy",
-        rows = report.therapy.map { ReportRow(it.name, "${it.doseDescription()} once daily, morning") },
+    private fun medication(report: CardioReport) = ReportSection(
+        heading = t(R.string.report_medication),
+        rows = listOf(ReportRow(t(R.string.report_logged_intakes), "${report.medicationIntakes}")),
     )
 
     private fun pressure(summary: AmbulatoryPressureSummary) = ReportSection(
-        heading = "Ambulatory blood pressure",
+        heading = t(R.string.report_ambulatory_bp),
         rows = listOf(
-            ReportRow("24 h mean", mean(summary.overall)),
-            ReportRow("Daytime mean (${DayNightWindow.DAY_START}-${DayNightWindow.NIGHT_START})", mean(summary.daytime)),
-            ReportRow("Nighttime mean (${DayNightWindow.NIGHT_START}-${DayNightWindow.DAY_START})", mean(summary.nighttime)),
+            ReportRow(t(R.string.report_mean_24h), mean(summary.overall)),
+            ReportRow(t(R.string.report_mean_day, DayNightWindow.DAY_START.toString(), DayNightWindow.NIGHT_START.toString()), mean(summary.daytime)),
+            ReportRow(t(R.string.report_mean_night, DayNightWindow.NIGHT_START.toString(), DayNightWindow.DAY_START.toString()), mean(summary.nighttime)),
             ReportRow(
-                "Nocturnal dipping",
-                summary.dippingPercent?.let { "%.1f%% - %s".format(it, summary.dippingPattern?.label) } ?: NO_DATA,
+                t(R.string.report_dipping),
+                summary.dippingPercent?.let { t(R.string.report_dipping_value, it, summary.dippingPattern?.let { pattern -> t(pattern.label) }.orEmpty()) }
+                    ?: noData(),
             ),
-            ReportRow("Mean pulse pressure", summary.overall?.let { "${it.pulsePressure.roundToInt()} mmHg" } ?: NO_DATA),
-            ReportRow("Readings", "${summary.cuffReadings} cuff, ${summary.wristReadings} wrist estimates"),
+            ReportRow(t(R.string.report_pulse_pressure), summary.overall?.let { t(R.string.report_mmhg_int, it.pulsePressure.roundToInt()) } ?: noData()),
+            ReportRow(t(R.string.report_readings), t(R.string.report_readings_value, summary.cuffReadings, summary.wristReadings)),
         ),
     )
 
     private fun heartRate(summary: HeartRateSummary) = ReportSection(
-        heading = "Heart rate and tachycardia",
+        heading = t(R.string.report_hr_section),
         rows = listOf(
-            ReportRow("Night resting heart rate", summary.nightRestingHeartRate?.let { "${it.roundToInt()} bpm (${summary.nights} night(s))" } ?: NO_DATA),
-            ReportRow("Morning surge (first hour after waking)", summary.morningSurge?.let { "%+d bpm".format(it.roundToInt()) } ?: NO_DATA),
             ReportRow(
-                "Daytime episodes > ${HeartRateReportCalculator.TACHYCARDIA_THRESHOLD.roundToInt()} bpm",
-                "${summary.tachycardiaEpisodes}, total ${duration(summary.tachycardiaDuration)}",
+                t(R.string.report_night_resting_hr),
+                summary.nightRestingHeartRate?.let { t(R.string.report_night_resting_hr_value, it.roundToInt(), summary.nights) } ?: noData(),
+            ),
+            ReportRow(t(R.string.report_morning_surge), summary.morningSurge?.let { t(R.string.report_bpm_signed, it.roundToInt()) } ?: noData()),
+            ReportRow(
+                t(R.string.report_tachy_episodes, HeartRateReportCalculator.TACHYCARDIA_THRESHOLD.roundToInt()),
+                t(R.string.report_tachy_value, summary.tachycardiaEpisodes, duration(summary.tachycardiaDuration)),
             ),
             ReportRow(
-                "Onset of effect after the morning dose",
-                summary.medicationOnset?.let { "${it.toMinutes()} min (median of ${summary.intakesWithOnset} of ${summary.intakes} logged intakes)" }
-                    ?: if (summary.intakes == 0) "no intakes logged" else "no heart-rate drop detected (${summary.intakes} intakes)",
+                t(R.string.report_onset),
+                summary.medicationOnset?.let { t(R.string.report_onset_value, it.toMinutes(), summary.intakesWithOnset, summary.intakes) }
+                    ?: if (summary.intakes == 0) t(R.string.report_no_intakes) else t(R.string.report_no_hr_drop, summary.intakes),
             ),
         ),
-        note = "Episodes count runs of >= ${HeartRateReportCalculator.MIN_EPISODE.toMinutes()} min outside recorded workouts. " +
-            "Onset = first 15-min heart-rate median >= ${MedicationEffectAnalyzer.ONSET_HEART_RATE_DROP.roundToInt()} bpm " +
-            "below the 30 min before the intake.",
+        note = t(
+            R.string.report_hr_note, HeartRateReportCalculator.MIN_EPISODE.toMinutes(), MedicationEffectAnalyzer.ONSET_HEART_RATE_DROP.roundToInt(),
+        ),
+    )
+
+    private fun sleep(summary: SleepReportSummary) = ReportSection(
+        heading = t(R.string.report_sleep_section),
+        rows = listOf(
+            ReportRow(t(R.string.report_nights), "${summary.nights}"),
+            ReportRow(t(R.string.report_waso), summary.meanWaso?.let { t(R.string.report_minutes, it.toMinutes()) } ?: noData()),
+            ReportRow(t(R.string.report_awakenings), summary.meanAwakenings?.let { "%.1f".format(it) } ?: noData()),
+            ReportRow(
+                t(R.string.report_vrr),
+                summary.meanVagalRecoveryRatio?.let {
+                    t(R.string.report_vrr_value, it, summary.recoveryStatus?.let { status -> t(status.label) }.orEmpty(), summary.recoveryNights)
+                } ?: noData(),
+            ),
+            ReportRow(
+                t(R.string.report_snoring),
+                t(
+                    R.string.report_snoring_value, t(summary.snoreImpact.label), summary.snoreEpisodes,
+                    summary.snoreCardiacSpikes, summary.assessedSnoreEpisodes,
+                ),
+            ),
+        ),
+        note = t(R.string.report_sleep_note),
     )
 
     private fun accuracy(accuracy: CalibrationAccuracy, time: DateTimeFormatter) = ReportSection(
-        heading = "Accuracy and calibration",
+        heading = t(R.string.report_accuracy),
         rows = listOf(
-            ReportRow("Cuff reference readings", accuracy.cuffReadings.size.toString()),
+            ReportRow(t(R.string.report_cuff_readings), accuracy.cuffReadings.size.toString()),
             ReportRow(
-                "Mean absolute wrist-cuff difference",
-                if (accuracy.comparisons.isEmpty()) NO_DATA else
-                    "SYS ${accuracy.meanAbsoluteSystolicDelta?.roundToInt()} / DIA ${accuracy.meanAbsoluteDiastolicDelta?.roundToInt()} mmHg",
+                t(R.string.report_mean_abs_diff),
+                if (accuracy.comparisons.isEmpty()) noData() else t(
+                    R.string.report_mean_abs_diff_value,
+                    accuracy.meanAbsoluteSystolicDelta?.roundToInt().toString(), accuracy.meanAbsoluteDiastolicDelta?.roundToInt().toString(),
+                ),
             ),
         ),
         table = ReportTable(
-            headers = listOf("Time", "Cuff", "Pulse", "Wrist", "Delta"),
+            headers = listOf(
+                t(R.string.report_col_time), t(R.string.report_col_cuff), t(R.string.report_col_pulse),
+                t(R.string.report_col_wrist), t(R.string.report_col_delta),
+            ),
             rows = accuracy.cuffReadings.map { cuff ->
                 val comparison = accuracy.comparisons.firstOrNull { it.cuff == cuff }
                 listOf(
@@ -118,21 +155,30 @@ class CardioReportFormatter {
                 )
             },
         ).takeIf { accuracy.cuffReadings.isNotEmpty() },
-        note = "Wrist estimate = nearest within ${CalibrationAccuracyCalculator.MAX_GAP.toMinutes()} min; delta = wrist - cuff.",
+        note = t(R.string.report_accuracy_note, CalibrationAccuracyCalculator.MAX_GAP.toMinutes()),
     )
 
     private fun mean(mean: PressureMean?): String =
-        mean?.let { "${pressure(it.systolic, it.diastolic)} mmHg (n = ${it.count})" } ?: NO_DATA
+        mean?.let { t(R.string.report_mean_value, pressure(it.systolic, it.diastolic), it.count) } ?: noData()
 
     private fun pressure(systolic: Double, diastolic: Double): String = "${systolic.roundToInt()}/${diastolic.roundToInt()}"
 
-    private fun duration(duration: Duration): String = "%d h %02d min".format(duration.toHours(), duration.toMinutes() % MINUTES_PER_HOUR)
+    private fun duration(duration: Duration): String =
+        t(R.string.report_duration, duration.toHours(), duration.toMinutes() % MINUTES_PER_HOUR)
+
+    private fun t(@StringRes id: Int, vararg args: Any): String = texts.resolve(uiText(id, *args))
+
+    private fun notSet(): String = t(R.string.report_not_set)
+
+    private fun noData(): String = t(R.string.no_data)
+
+    private fun sexLabel(sex: BiologicalSex): Int = when (sex) {
+        BiologicalSex.MALE -> R.string.sex_male
+        BiologicalSex.FEMALE -> R.string.sex_female
+    }
 
     private companion object {
-        const val TITLE = "Ambulatory cardio report"
         const val DATE_TIME_PATTERN = "dd.MM.yyyy HH:mm"
-        const val NOT_SET = "not set"
-        const val NO_DATA = "no data"
         const val MINUTES_PER_HOUR = 60
     }
 }

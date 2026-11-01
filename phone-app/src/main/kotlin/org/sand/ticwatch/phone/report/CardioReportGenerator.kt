@@ -7,10 +7,9 @@ import org.sand.ticwatch.phone.health.SampleWindowReader
 import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.health.UserProfileStore
 import org.sand.ticwatch.phone.history.SensorHistoryQueries
-import org.sand.ticwatch.phone.medication.MedicationDose
 import org.sand.ticwatch.phone.medication.MedicationEffectReader
 import org.sand.ticwatch.phone.medication.MedicationIntakeLog
-import org.sand.ticwatch.phone.medication.MedicationRegimen
+import org.sand.ticwatch.phone.sleep.SleepAdvancedInsightsReader
 import java.time.Clock
 import java.time.Duration
 import java.time.Year
@@ -21,6 +20,7 @@ data class CardioReportCalculators(
     val pressure: AmbulatoryPressureCalculator,
     val heartRate: HeartRateReportCalculator,
     val accuracy: CalibrationAccuracyCalculator,
+    val sleep: SleepReportCalculator,
 )
 
 /** Collects the history of the last [days] days into a [CardioReport] (ABPM-style summary for a cardiologist). */
@@ -32,7 +32,7 @@ class CardioReportGenerator(
     private val effects: MedicationEffectReader,
     private val profile: UserProfileStore,
     private val patientNames: PatientNameStore,
-    private val regimen: MedicationRegimen,
+    private val sleepInsights: SleepAdvancedInsightsReader,
     private val calculators: CardioReportCalculators,
     private val clock: Clock,
     private val zone: ZoneId,
@@ -47,7 +47,8 @@ class CardioReportGenerator(
         val workouts = samples.samples(WORKOUT_TYPES, from.minus(WORKOUT_LOOKBACK), to, emptyList())
             .mapNotNull { sample -> sample.endedAt?.let { TimeRange(sample.recordedAt, it) } }
         val sleepSessions = queries.sleepSessions(from.minus(NIGHT_LOOKBACK), to, null, MAX_SLEEP_SESSIONS)
-        val intakeEffects = intakes.intakes(from, to).map { effects.effect(it) }
+        val loggedIntakes = intakes.intakes(from, to)
+        val intakeEffects = loggedIntakes.map { effects.effect(it) }
         val birthYear = profile.birthYear()
         return CardioReport(
             generatedAt = to,
@@ -61,10 +62,11 @@ class CardioReportGenerator(
                 heightCm = profile.heightCm(),
                 weightKg = profile.weightKg(),
             ),
-            therapy = MedicationDose.entries.flatMap(regimen::medications),
+            medicationIntakes = loggedIntakes.size,
             pressure = calculators.pressure.summarize(readings),
             heartRate = calculators.heartRate.summarize(heartRates, from, to, sleepSessions, workouts, intakeEffects),
             accuracy = calculators.accuracy.compare(readings),
+            sleep = calculators.sleep.summarize(sleepInsights.nightsEndingIn(from, to)),
         )
     }
 

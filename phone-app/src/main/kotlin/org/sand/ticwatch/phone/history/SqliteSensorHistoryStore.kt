@@ -2,11 +2,12 @@ package org.sand.ticwatch.phone.history
 
 import android.content.ContentValues
 import android.database.Cursor
+import android.database.DatabaseUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.sand.ticwatch.phone.cloud.CloudOutbox
 import org.sand.ticwatch.phone.health.SensorSample
 import org.sand.ticwatch.phone.health.SensorType
-import org.sand.ticwatch.phone.health.SleepStageType
 import org.sand.ticwatch.phone.history.SensorHistoryDatabase.RollupTable
 import org.sand.ticwatch.phone.history.SensorHistoryDatabase.SleepSessionTable
 import org.sand.ticwatch.phone.history.SensorHistoryDatabase.SleepStageTable
@@ -15,15 +16,15 @@ import java.time.Instant
 import java.time.ZoneId
 
 /**
- * [SensorHistoryLog] + [SensorHistoryMaintenance] + [SensorHistoryQueries] + [SleepStageQueries] over
- * [SensorHistoryDatabase]; all I/O runs on [Dispatchers.IO].
+ * [SensorHistoryLog] + [SensorHistoryMaintenance] + [SensorHistoryQueries] + [SleepStageQueries] + the raw rows'
+ * [CloudOutbox] over [SensorHistoryDatabase]; all I/O runs on [Dispatchers.IO].
  */
 class SqliteSensorHistoryStore(
     private val database: SensorHistoryDatabase,
     private val projections: List<HistoryProjection>,
     private val zone: ZoneId,
 ) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries, SleepHistoryEraser,
-    SampleEraser {
+    SampleEraser, CloudOutbox<SensorHistoryRow>, RawHistoryHorizon {
 
     override suspend fun recordPending(samples: List<SensorSample>, receivedAt: Instant): List<Long> =
         withContext(Dispatchers.IO) {
@@ -89,8 +90,64 @@ class SqliteSensorHistoryStore(
         }
     }
 
-    override suspend fun purgeReceivedBefore(cutoff: Instant): Int = withContext(Dispatchers.IO) {
-        database.writableDatabase.delete(Table.NAME, "${Table.RECEIVED_AT} < ?", arrayOf(cutoff.toEpochMilli().toString()))
+    override suspend fun purgeReceivedBefore(cutoff: Instant, keepUnsynced: Boolean): Int = withContext(Dispatchers.IO) {
+        database.writableDatabase.delete(
+            Table.NAME,
+            "${Table.RECEIVED_AT} < ?${SensorHistoryDatabase.purgeableClause(Table.CLOUD_SYNCED, keepUnsynced)}",
+            arrayOf(cutoff.toEpochMilli().toString()),
+        )
+    }
+
+    override suspend fun pendingUpload(limit: Int): List<SensorHistoryRow> = withContext(Dispatchers.IO) {
+        // The literal flag matches the partial index's WHERE clause, so SQLite can use it.
+        database.readableDatabase.query(
+            Table.NAME,
+            SensorHistoryDatabase.SAMPLE_COLUMNS + Table.ID,
+            "${Table.CLOUD_SYNCED} = ${SensorHistoryDatabase.NOT_CLOUD_SYNCED}",
+            null,
+            null,
+            null,
+            "${Table.ID} ASC",
+            limit.toString(),
+        ).use { cursor ->
+            cursor.readAll { SensorHistoryRow(getLong(getColumnIndexOrThrow(Table.ID)), readSample()) }
+        }
+    }
+
+    override suspend fun markUploaded(items: List<SensorHistoryRow>) {
+        if (items.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            val db = database.writableDatabase
+            val values = ContentValues().apply { put(Table.CLOUD_SYNCED, SensorHistoryDatabase.CLOUD_SYNCED) }
+            db.beginTransaction()
+            try {
+                items.map { it.id }.chunked(MAX_BOUND_IDS).forEach { chunk ->
+                    val placeholders = chunk.joinToString(",") { "?" }
+                    db.update(Table.NAME, values, "${Table.ID} IN ($placeholders)", chunk.map(Long::toString).toTypedArray())
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        }
+    }
+
+    override suspend fun pendingUploadCount(): Long = withContext(Dispatchers.IO) {
+        DatabaseUtils.longForQuery(
+            database.readableDatabase,
+            "SELECT COUNT(*) FROM ${Table.NAME} WHERE ${Table.CLOUD_SYNCED} = ${SensorHistoryDatabase.NOT_CLOUD_SYNCED}",
+            null,
+        )
+    }
+
+    /** One MIN per type, each answered from the (type, recorded_at) index. */
+    override suspend fun oldestRecordedAt(types: Set<SensorType>): Instant? = withContext(Dispatchers.IO) {
+        types.mapNotNull { type ->
+            database.readableDatabase.rawQuery(
+                "SELECT MIN(${Table.RECORDED_AT}) FROM ${Table.NAME} WHERE ${Table.TYPE} = ?",
+                arrayOf(SensorTypeCodes.code(type).toString()),
+            ).use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null }
+        }.minOrNull()?.let(Instant::ofEpochMilli)
     }
 
     override suspend fun purgeRollupsBefore(resolution: RollupResolution, cutoff: Instant): Int =
@@ -102,13 +159,14 @@ class SqliteSensorHistoryStore(
             )
         }
 
-    override suspend fun purgeSleepSessionsBefore(cutoff: Instant): Int = withContext(Dispatchers.IO) {
+    override suspend fun purgeSleepSessionsBefore(cutoff: Instant, keepUnsynced: Boolean): Int = withContext(Dispatchers.IO) {
         val db = database.writableDatabase
         val cutoffArgs = arrayOf(cutoff.toEpochMilli().toString())
+        val purgeable = SensorHistoryDatabase.purgeableClause(SensorHistoryDatabase.SLEEP_CLOUD_SYNCED, keepUnsynced)
         db.beginTransaction()
         try {
-            db.delete(SleepStageTable.NAME, "${SleepStageTable.START} < ?", cutoffArgs)
-            db.delete(SleepSessionTable.NAME, "${SleepSessionTable.START} < ?", cutoffArgs)
+            db.delete(SleepStageTable.NAME, "${SleepStageTable.START} < ?$purgeable", cutoffArgs)
+            db.delete(SleepSessionTable.NAME, "${SleepSessionTable.START} < ?$purgeable", cutoffArgs)
                 .also { db.setTransactionSuccessful() }
         } finally {
             db.endTransaction()
@@ -280,7 +338,7 @@ class SqliteSensorHistoryStore(
     ): List<SleepSession> = withContext(Dispatchers.IO) {
         database.readableDatabase.query(
             SleepSessionTable.NAME,
-            arrayOf(SleepSessionTable.START, SleepSessionTable.END),
+            SLEEP_SESSION_COLUMNS,
             "${SleepSessionTable.START} < ? AND ${SleepSessionTable.END} > ? AND ${SleepSessionTable.START} > ?",
             arrayOf(
                 to.toEpochMilli().toString(),
@@ -292,30 +350,20 @@ class SqliteSensorHistoryStore(
             "${SleepSessionTable.START} ASC",
             limit.toString(),
         ).use { cursor ->
-            cursor.readAll { SleepSession(Instant.ofEpochMilli(getLong(0)), Instant.ofEpochMilli(getLong(1))) }
+            cursor.readAll { readSleepSession() }
         }
     }
 
     override suspend fun sleepStages(from: Instant, to: Instant): List<SleepStage> = withContext(Dispatchers.IO) {
         database.readableDatabase.query(
             SleepStageTable.NAME,
-            arrayOf(SleepStageTable.START, SleepStageTable.END, SleepStageTable.STAGE_TYPE, SleepStageTable.SESSION_START),
+            SLEEP_STAGE_COLUMNS,
             "${SleepStageTable.START} < ? AND ${SleepStageTable.END} > ?",
             arrayOf(to.toEpochMilli().toString(), from.toEpochMilli().toString()),
             null,
             null,
             "${SleepStageTable.START} ASC",
-        ).use { cursor ->
-            // SleepStageWriter stores only known codes, so fromCode never misses here.
-            cursor.readAll {
-                SleepStage(
-                    start = Instant.ofEpochMilli(getLong(0)),
-                    end = Instant.ofEpochMilli(getLong(1)),
-                    type = checkNotNull(SleepStageType.fromCode(getInt(2))),
-                    sessionStart = if (isNull(3)) null else Instant.ofEpochMilli(getLong(3)),
-                )
-            }
-        }
+        ).use { cursor -> cursor.readAll { readSleepStage() } }
     }
 
     override suspend fun deliveryCounts(from: Instant, to: Instant): Map<DeliveryStatus, Long> =

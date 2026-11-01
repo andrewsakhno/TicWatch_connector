@@ -21,57 +21,78 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.sand.ticwatch.phone.medication.EffectDelta
-import org.sand.ticwatch.phone.medication.Medication
 import org.sand.ticwatch.phone.medication.MedicationEffect
+import org.sand.ticwatch.phone.medication.MedicationProtection
 import org.sand.ticwatch.phone.report.AndroidCardioReportExporter
 import org.sand.ticwatch.phone.report.CardioReportComposer
 import org.sand.ticwatch.phone.report.CardioReportExporter
 import org.sand.ticwatch.phone.report.CardioReportGenerator
 import org.sand.ticwatch.phone.report.RenderedCardioReport
-import java.time.Instant
-import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.text.asString
 
 /**
- * Blood Pressure tab's medication card: the regimen, a one-tap "took my morning dose" log and the latest intake's
+ * Blood Pressure tab's medication card: a one-tap intake log (fact and time only - the therapy itself is managed
+ * outside the app) and the latest intake's
  * heart-rate / blood-pressure change at each checkpoint (a checkpoint still in the future shows as pending).
  */
 @Composable
-internal fun MedicationCard(medications: List<Medication>, latest: MedicationEffect?, now: Instant, onTaken: () -> Unit) =
-    SectionCard("Medication") {
-        medications.forEach { Text(text = "${it.name}: ${it.doseDescription()}", style = MaterialTheme.typography.bodySmall) }
-        Button(onClick = onTaken) { Text(text = "Took morning medication (${medications.joinToString(" + ") { it.name }})") }
+internal fun MedicationCard(latest: MedicationEffect?, protection: MedicationProtection?, now: Instant, onTaken: () -> Unit) =
+    SectionCard(stringResource(R.string.card_medication)) {
+        Button(onClick = onTaken) { Text(text = stringResource(R.string.medication_taken)) }
+        protection?.let { MedicationPhaseText(it) }
         if (latest == null) {
-            Text(text = "No intake logged in the last 24 hours.", style = MaterialTheme.typography.bodyMedium)
+            Text(text = stringResource(R.string.no_intake_24h), style = MaterialTheme.typography.bodyMedium)
             return@SectionCard
         }
-        Text(text = "Taken ${formatTime(latest.intake.takenAt)}", style = MaterialTheme.typography.bodyMedium)
+        Text(text = stringResource(R.string.taken_at, formatTime(latest.intake.takenAt)), style = MaterialTheme.typography.bodyMedium)
         Text(
-            text = "Before: " + listOfNotNull(
-                latest.baseline.heartRate?.let { "${it.roundToInt()} bpm" },
-                latest.baseline.systolic?.let { "${it.roundToInt()}/${latest.baseline.diastolic?.roundToInt()} mmHg" },
-            ).ifEmpty { listOf("no data") }.joinToString(" · "),
+            text = stringResource(
+                R.string.before,
+                listOfNotNull(
+                    latest.baseline.heartRate?.let { stringResource(R.string.bpm_int, it.roundToInt()) },
+                    latest.baseline.systolic?.let {
+                        stringResource(R.string.bp_pair_int, it.roundToInt(), latest.baseline.diastolic?.roundToInt()?.toString() ?: MISSING)
+                    },
+                ).ifEmpty { listOf(stringResource(R.string.no_data)) }.joinToString(VALUE_SEPARATOR),
+            ),
             style = MaterialTheme.typography.bodySmall,
         )
         latest.deltas.forEach { delta ->
             val due = latest.intake.takenAt.plus(delta.offset)
-            Text(text = "+${delta.offset.toHours()} h: ${if (due.isAfter(now)) "pending" else deltaText(delta)}", style = MaterialTheme.typography.bodySmall)
+            Text(text = stringResource(R.string.checkpoint, delta.offset.toHours(), if (due.isAfter(now)) stringResource(R.string.pending) else deltaText(delta)), style = MaterialTheme.typography.bodySmall)
         }
-        latest.onset?.let { Text(text = "Heart rate dropped after ${it.toMinutes()} min", style = MaterialTheme.typography.bodySmall) }
+        latest.onset?.let { Text(text = stringResource(R.string.hr_dropped_after, it.toMinutes()), style = MaterialTheme.typography.bodySmall) }
     }
 
+/** Current pharmacodynamic phase of the last intake and when the next one starts; shared with the Advisor tab. */
+@Composable
+internal fun MedicationPhaseText(protection: MedicationProtection) {
+    val next = protection.nextPhaseIn?.let { stringResource(R.string.next_phase_in, it.toHours(), it.toMinutes() % MINUTES_PER_HOUR) }.orEmpty()
+    Text(text = stringResource(R.string.phase_line, stringResource(protection.phase.label), next), style = MaterialTheme.typography.titleSmall)
+    Text(text = protection.phase.description.asString(), style = MaterialTheme.typography.bodySmall)
+}
+
+private const val MINUTES_PER_HOUR = 60
+private const val VALUE_SEPARATOR = " · "
+private const val MISSING = "--"
+
+@Composable
 private fun deltaText(delta: EffectDelta): String = listOfNotNull(
-    delta.heartRate?.let { "HR %+d bpm".format(it.roundToInt()) },
-    delta.systolic?.let { "BP %+d/%+d mmHg".format(it.roundToInt(), delta.diastolic?.roundToInt() ?: 0) },
-).ifEmpty { listOf("no data") }.joinToString(" · ")
+    delta.heartRate?.let { stringResource(R.string.hr_delta, it.roundToInt()) },
+    delta.systolic?.let { stringResource(R.string.bp_delta, it.roundToInt(), delta.diastolic?.roundToInt() ?: 0) },
+).ifEmpty { listOf(stringResource(R.string.no_data)) }.joinToString(VALUE_SEPARATOR)
 
 /** "Export report for doctor": pick 1-7 days, then print / save as PDF or share as Markdown. */
 @Composable
-internal fun ReportExportCard(composer: CardioReportComposer) = SectionCard("Report for your doctor") {
+internal fun ReportExportCard(composer: CardioReportComposer) = SectionCard(stringResource(R.string.card_report)) {
     val context = LocalContext.current
     val exporter: CardioReportExporter = remember(context) { AndroidCardioReportExporter(context) }
     val coroutineScope = rememberCoroutineScope()
@@ -81,25 +102,25 @@ internal fun ReportExportCard(composer: CardioReportComposer) = SectionCard("Rep
 
     fun export(action: (RenderedCardioReport) -> Unit) {
         menuOpen = false
-        status = "Preparing report..."
+        status = context.getString(R.string.report_preparing)
         coroutineScope.launch {
             runCatching { withContext(Dispatchers.IO) { composer.compose(days) } }
                 .onSuccess { status = null; action(it) }
-                .onFailure { status = "Report failed: ${it.message}" }
+                .onFailure { status = context.getString(R.string.report_failed, it.message.orEmpty()) }
         }
     }
 
-    Text(text = "Period, days", style = MaterialTheme.typography.bodySmall)
+    Text(text = stringResource(R.string.report_period_days), style = MaterialTheme.typography.bodySmall)
     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(CHIP_SPACING.dp)) {
         CardioReportGenerator.DAYS.forEach { option ->
             FilterChip(selected = option == days, onClick = { days = option }, label = { Text(text = "$option") })
         }
     }
     Box {
-        OutlinedButton(onClick = { menuOpen = true }) { Text(text = "Export report for doctor") }
+        OutlinedButton(onClick = { menuOpen = true }) { Text(text = stringResource(R.string.report_export)) }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(text = { Text(text = "Share PDF / Print") }, onClick = { export { exporter.print(it.html, it.name) } })
-            DropdownMenuItem(text = { Text(text = "Share as Markdown") }, onClick = { export { exporter.shareMarkdown(it.markdown, it.name) } })
+            DropdownMenuItem(text = { Text(text = stringResource(R.string.report_share_pdf)) }, onClick = { export { exporter.print(it.html, it.name) } })
+            DropdownMenuItem(text = { Text(text = stringResource(R.string.report_share_markdown)) }, onClick = { export { exporter.shareMarkdown(it.markdown, it.name) } })
         }
     }
     status?.let { Text(text = it, style = MaterialTheme.typography.bodySmall) }

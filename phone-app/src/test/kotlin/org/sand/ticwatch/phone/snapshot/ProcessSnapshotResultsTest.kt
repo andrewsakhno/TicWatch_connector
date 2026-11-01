@@ -34,7 +34,7 @@ class ProcessSnapshotResultsTest {
             return Result.success("test-id")
         }
 
-        override suspend fun requestAndAwait(timeout: Duration): Result<WatchSnapshotResult?> {
+        override suspend fun requestAndAwait(timeout: Duration, onAccepted: () -> Unit): Result<WatchSnapshotResult?> {
             requested++
             return reply()
         }
@@ -95,6 +95,6 @@ class ProcessSnapshotResultsTest {
         advanceUntilIdle()
 
         assertFalse(ProcessSnapshotResults.isRunning.value)
-        assertEquals(uiText(R.string.no_answer_from_watch), ProcessSnapshotResults.error.value)
+        assertEquals(uiText(R.string.snapshot_stuck, uiText(SnapshotStage.CONNECTING.label)), ProcessSnapshotResults.error.value)
     }
 }

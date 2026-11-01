@@ -14,10 +14,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import org.sand.ticwatch.phone.insights.Trend
 import java.time.Duration
 import java.time.Instant
+import org.sand.ticwatch.phone.R
+import org.sand.ticwatch.phone.insights.Trend
 
 private val LINE_WIDTH = 2.dp
 private val LAST_POINT_RADIUS = 3.dp
@@ -34,7 +36,7 @@ fun Sparkline(trend: Trend, color: Color, modifier: Modifier = Modifier) {
     val points = trend.points
     if (points.size < MIN_POINTS) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            Text("Not enough history yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.not_enough_history), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

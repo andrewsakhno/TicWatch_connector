@@ -1,6 +1,8 @@
 package org.sand.ticwatch.watch.bloodpressure
 
 import android.util.Log
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import org.sand.ticwatch.watch.power.AwakeRunner
 import org.sand.ticwatch.watch.sensors.QualifierProbe
 import org.sand.ticwatch.watch.sensors.WindowGate
@@ -14,7 +16,7 @@ import java.time.Duration
  * estimate to the history, the same as the page's "Measure" button. Paced by an alarm [scheduler], never `delay`.
  */
 class AutoBloodPressureController(
-    private val settings: AutoBloodPressureSettings,
+    private val enabled: Flow<Boolean>,
     private val gates: List<WindowGate>,
     private val stillness: () -> List<WindowQualifier>,
     private val probe: QualifierProbe,
@@ -27,8 +29,10 @@ class AutoBloodPressureController(
 
     suspend fun run() {
         while (true) {
+            // Switched off (the default), no alarm wakes the watch for this.
+            enabled.first { it }
             scheduler.awaitNext(interval)
-            if (!settings.isEnabled() || gates.any { !it.isOpen() }) continue
+            if (!enabled.first() || gates.any { !it.isOpen() }) continue
             awakeRunner.runAwake(probeDuration.plus(REQUEST_TIMEOUT)) {
                 if (probe.accepts(stillness(), probeDuration)) {
                     requester.requestAndAwait()

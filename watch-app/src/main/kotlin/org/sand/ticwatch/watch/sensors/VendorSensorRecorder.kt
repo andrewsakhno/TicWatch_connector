@@ -12,8 +12,8 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * Investigation aid: records every channel of the given Mobvoi vendor sensors to
- * [logFile] so their output can be pulled over the debug bridge and decoded. At most one
+ * Investigation aid, running only while the "Log capture" setting is on: records every channel of the given
+ * Mobvoi vendor sensors to [logFile] so their output can be pulled over the debug bridge and decoded. At most one
  * event per sensor type per [minLogInterval] is kept, so a fast-reporting sensor can run
  * for hours under [MAX_LOG_BYTES]. Registered with a long max report latency so the
  * sensor hub batches events in its FIFO instead of waking the application processor for

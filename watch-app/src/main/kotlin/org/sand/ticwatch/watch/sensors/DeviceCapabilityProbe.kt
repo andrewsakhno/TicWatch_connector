@@ -37,7 +37,7 @@ class HealthDeviceCapabilityProbe(private val context: Context) : DeviceCapabili
     private fun sensors(): List<String> =
         context.getSystemService(SensorManager::class.java)
             .getSensorList(Sensor.TYPE_ALL)
-            .map { "${it.type}|${it.stringType}|${it.name}|${it.vendor}" }
+            .map { "${it.type}|${it.stringType}|${it.name}|${it.vendor}|fifo=${it.fifoMaxEventCount}|wakeUp=${it.isWakeUpSensor}" }
 
     private fun vendorProviders(): List<String> =
         context.packageManager

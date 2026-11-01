@@ -2,6 +2,7 @@ package org.sand.ticwatch.phone.datalayer
 
 import android.util.Log
 import org.json.JSONObject
+import org.sand.ticwatch.phone.ecg.EcgMessageReceiver
 import org.sand.ticwatch.phone.snore.SnoreMonitorControl
 import org.sand.ticwatch.phone.snapshot.SnapshotResultReceiver
 import org.sand.ticwatch.phone.health.SensorDataSyncWorker
@@ -10,6 +11,7 @@ import org.sand.ticwatch.phone.route.WorkoutPayloads
 import org.sand.ticwatch.phone.route.WorkoutRouteRecorder
 import org.sand.ticwatch.phone.sync.SyncDirection
 import org.sand.ticwatch.phone.sync.SyncStatusReporter
+import org.sand.ticwatch.phone.watchbattery.WatchBatteryReceiver
 import org.sand.ticwatch.phone.watchsettings.WatchSettingsReceiver
 
 /**
@@ -35,6 +37,9 @@ class PhoneMessageRouter(
     private val snoreMonitor: SnoreMonitorControl,
     private val watchScreenshots: WatchScreenshotSink,
     private val snapshotResults: SnapshotResultReceiver,
+    private val watchBattery: WatchBatteryReceiver,
+    private val ecg: EcgMessageReceiver,
+    private val probeDumps: WatchProbeDumpSink,
 ) {
     /**
      * Handles one incoming message to completion. Returns false when the payload was received
@@ -65,12 +70,18 @@ class PhoneMessageRouter(
                 }
             }
 
-            // Answers a request someone is waiting on (e.g. the MCP `get_watch_logs` tool).
-            DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE -> {
+            // Answers a request someone is waiting on (the MCP `get_watch_logs` tool, a blood pressure estimate's sync).
+            DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE,
+            DataLayerPaths.MESSAGE_SYNC_NOW_RESULT -> {
                 val text = String(payload, Charsets.UTF_8)
                 runCatching { JSONObject(text).getString(REQUEST_ID) }
                     .onSuccess { replySink.deliver(it, text) }
-                    .onFailure { Log.w(TAG, "Watch log reply without a request id", it) }
+                    .onFailure { Log.w(TAG, "Watch reply on $path without a request id", it) }
+            }
+
+            DataLayerPaths.MESSAGE_DEBUG_RAW_PPG_RESPONSE -> {
+                runCatching { probeDumps.save(FileWatchProbeDumpSink.RAW_PPG_DUMP_NAME, payload) }
+                    .onFailure { Log.w(TAG, "Failed to store the raw PPG probe", it) }
             }
 
             DataLayerPaths.MESSAGE_DEBUG_SCREENSHOT_RESPONSE -> {
@@ -91,9 +102,17 @@ class PhoneMessageRouter(
                 if (handled) pushPublishers.forEach(WatchStatePublisher::publish)
             }
 
+            DataLayerPaths.MESSAGE_SNAPSHOT_PROGRESS -> snapshotResults.onSnapshotProgress(payload)
+
+            DataLayerPaths.MESSAGE_ECG_PROGRESS -> ecg.onProgress(payload)
+
+            DataLayerPaths.MESSAGE_ECG_RESULT -> handled = ecg.onResult(payload)
+
             DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST -> bloodPressureRequests.onMeasureRequested(payload)
 
             DataLayerPaths.MESSAGE_WATCH_SETTINGS -> watchSettings.onWatchSettings(payload)
+
+            DataLayerPaths.MESSAGE_WATCH_BATTERY -> watchBattery.onWatchBattery(payload)
 
             DataLayerPaths.MESSAGE_SNORE_MONITOR -> {
                 runCatching { WorkoutPayloads.isWorkoutActive(payload) }

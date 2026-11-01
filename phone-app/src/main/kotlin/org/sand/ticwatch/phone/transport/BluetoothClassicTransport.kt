@@ -16,7 +16,11 @@ import java.io.IOException
  * [FallbackDeviceLinkTransport] when the Wear Data Layer can't reach the watch (e.g. it
  * was never paired through the official Wear OS by Google flow).
  */
-class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransport {
+class BluetoothClassicTransport(
+    private val context: Context,
+    /** Small frames reuse its socket while it is held; resumable uploads always get their own. */
+    private val heldLink: HeldRfcommLink = HeldRfcommLink(),
+) : DeviceLinkTransport {
 
     override suspend fun send(path: String, length: Long, source: PayloadSource): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -37,10 +41,14 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
                     if (preemption?.isRequested == true) preemption.yieldLink()
                     val offsetBefore = upload?.confirmedOffset
                     try {
-                        val outcome = watch.createRfcommSocketToServiceRecord(TransportProtocol.SERVICE_UUID).use { socket ->
-                            socket.connect()
+                        val sentHeld = upload == null && heldLink.trySend(watch::connectLinkSocket) { socket ->
+                            val reply = sendOneShotFrame(socket, path, length, source)
+                            if (reply != TransportProtocol.ACK) throw IOException("Watch did not accept $path (reply=$reply)")
+                        }
+                        if (sentHeld) break
+                        val outcome = watch.connectLinkSocket().use { socket ->
                             if (upload != null && resumable) {
-                                upload.runOn(socket) { preemption?.isRequested == true }
+                                upload.runOn(socket.inputStream, socket.outputStream) { preemption?.isRequested == true }
                             } else {
                                 sendOneShotFrame(socket, path, length, source)
                                 ResumableUpload.Outcome.COMPLETED
@@ -80,7 +88,7 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
             }
         }
 
-    private fun sendOneShotFrame(socket: BluetoothSocket, path: String, length: Long, source: PayloadSource) {
+    private fun sendOneShotFrame(socket: BluetoothSocket, path: String, length: Long, source: PayloadSource): Int {
         val out = DataOutputStream(socket.outputStream)
         out.writeUTF(path)
         out.writeLong(length)
@@ -88,7 +96,7 @@ class BluetoothClassicTransport(private val context: Context) : DeviceLinkTransp
         out.flush()
         // Wait for the receiver's one-byte ack before closing - otherwise
         // the socket can tear down before the payload is fully delivered.
-        socket.inputStream.read()
+        return socket.inputStream.read()
     }
 
     companion object {

@@ -16,13 +16,22 @@ data class WatchSettings(
     /** Snoring analysis during sleep, on [snoreMicrophone]'s microphone. */
     val snoreAnalysis: Boolean = false,
     val snoreMicrophone: SnoreMicrophone = SnoreMicrophone.WATCH,
+    /** Raw pulse wave all night for pulse amplitude drops (apnea arousals); keeps the PPG at full rate. */
+    val nightPulseWave: Boolean = false,
+    /** Pauses the night monitor between its epochs (less PPG), so desaturations in the pauses go unseen. */
+    val nightMonitorIntermittent: Boolean = false,
+    /** BCP 47 tag of the app language picked on the phone ([LANGUAGE_SYSTEM] = follow the device). */
+    val language: String = LANGUAGE_SYSTEM,
     val changedAtEpochMs: Long = 0,
 )
 
+/** [WatchSettings.language] value meaning "use the device's own language". */
+const val LANGUAGE_SYSTEM = ""
+
 /** Which device listens for snoring: the watch costs its battery, the phone must lie next to the bed. */
-enum class SnoreMicrophone(val wireValue: String, val label: String) {
-    WATCH("watch", "Watch"),
-    PHONE("phone", "Phone");
+enum class SnoreMicrophone(val wireValue: String) {
+    WATCH("watch"),
+    PHONE("phone");
 
     fun next(): SnoreMicrophone = entries[(ordinal + 1) % entries.size]
 
@@ -37,6 +46,9 @@ object WatchSettingsPayload {
     private const val LOG_CAPTURE = "log_capture"
     private const val SNORE_ANALYSIS = "snore_analysis"
     private const val SNORE_MICROPHONE = "snore_microphone"
+    private const val NIGHT_PULSE_WAVE = "night_pulse_wave"
+    private const val NIGHT_MONITOR_INTERMITTENT = "night_monitor_intermittent"
+    private const val LANGUAGE = "language"
     private const val CHANGED_AT = "changed_at"
 
     fun encode(settings: WatchSettings): String = JSONObject()
@@ -44,16 +56,22 @@ object WatchSettingsPayload {
         .put(LOG_CAPTURE, settings.logCapture)
         .put(SNORE_ANALYSIS, settings.snoreAnalysis)
         .put(SNORE_MICROPHONE, settings.snoreMicrophone.wireValue)
+        .put(NIGHT_PULSE_WAVE, settings.nightPulseWave)
+        .put(NIGHT_MONITOR_INTERMITTENT, settings.nightMonitorIntermittent)
+        .put(LANGUAGE, settings.language)
         .put(CHANGED_AT, settings.changedAtEpochMs)
         .toString()
 
-    // Snore keys are optional: a peer built before them sends none.
+    // Snore, pulse wave, night monitor and language keys are optional: a peer built before them sends none.
     fun decode(payload: String): WatchSettings = JSONObject(payload).let {
         WatchSettings(
             autoBloodPressure = it.getBoolean(AUTO_BLOOD_PRESSURE),
             logCapture = it.getBoolean(LOG_CAPTURE),
             snoreAnalysis = it.optBoolean(SNORE_ANALYSIS, false),
             snoreMicrophone = SnoreMicrophone.of(it.optString(SNORE_MICROPHONE).ifEmpty { null }),
+            nightPulseWave = it.optBoolean(NIGHT_PULSE_WAVE, false),
+            nightMonitorIntermittent = it.optBoolean(NIGHT_MONITOR_INTERMITTENT, false),
+            language = it.optString(LANGUAGE, LANGUAGE_SYSTEM),
             changedAtEpochMs = it.getLong(CHANGED_AT),
         )
     }
@@ -80,6 +98,9 @@ class SharedPreferencesWatchSettingsStore private constructor(private val prefs:
             .putBoolean(KEY_LOG_CAPTURE, settings.logCapture)
             .putBoolean(KEY_SNORE_ANALYSIS, settings.snoreAnalysis)
             .putString(KEY_SNORE_MICROPHONE, settings.snoreMicrophone.wireValue)
+            .putBoolean(KEY_NIGHT_PULSE_WAVE, settings.nightPulseWave)
+            .putBoolean(KEY_NIGHT_MONITOR_INTERMITTENT, settings.nightMonitorIntermittent)
+            .putString(KEY_LANGUAGE, settings.language)
             .putLong(KEY_CHANGED_AT, settings.changedAtEpochMs)
             .apply()
         state.value = settings
@@ -90,6 +111,9 @@ class SharedPreferencesWatchSettingsStore private constructor(private val prefs:
         logCapture = prefs.getBoolean(KEY_LOG_CAPTURE, DEFAULTS.logCapture),
         snoreAnalysis = prefs.getBoolean(KEY_SNORE_ANALYSIS, DEFAULTS.snoreAnalysis),
         snoreMicrophone = SnoreMicrophone.of(prefs.getString(KEY_SNORE_MICROPHONE, null)),
+        nightPulseWave = prefs.getBoolean(KEY_NIGHT_PULSE_WAVE, DEFAULTS.nightPulseWave),
+        nightMonitorIntermittent = prefs.getBoolean(KEY_NIGHT_MONITOR_INTERMITTENT, DEFAULTS.nightMonitorIntermittent),
+        language = prefs.getString(KEY_LANGUAGE, null) ?: DEFAULTS.language,
         changedAtEpochMs = prefs.getLong(KEY_CHANGED_AT, DEFAULTS.changedAtEpochMs),
     )
 
@@ -99,6 +123,9 @@ class SharedPreferencesWatchSettingsStore private constructor(private val prefs:
         private const val KEY_LOG_CAPTURE = "log_capture"
         private const val KEY_SNORE_ANALYSIS = "snore_analysis"
         private const val KEY_SNORE_MICROPHONE = "snore_microphone"
+        private const val KEY_NIGHT_PULSE_WAVE = "night_pulse_wave"
+        private const val KEY_NIGHT_MONITOR_INTERMITTENT = "night_monitor_intermittent"
+        private const val KEY_LANGUAGE = "language"
         private const val KEY_CHANGED_AT = "changed_at"
         private val DEFAULTS = WatchSettings()
 

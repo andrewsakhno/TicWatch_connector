@@ -14,6 +14,9 @@ import kotlin.math.sqrt
  */
 interface WindowQualifier : WindowSensorListener {
     fun accepts(): Boolean
+
+    /** True once [accepts] can no longer pass, whatever the remaining window brings; [progress] is the elapsed part of it (0..1). */
+    fun alreadyRejects(progress: Double): Boolean = false
 }
 
 /**
@@ -25,8 +28,14 @@ interface WindowQualifier : WindowSensorListener {
  */
 class StillnessQualifier : WindowQualifier {
     override val sensorType = Sensor.TYPE_ACCELEROMETER
-    private var events = 0
-    private var movingEvents = 0
+
+    // Written by the listener on the main thread, read by the window's coroutine.
+    @Volatile private var events = 0
+    @Volatile private var movingEvents = 0
+
+    /** At a steady event rate the whole window has `events / progress` events, so this share is already past the limit. */
+    override fun alreadyRejects(progress: Double): Boolean =
+        events > 0 && movingEvents.toDouble() / events * progress > MAX_MOVING_FRACTION
 
     override fun onEvent(values: FloatArray, at: Instant) {
         if (values.size < AXES) return

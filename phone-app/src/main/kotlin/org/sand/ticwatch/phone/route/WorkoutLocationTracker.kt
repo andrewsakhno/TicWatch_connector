@@ -17,6 +17,7 @@ class WorkoutLocationTracker(
     private val locationSource: LocationSource,
     private val routeLog: ExerciseRouteLog,
     private val scope: CoroutineScope,
+    private val announcer: PhoneRouteTrackAnnouncer,
     private val interval: Duration = DEFAULT_INTERVAL,
 ) {
     private var tracking: Job? = null
@@ -28,7 +29,11 @@ class WorkoutLocationTracker(
         tracking = scope.launch {
             locationSource.fixes(interval)
                 .catch { error -> Log.w(TAG, "Location updates failed", error) }
-                .collect { point -> runCatching { routeLog.insert(listOf(point)) }.onFailure { Log.w(TAG, "Failed to store fix", it) } }
+                .collect { point ->
+                    runCatching { routeLog.insert(listOf(point)) }
+                        .onSuccess { announcer.onFix(point) }
+                        .onFailure { Log.w(TAG, "Failed to store fix", it) }
+                }
         }
         Log.i(TAG, "Workout route tracking started")
     }

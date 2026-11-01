@@ -5,6 +5,7 @@ import org.json.JSONObject
 import org.sand.ticwatch.phone.advisor.CardioReadinessSource
 import org.sand.ticwatch.phone.advisor.ReadinessFactor
 import org.sand.ticwatch.phone.mcp.McpTool
+import org.sand.ticwatch.phone.medication.MedicationProtection
 
 /** Current cardio readiness (the Advisor tab) for the agent to judge the user's state at a glance. */
 class GetCardioReadinessTool(
@@ -34,7 +35,7 @@ class GetCardioReadinessTool(
                 JSONObject()
                     .put("start", format.time(hour.start))
                     .put("score", hour.score)
-                    .put("state", hour.state.label)
+                    .put("state", format.text(hour.state.label))
                     .put("walk_window", hour.walkWindow),
             )
         }
@@ -47,8 +48,9 @@ class GetCardioReadinessTool(
         }
         return JSONObject()
             .put("readiness_score", assessment.score)
-            .put("state", assessment.state.label)
-            .put("key_recommendation", JSONObject().put("action", advice.action.title).put("text", advice.text).put("rationale", advice.rationale ?: JSONObject.NULL))
+            .put("state", format.text(assessment.state.label))
+            .put("key_recommendation", JSONObject().put("action", format.text(advice.action.title)).put("text", format.text(advice.text))
+                .put("rationale", advice.rationale?.let(format::text) ?: JSONObject.NULL))
             .put("limiting_factors", factors(assessment.limitingFactors))
             .put("factors", factors(assessment.factors))
             .put(
@@ -60,11 +62,22 @@ class GetCardioReadinessTool(
                     .put("spo2_percent", vitals.spo2Percent?.let(format::number) ?: JSONObject.NULL),
             )
             .put("forecast", forecast)
+            .put("medication_phase", medication(readiness.medication))
+            .put(
+                "night_recovery",
+                readiness.recovery?.let { JSONObject().put("vrr_ratio", format.number(it.ratio)).put("status", format.text(it.status.label)) } ?: JSONObject.NULL,
+            )
             .put("timestamp", format.time(assessment.at))
             .toString()
     }
 
+    private fun medication(protection: MedicationProtection): JSONObject = JSONObject()
+        .put("phase", format.text(protection.phase.label))
+        .put("description", format.text(protection.phase.description))
+        .put("last_intake_at", protection.lastIntakeAt?.let(format::time) ?: JSONObject.NULL)
+        .put("next_phase_in_minutes", protection.nextPhaseIn?.toMinutes() ?: JSONObject.NULL)
+
     private fun factors(factors: List<ReadinessFactor>): JSONArray = JSONArray().also { array ->
-        factors.forEach { array.put(JSONObject().put("factor", it.kind.label).put("detail", it.detail).put("points", it.points)) }
+        factors.forEach { array.put(JSONObject().put("factor", format.text(it.kind.label)).put("detail", format.text(it.detail)).put("points", it.points)) }
     }
 }

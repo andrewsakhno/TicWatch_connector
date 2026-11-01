@@ -22,8 +22,8 @@ class SettingsGatedSnoreMeter(
 /**
  * Hands sleep-state updates on to [next] and, while [settings] ask for snore analysis on the phone's microphone,
  * tells the phone through [sender] when a sleep session opens and closes. Re-evaluated on every sleep event, so a
- * setting changed mid-night applies at the next one. A night ended by sensor silence sends no "off": the phone
- * caps its own listening.
+ * setting changed mid-night applies at the next one. A night ended by sensor silence sends its "off" once the
+ * session check closes it; the phone still caps its own listening in case that never comes.
  */
 class PhoneSnoreMonitorRelay(
     private val next: SleepStateSink,

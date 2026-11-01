@@ -1,7 +1,5 @@
 package org.sand.ticwatch.watch
 
-import kotlinx.coroutines.flow.StateFlow
-import org.sand.ticwatch.watch.snapshot.SnapshotState
 import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
@@ -18,19 +16,13 @@ import org.sand.ticwatch.watch.screenshot.VisibleScreen
 import org.sand.ticwatch.watch.screenshot.WindowScreenCapturer
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.core.content.ContextCompat
 import androidx.wear.compose.material.MaterialTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.sand.ticwatch.watch.autoworkout.AutoWorkoutMode
-import org.sand.ticwatch.watch.autoworkout.AutoWorkoutSettings
 import org.sand.ticwatch.watch.autoworkout.SharedPreferencesAutoWorkoutSettings
 import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
-import org.sand.ticwatch.watch.sensors.LiveReadings
 import org.sand.ticwatch.watch.sensors.SensorCollectionService
 import org.sand.ticwatch.watch.settings.SharedPreferencesWatchSettingsStore
 import org.sand.ticwatch.watch.settings.WatchSettings
@@ -39,14 +31,17 @@ import org.sand.ticwatch.watch.transport.BluetoothLinkServerService
 
 class MainActivity : ComponentActivity() {
 
-    private var liveReadings by mutableStateOf<LiveReadings?>(null)
-    private var autoWorkoutMode by mutableStateOf<AutoWorkoutMode?>(null)
-    private var phonePayloads by mutableStateOf<PhonePayloadStores?>(null)
-    private var bloodPressureAvailable by mutableStateOf(false)
-    private var snapshotState by mutableStateOf<StateFlow<SnapshotState>?>(null)
-    private val autoWorkoutSettings: AutoWorkoutSettings by lazy { SharedPreferencesAutoWorkoutSettings(applicationContext) }
-    private var watchSettings by mutableStateOf<WatchSettings?>(null)
-    private val watchSettingsSync by lazy { WatchSettingsSync.create(applicationContext, lifecycleScope) }
+    /** Single source of truth of the dashboard; the composition only renders its state. */
+    private val dashboard by lazy {
+        WatchDashboardStore(
+            autoWorkoutSettings = SharedPreferencesAutoWorkoutSettings(applicationContext),
+            phonePayloads = { PhonePayloadStores.get(applicationContext) },
+            settingsStore = { SharedPreferencesWatchSettingsStore.get(applicationContext) },
+            settingsSync = lazy { WatchSettingsSync.create(applicationContext, lifecycleScope) },
+            scope = lifecycleScope,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
     private var boundToSensorService = false
     private var sensorService: SensorCollectionService.LocalBinder? = null
     private var holdingLiveHeartRate = false
@@ -55,18 +50,14 @@ class MainActivity : ComponentActivity() {
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             sensorService = binder as? SensorCollectionService.LocalBinder
-            liveReadings = sensorService?.readings
-            bloodPressureAvailable = sensorService != null
-            snapshotState = sensorService?.snapshotState
+            dashboard.bind(sensorService)
             updateLiveHeartRateDemand()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             sensorService = null
             holdingLiveHeartRate = false
-            liveReadings = null
-            bloodPressureAvailable = false
-            snapshotState = null
+            dashboard.bind(null)
         }
     }
 
@@ -105,31 +96,26 @@ class MainActivity : ComponentActivity() {
             requestStartupPermissions.launch(missing.toTypedArray())
         }
 
-        // First SharedPreferences access reads the file: off the main thread.
-        lifecycleScope.launch {
-            autoWorkoutMode = withContext(Dispatchers.IO) { autoWorkoutSettings.mode() }
-            phonePayloads = withContext(Dispatchers.IO) { PhonePayloadStores.get(applicationContext) }
-            val settingsStore = withContext(Dispatchers.IO) { SharedPreferencesWatchSettingsStore.get(applicationContext) }
-            // A change from the phone shows up here too.
-            settingsStore.settings.collect { watchSettings = it }
-        }
-
         setContent {
             MaterialTheme {
-                val stores = phonePayloads
+                val state by dashboard.state.collectAsState()
+                val stores = state.phonePayloads
+                val watchSettings = state.settings
+                val snapshotState = state.service?.snapshotState
                 WatchDashboardScreen(
-                    readings = liveReadings,
+                    readings = state.service?.readings,
+                    cardioReadiness = stores?.cardioReadiness?.latest,
                     healthScores = stores?.healthScores?.latest,
                     spaceWeather = stores?.spaceWeather?.latest,
                     bloodPressure = BloodPressurePageState(
                         history = stores?.bloodPressureHistory?.latest,
                         lastResult = stores?.bloodPressureResult?.latest,
-                        onMeasure = if (bloodPressureAvailable) ::requestBloodPressure else null,
+                        onMeasure = if (state.service != null) ::requestBloodPressure else null,
                         autoMeasure = watchSettings?.autoBloodPressure,
                         onAutoMeasureChange = ::setAutoBloodPressure,
                     ),
-                    autoWorkoutMode = autoWorkoutMode,
-                    onAutoWorkoutModeClick = ::cycleAutoWorkoutMode,
+                    autoWorkoutMode = state.autoWorkoutMode,
+                    onAutoWorkoutModeClick = dashboard::cycleAutoWorkoutMode,
                     logCapture = watchSettings?.logCapture,
                     onLogCaptureChange = ::setLogCapture,
                     snoreAnalysis = SnoreAnalysisState(
@@ -160,16 +146,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setLogCapture(enabled: Boolean) = changeSettings { it.copy(logCapture = enabled) }
 
-    /** Stored and sent to the phone; the screen follows through the store's flow. */
-    private fun changeSettings(transform: (WatchSettings) -> WatchSettings) {
-        lifecycleScope.launch(Dispatchers.IO) { watchSettingsSync.change(transform) }
-    }
-
-    private fun cycleAutoWorkoutMode() {
-        val next = autoWorkoutMode?.next() ?: return
-        autoWorkoutMode = next
-        lifecycleScope.launch(Dispatchers.IO) { autoWorkoutSettings.setMode(next) }
-    }
+    private fun changeSettings(transform: (WatchSettings) -> WatchSettings) = dashboard.changeSettings(transform)
 
     private fun startupPermissions(): List<String> = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)

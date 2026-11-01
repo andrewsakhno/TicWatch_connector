@@ -1,15 +1,10 @@
 package org.sand.ticwatch.phone.advisor
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.Flow
+import org.sand.ticwatch.phone.ui.UiStateStore
 
 /** Advisor tab state (MVI model). */
 data class AdvisorUiState(
@@ -27,31 +22,32 @@ sealed interface AdvisorIntent {
 
 /**
  * MVI store of the Advisor tab: [dispatch] intents, observe [state]. Loads on [ioDispatcher] inside [scope], so work
- * is cancelled with the owning screen.
+ * is cancelled with the owning screen; re-loads by itself whenever [changes] emits (also once at start).
  */
 class CardioAdvisorStore(
     private val source: CardioReadinessSource,
-    private val scope: CoroutineScope,
-    private val ioDispatcher: CoroutineDispatcher,
-) {
-    private val mutableState = MutableStateFlow(AdvisorUiState())
-    val state: StateFlow<AdvisorUiState> = mutableState.asStateFlow()
+    changes: Flow<*>,
+    scope: CoroutineScope,
+    ioDispatcher: CoroutineDispatcher,
+) : UiStateStore<AdvisorUiState>(AdvisorUiState(), scope, ioDispatcher) {
     private var loadJob: Job? = null
+
+    init {
+        observe(changes) { refresh() }
+    }
 
     fun dispatch(intent: AdvisorIntent) {
         when (intent) {
             AdvisorIntent.Refresh -> refresh()
-            AdvisorIntent.ToggleFactors -> mutableState.update { it.copy(factorsExpanded = !it.factorsExpanded) }
+            AdvisorIntent.ToggleFactors -> setState { it.copy(factorsExpanded = !it.factorsExpanded) }
         }
     }
 
     private fun refresh() {
         loadJob?.cancel()
-        mutableState.update { it.copy(loading = true, error = null) }
-        loadJob = scope.launch {
-            val result = runCatching { withContext(ioDispatcher) { source.load() } }
-                .onFailure { if (it is CancellationException) throw it }
-            mutableState.update { current ->
+        setState { it.copy(loading = true, error = null) }
+        loadJob = launchLocalFirstRead(source::load) { result ->
+            setState { current ->
                 result.fold(
                     onSuccess = { current.copy(loading = false, readiness = it) },
                     onFailure = { current.copy(loading = false, error = it.message ?: it.javaClass.simpleName) },

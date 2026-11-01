@@ -6,6 +6,10 @@
     <string name="tile_name">TicWatch Pulse</string>
     <string name="tile_open">Otwórz</string>
     <string name="tile_readiness_name">Gotowość serca</string>
+    <string name="readiness_percent">%1$d%%</string>
+    <string name="gauge_cardio">Kardio</string>
+    <string name="gauge_load">Obciążenie</string>
+    <string name="gauge_with_label">%1$s: %2$s</string>
     <string name="heart_rate">Tętno</string>
     <string name="readiness_hrv">Gotowość / HRV</string>
     <string name="sleep_score">Ocena snu</string>
@@ -62,6 +66,11 @@
     <string name="band_active">Aktywnie</string>
     <string name="band_storm">Burza</string>
     <string name="band_low">Niski</string>
+    <string name="fatigue_index">Indeks zmęczenia</string>
+    <string name="band_fresh">Wypoczęty</string>
+    <string name="band_moderate_fatigue">Umiarkowane</string>
+    <string name="band_pronounced_fatigue">Wyraźne</string>
+    <string name="band_exhausted">Wyczerpanie</string>
     <string name="blood_pressure">Ciśnienie krwi</string>
     <string name="mmhg">mmHg</string>
     <string name="pulse_value">tętno %1$d</string>

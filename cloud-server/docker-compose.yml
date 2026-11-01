@@ -1,0 +1,60 @@
+# Cloud history on the netbook; `deploy-netbook.sh` loads the image and runs this with Debian's docker-compose 1.29,
+# hence the 2.4 file format. Port 8766 must be reachable from the phone's Wi-Fi (it scans its /24 for it).
+version: "2.4"
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 512m
+    # 2 GB of RAM, 5400 rpm disk. fsync and synchronous_commit stay on: the phone marks rows synced once the server
+    # answers, so a lost commit would be lost data.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=20
+      - -c
+      - work_mem=4MB
+      - -c
+      - effective_cache_size=256MB
+    environment:
+      POSTGRES_DB: ticwatch
+      POSTGRES_USER: ticwatch
+      POSTGRES_PASSWORD: ticwatch
+    volumes:
+      - ticwatch-db:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP: during init the image's temporary server listens on the socket only.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ticwatch -d ticwatch"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  cloud:
+    image: ticwatch-cloud-server:latest
+    restart: unless-stopped
+    mem_limit: 128m
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TICWATCH_DB_URL: postgres://db:5432/ticwatch
+      TICWATCH_DB_USER: ticwatch
+      TICWATCH_DB_PASSWORD: ticwatch
+      # Leave empty on the home LAN; set to require "Authorization: Bearer <key>".
+      TICWATCH_CLOUD_API_KEY: ""
+      # From .env next to this file (deploy-netbook.sh creates it); blank locks the MyApplication admin page.
+      MYAPPLICATION_ADMIN_PASSWORD: ${MYAPPLICATION_ADMIN_PASSWORD:-}
+      GOMEMLIMIT: 100MiB
+    ports:
+      - "8766:8766"
+    healthcheck:
+      test: ["CMD", "/cloud-server", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  ticwatch-db:

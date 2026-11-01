@@ -1,17 +1,19 @@
 package org.sand.ticwatch.phone.insights
 
+import androidx.annotation.StringRes
 import java.time.LocalDate
 import kotlin.math.sqrt
+import org.sand.ticwatch.phone.R
 
 /** One night's mean RMSSD, keyed by the local date the night ended on. */
 data class NightlyValue(val date: LocalDate, val value: Double)
 
 /** Garmin-style HRV status of the 7-day nightly RMSSD mean against the personal [HrvBaseline]. */
-enum class HrvStatusLevel(val label: String) {
-    BALANCED("Balanced"),
-    UNBALANCED("Unbalanced"),
-    LOW("Low"),
-    POOR("Poor"),
+enum class HrvStatusLevel(@StringRes val label: Int) {
+    BALANCED(R.string.hrv_status_balanced),
+    UNBALANCED(R.string.hrv_status_unbalanced),
+    LOW(R.string.hrv_status_low),
+    POOR(R.string.hrv_status_poor),
 }
 
 /** The personal norm corridor [low]..[high] (mean ± the band factor times SD); below [veryLow] reads as LOW. */

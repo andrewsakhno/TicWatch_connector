@@ -32,6 +32,8 @@ class WatchDataLayerListenerService : WearableListenerService() {
             replyTransport = TransportFactory.create(applicationContext),
             phonePayloads = WatchMessageRouter.phonePayloadSinks(applicationContext, scope),
             snapshotRequester = SensorCollectionService.snapshotRequester(applicationContext),
+            syncNowRequester = SensorCollectionService.syncNowRequester(applicationContext),
+            ecgRequester = SensorCollectionService.ecgRequester(applicationContext),
             scope = scope,
         )
     }

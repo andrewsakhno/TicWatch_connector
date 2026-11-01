@@ -4,9 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.time.Clock
-import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 
 /**
@@ -86,18 +83,9 @@ class SharedPreferencesCloudSettings private constructor(private val prefs: Shar
 }
 
 /**
- * While cloud storage is on, rows not yet uploaded outlive the chosen retention by up to [MAX_HOLD]
- * (a server that's off for a while doesn't lose data); after that, or with cloud storage off, the
- * retention applies to them too.
+ * While cloud storage is on, rows not yet uploaded stay until the server acknowledges them, however long it is
+ * away; with cloud storage off nothing would ever upload them, so the retention applies to them too.
  */
-class SettingsCloudRetentionHold(
-    private val settings: CloudSettingsStore,
-    private val clock: Clock,
-) : CloudRetentionHold {
-    override suspend fun unsyncedCutoff(cutoff: Instant): Instant =
-        if (settings.get().enabled) minOf(cutoff, clock.instant().minus(MAX_HOLD)) else cutoff
-
-    companion object {
-        val MAX_HOLD: Duration = Duration.ofDays(30)
-    }
+class SettingsCloudRetentionHold(private val settings: CloudSettingsStore) : CloudRetentionHold {
+    override suspend fun keepsUnsynced(): Boolean = settings.get().enabled
 }

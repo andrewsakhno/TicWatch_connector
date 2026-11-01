@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import org.sand.ticwatch.watch.ecg.EcgRequester
 import org.sand.ticwatch.watch.install.ApkInstaller
 import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
 import org.sand.ticwatch.watch.phonedata.PhonePayloadSink
@@ -35,6 +36,10 @@ class WatchMessageRouter(
     private val phonePayloads: Map<String, PhonePayloadSink>,
     /** Hands the phone's snapshot command to the sensor service, which owns the sensors. */
     private val snapshotRequester: SnapshotRequester,
+    /** Hands the phone's sync-now command to the sensor service, which owns the sample buffer. */
+    private val syncNowRequester: SyncNowRequester,
+    /** Hands the phone's rhythm-recording command to the sensor service. */
+    private val ecgRequester: EcgRequester,
     private val scope: CoroutineScope,
 ) {
     private val pendingInstallPackage = AtomicReference<String?>()
@@ -65,6 +70,18 @@ class WatchMessageRouter(
                     .getOrNull()?.takeIf { it.isNotEmpty() }
                 Log.i(TAG, "Snapshot requested by the phone ($requestId)")
                 snapshotRequester.request(requestId)
+            }
+
+            DataLayerPaths.MESSAGE_SYNC_NOW -> {
+                val requestId = SyncNowPayloads.decodeRequestId(payload)
+                Log.i(TAG, "Immediate sync requested by the phone ($requestId)")
+                syncNowRequester.request(requestId)
+            }
+
+            DataLayerPaths.MESSAGE_ECG_CAPTURE -> {
+                val requestId = SyncNowPayloads.decodeRequestId(payload)
+                Log.i(TAG, "Rhythm recording requested by the phone ($requestId)")
+                ecgRequester.request(requestId)
             }
 
             in phonePayloads -> phonePayloads.getValue(path).accept(String(payload, Charsets.UTF_8))
@@ -143,7 +160,9 @@ class WatchMessageRouter(
         /** Every phone -> watch payload path with its receiver: the dashboard stores plus the synced settings. */
         fun phonePayloadSinks(context: Context, scope: CoroutineScope): Map<String, PhonePayloadSink> =
             PhonePayloadStores.get(context).sinksByPath +
-                (DataLayerPaths.MESSAGE_WATCH_SETTINGS to WatchSettingsSync.create(context, scope))
+                (DataLayerPaths.MESSAGE_WATCH_SETTINGS to WatchSettingsSync.create(context, scope)) +
+                (DataLayerPaths.MESSAGE_LIVE_SYNC to LiveSyncLease.processWide) +
+                (DataLayerPaths.MESSAGE_PHONE_ROUTE_TRACK to LiveSyncLease.phoneRouteTrack)
 
         private const val REQUEST_ID = "request_id"
         private const val SENSOR_SNAPSHOT_TIMEOUT_MS = 5_000L

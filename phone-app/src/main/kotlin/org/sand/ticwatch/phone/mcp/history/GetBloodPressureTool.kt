@@ -40,7 +40,7 @@ class GetBloodPressureTool(
         .put("time", format.time(reading.measuredAt))
         .put("systolic", format.number(reading.systolic))
         .put("diastolic", format.number(reading.diastolic))
-        .put("category", reading.category.label)
+        .put("category", format.text(reading.category.label))
         .put("source", reading.source.name)
         .apply { reading.pulse?.let { put("pulse", format.number(it)) } }
 

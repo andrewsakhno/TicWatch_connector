@@ -8,20 +8,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.time.Instant
 import org.sand.ticwatch.phone.medication.CardioAdvisor
-import org.sand.ticwatch.phone.spaceweather.GeomagneticAlert
 import org.sand.ticwatch.phone.spaceweather.GeomagneticAlertPolicy
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherStore
-import java.time.Instant
+import org.sand.ticwatch.phone.ui.LOAD_ONCE
+import org.sand.ticwatch.phone.ui.ReloadingStore
+import org.sand.ticwatch.phone.ui.rememberStore
 
 /** Opened from a geomagnetic alert notification: the disturbance still ahead (if any) and the personalised advice. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,19 +30,19 @@ fun CardioAdviceBottomSheet(
     advisor: CardioAdvisor,
     onDismiss: () -> Unit,
 ) {
-    var alert by remember { mutableStateOf<GeomagneticAlert?>(null) }
-    LaunchedEffect(Unit) {
-        alert = withContext(Dispatchers.IO) { store.load()?.let { policy.alertFor(it, Instant.now()) } }
+    val alertStore = rememberStore(store) { scope, io ->
+        ReloadingStore(scope, io, LOAD_ONCE) { store.load()?.let { policy.alertFor(it, Instant.now()) } }
     }
+    val alert by alertStore.state.collectAsState()
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.padding(SHEET_PADDING.dp), verticalArrangement = Arrangement.spacedBy(ITEM_SPACING.dp)) {
-            Text(text = "Geomagnetic activity and your heart", style = MaterialTheme.typography.titleLarge)
+            Text(text = stringResource(R.string.geomagnetic_sheet_title), style = MaterialTheme.typography.titleLarge)
             Text(
-                text = alert?.let { "Peak Kp ${"%.1f".format(it.maxKp)} (${it.level.label}) around ${formatTime(it.peakAt)}" }
-                    ?: "No disturbance ahead in the latest forecast.",
+                text = alert?.let { stringResource(R.string.geomagnetic_peak, it.maxKp, stringResource(it.level.label), formatTime(it.peakAt)) }
+                    ?: stringResource(R.string.geomagnetic_none),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            advisor.advice().forEach { Text(text = "• $it", style = MaterialTheme.typography.bodyMedium) }
+            advisor.advice().forEach { Text(text = stringResource(R.string.bullet, stringResource(it)), style = MaterialTheme.typography.bodyMedium) }
         }
     }
 }

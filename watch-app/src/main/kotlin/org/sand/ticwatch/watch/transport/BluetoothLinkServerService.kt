@@ -11,6 +11,12 @@ import android.bluetooth.BluetoothSocket
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
+import java.io.Closeable
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,16 +25,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.sand.ticwatch.watch.R
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
 import org.sand.ticwatch.watch.datalayer.WatchMessageRouter
-import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
 import org.sand.ticwatch.watch.datalayer.defaultDebugProbeRoutes
+import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
 import org.sand.ticwatch.watch.sensors.HealthServicesSensorCollector
 import org.sand.ticwatch.watch.sensors.SensorCollectionService
-import java.io.DataInputStream
-import java.io.DataOutputStream
-import java.io.File
-import java.io.InputStream
 
 /**
  * Long-running counterpart to [BluetoothClassicTransport] on the phone side: listens
@@ -46,6 +49,10 @@ class BluetoothLinkServerService : Service() {
         ResumableTransferReceiver(File(noBackupFilesDir, INCOMING_TRANSFERS_DIR))
     }
 
+    private val wifiLink: WifiLinkServer by lazy {
+        WifiLinkServer(applicationContext, scope, ::serveFrames)
+    }
+
     private val router: WatchMessageRouter by lazy {
         WatchMessageRouter(
             context = applicationContext,
@@ -55,6 +62,8 @@ class BluetoothLinkServerService : Service() {
             replyTransport = TransportFactory.create(applicationContext),
             phonePayloads = WatchMessageRouter.phonePayloadSinks(applicationContext, scope),
             snapshotRequester = SensorCollectionService.snapshotRequester(applicationContext),
+            syncNowRequester = SensorCollectionService.syncNowRequester(applicationContext),
+            ecgRequester = SensorCollectionService.ecgRequester(applicationContext),
             scope = scope,
         )
     }
@@ -109,24 +118,51 @@ class BluetoothLinkServerService : Service() {
     }
 
     private suspend fun handleConnection(socket: BluetoothSocket) {
+        serveFrames(socket, socket.inputStream, socket.outputStream)
+    }
+
+    /** Runs the link's frames on one connection, RFCOMM or Wi-Fi, and closes it when they end. */
+    private suspend fun serveFrames(connection: Closeable, rawInput: InputStream, rawOutput: OutputStream) {
         runCatching {
-            socket.use {
-                val input = DataInputStream(it.inputStream)
-                val path = input.readUTF()
-                val length = input.readLong()
-                if (path == TransportProtocol.RESUMABLE_FRAME_PATH) {
-                    // The receiver writes its own per-chunk and final replies.
-                    resumableReceiver.receive(it, input, DataOutputStream(it.outputStream)) { realPath, file ->
-                        file.inputStream().use { payload -> dispatch(realPath, payload) }
+            connection.use {
+                val input = DataInputStream(rawInput)
+                val output = DataOutputStream(rawOutput)
+                var path = input.readUTF()
+                while (true) {
+                    val length = input.readLong()
+                    if (path == TransportProtocol.RESUMABLE_FRAME_PATH) {
+                        // The receiver writes its own per-chunk and final replies.
+                        resumableReceiver.receive(connection, input, output) { realPath, file ->
+                            file.inputStream().use { payload -> dispatch(realPath, payload) }
+                        }
+                        return@use
                     }
-                    return@use
+                    if (path == TransportProtocol.WIFI_OFFER_FRAME_PATH) {
+                        answerWifiOffer(output)
+                    } else {
+                        dispatch(path, BoundedInputStream(input, length))
+                        // Ack so the sender knows it's safe to close its end of the socket.
+                        output.writeByte(TransportProtocol.ACK)
+                        output.flush()
+                    }
+                    // A sender holding the link sends its next frame here; any other has closed the socket by now.
+                    path = runCatching { input.readUTF() }.getOrNull() ?: return@use
                 }
-                dispatch(path, BoundedInputStream(input, length))
-                // Ack so the sender knows it's safe to close its end of the socket.
-                it.outputStream.write(TransportProtocol.ACK)
-                it.outputStream.flush()
             }
-        }.onFailure { Log.w(TAG, "Failed to handle incoming Bluetooth connection", it) }
+        }.onFailure { Log.w(TAG, "Failed to handle incoming link connection", it) }
+    }
+
+    private suspend fun answerWifiOffer(output: DataOutputStream) {
+        val endpoint = wifiLink.open()
+        if (endpoint == null) {
+            output.writeByte(TransportProtocol.NACK)
+        } else {
+            output.writeByte(TransportProtocol.WIFI_READY)
+            output.writeUTF(endpoint.host)
+            output.writeInt(endpoint.port)
+            output.write(endpoint.key)
+        }
+        output.flush()
     }
 
     private suspend fun dispatch(path: String, payload: InputStream) {
@@ -140,11 +176,11 @@ class BluetoothLinkServerService : Service() {
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Watch link bridge", NotificationManager.IMPORTANCE_MIN),
+            NotificationChannel(CHANNEL_ID, getString(R.string.bridge_channel), NotificationManager.IMPORTANCE_MIN),
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("TicWatch Connector")
-            .setContentText("Listening for phone requests over Bluetooth")
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.bridge_text))
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .build()
     }
@@ -153,6 +189,7 @@ class BluetoothLinkServerService : Service() {
 
     override fun onDestroy() {
         runCatching { serverSocket?.close() }
+        wifiLink.close()
         scope.cancel()
         super.onDestroy()
     }

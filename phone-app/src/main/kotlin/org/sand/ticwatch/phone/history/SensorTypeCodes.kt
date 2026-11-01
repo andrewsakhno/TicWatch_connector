@@ -54,6 +54,8 @@ internal object SensorTypeCodes {
         SensorType.HEART_RATE_ALERT to 43,
         SensorType.BLOOD_PRESSURE_SYSTOLIC to 44,
         SensorType.BLOOD_PRESSURE_DIASTOLIC to 45,
+        SensorType.PULSE_AMPLITUDE_DROP to 46,
+        SensorType.FATIGUE_INDEX to 47,
     )
 
     private val types: Map<Int, SensorType> = codes.entries.associate { (type, code) -> code to type }

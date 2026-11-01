@@ -4,18 +4,27 @@ import android.util.Log
 import androidx.health.services.client.data.UserActivityInfo
 import androidx.health.services.client.data.UserActivityState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
+import org.sand.ticwatch.watch.datalayer.LiveSyncSignal
 import org.sand.ticwatch.watch.sensors.UserActivityObserver
+import org.sand.ticwatch.watch.sensors.WindowScheduler
 import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
+import java.time.Duration
 
 /**
  * Records the watch's own GPS track while a Health Services workout runs, so the route doesn't
- * depend on the phone being carried. Fixes go to the phone in batches of [batchSize] during the
+ * depend on the phone being carried; while [phoneTrack] says the phone is getting good fixes of its
+ * own, the watch's GPS stays off (re-checked every [phoneTrackCheckInterval] on [scheduler], since a
+ * phone left behind sends nothing more and a coroutine `delay` wouldn't elapse on a sleeping watch).
+ * Fixes go to the phone in batches of [batchSize] during the
  * workout and the rest right when it ends - before the EXERCISE sample's next sync flush, since
  * phone-app joins the points to the session by time when it writes the record. A failed batch
  * stays pending and rides along with the next one; the phone de-duplicates by fix time.
@@ -24,6 +33,9 @@ class WatchRouteRecorder(
     private val fixSource: LocationFixSource,
     private val transport: DeviceLinkTransport,
     private val scope: CoroutineScope,
+    private val phoneTrack: LiveSyncSignal,
+    private val scheduler: WindowScheduler,
+    private val phoneTrackCheckInterval: Duration,
     private val batchSize: Int = DEFAULT_BATCH_SIZE,
 ) : UserActivityObserver {
 
@@ -31,16 +43,35 @@ class WatchRouteRecorder(
     private val pending = mutableListOf<RouteFix>()
     private val sendMutex = Mutex()
     private var recording = false
+    private var gpsControl: Job? = null
 
     override fun onUserActivity(info: UserActivityInfo) {
         val isActive = info.userActivityState == UserActivityState.USER_ACTIVITY_EXERCISE
         if (isActive == recording) return
         recording = isActive
         if (isActive) {
-            fixSource.start(::onFix)
+            gpsControl = scope.launch { controlGps() }
         } else {
-            fixSource.stop()
-            scope.launch { flushWithRetry() }
+            val running = gpsControl
+            gpsControl = null
+            scope.launch {
+                // Joined first: the fix source is only ever touched by one of these at a time.
+                running?.cancelAndJoin()
+                fixSource.stop()
+                flushWithRetry()
+            }
+        }
+    }
+
+    private suspend fun controlGps() {
+        while (true) {
+            if (phoneTrack.isActive()) {
+                fixSource.stop()
+                scheduler.awaitNext(phoneTrackCheckInterval)
+            } else {
+                fixSource.start(::onFix)
+                phoneTrack.active.first { it }
+            }
         }
     }
 
@@ -74,7 +105,7 @@ class WatchRouteRecorder(
     private companion object {
         const val TAG = "WatchRouteRecorder"
 
-        /** ~4 min of fixes at the 4 s interval, ~8 KB of JSON: far below the resumable-frame threshold. */
+        /** ~10 min of fixes at the 10 s interval, ~8 KB of JSON: far below the resumable-frame threshold. */
         const val DEFAULT_BATCH_SIZE = 60
         const val MAX_ATTEMPTS = 5
         const val RETRY_DELAY_MS = 10_000L

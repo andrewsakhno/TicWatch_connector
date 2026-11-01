@@ -1,11 +1,6 @@
 package org.sand.ticwatch.phone.mcp.history
 
-import org.json.JSONArray
-import org.json.JSONObject
-import org.sand.ticwatch.phone.health.SensorType
-import org.sand.ticwatch.phone.history.RollupPoint
-import org.sand.ticwatch.phone.history.RollupResolution
-import org.sand.ticwatch.phone.history.SampleCursor
+import androidx.annotation.StringRes
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -13,6 +8,15 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import org.json.JSONArray
+import org.json.JSONObject
+import org.sand.ticwatch.phone.health.SensorType
+import org.sand.ticwatch.phone.history.RollupPoint
+import org.sand.ticwatch.phone.history.RollupResolution
+import org.sand.ticwatch.phone.history.SampleCursor
+import org.sand.ticwatch.phone.text.TextResolver
+import org.sand.ticwatch.phone.text.UiText
+import org.sand.ticwatch.phone.text.uiText
 
 /** Half-open time range [from, to). */
 data class TimeRange(val from: Instant, val to: Instant) {
@@ -153,7 +157,12 @@ class HistoryToolArguments(private val clock: Clock, private val zone: ZoneId) {
 }
 
 /** Renders history data compactly: local-offset timestamps, values rounded to [DECIMALS] places. */
-class HistoryToolFormat(private val zone: ZoneId) {
+class HistoryToolFormat(private val zone: ZoneId, private val texts: TextResolver) {
+
+    /** Localized texts in the resolver's language (English for the agent, see `AppContainer.mcpTools`). */
+    fun text(text: UiText): String = texts.resolve(text)
+
+    fun text(@StringRes id: Int): String = texts.resolve(uiText(id))
 
     fun time(instant: Instant): String = instant.atZone(zone).toOffsetDateTime().toString()
 

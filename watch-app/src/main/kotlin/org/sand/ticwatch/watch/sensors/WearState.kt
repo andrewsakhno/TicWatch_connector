@@ -5,10 +5,16 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
+import java.time.Instant
 
 /** Whether the watch is currently on the wrist. */
 fun interface WearStateSource {
     fun isWorn(): Boolean
+}
+
+/** When the watch came off the wrist; null while it is worn or the state is unknown. */
+fun interface OffBodySince {
+    fun offBodySince(): Instant?
 }
 
 /**
@@ -16,10 +22,15 @@ fun interface WearStateSource {
  * whose values[0] is 1 on the wrist and [OFF_BODY] off it. Until its first event (or if the sensor is
  * missing) the watch counts as worn, so a silent detector never blocks measurements.
  */
-class OffBodyDetector(private val sensorManager: SensorManager) : WearStateSource, SensorEventListener {
+class OffBodyDetector(private val sensorManager: SensorManager) : WearStateSource, OffBodySince, SensorEventListener {
 
     @Volatile
     private var worn = true
+
+    @Volatile
+    private var offSince: Instant? = null
+
+    override fun offBodySince(): Instant? = offSince
 
     fun start() {
         val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LOW_LATENCY_OFFBODY_DETECT, true)
@@ -34,6 +45,7 @@ class OffBodyDetector(private val sensorManager: SensorManager) : WearStateSourc
     override fun onSensorChanged(event: SensorEvent) {
         val state = event.values.getOrNull(STATE_INDEX) ?: return
         worn = state != OFF_BODY
+        offSince = if (worn) null else offSince ?: Instant.now()
         Log.i(TAG, "Wear state changed: worn=$worn")
     }
 

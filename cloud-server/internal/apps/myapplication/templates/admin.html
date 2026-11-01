@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyApplication devices</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #222; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid #ddd; vertical-align: middle; }
+  th { font-weight: 600; }
+  form { margin: 0; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .muted { color: #666; font-size: .85rem; }
+  .warning { color: #b00020; font-size: .85rem; }
+  .accounts { display: flex; flex-direction: column; gap: .25rem; }
+  h2 { margin-top: 2rem; }
+</style>
+</head>
+<body>
+<h1>MyApplication devices</h1>
+<p class="muted">Phones appear here when the cloud sync switch is on in their app. A device can do nothing until it gets a role and an account: a child reads one account, a parent exchanges data for each child it is linked to. Parents of the same child share that child's study guides; a blank dropdown adds another child.</p>
+{{if .Devices}}
+<table>
+  <thead>
+    <tr><th>Device</th><th>First seen</th><th>Last seen</th><th>Access</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{range $device := .Devices}}
+    <tr>
+      <td>{{if $device.Name}}{{$device.Name}}{{else}}(no name){{end}}<br><span class="muted">{{$device.ID}}</span></td>
+      <td>{{seenAt $device.FirstSeenAt}}</td>
+      <td>{{seenAt $device.LastSeenAt}}</td>
+      <td>
+        <form method="post" action="{{$.AssignPath}}">
+          <input type="hidden" name="device_id" value="{{$device.ID}}">
+          <select name="role">
+            {{range $role := $.Roles}}<option value="{{$role}}"{{if eq $role $device.Role}} selected{{end}}>{{$role}}</option>{{end}}
+          </select>
+          <span class="accounts">
+            {{range $picked := $device.AccountPickers}}
+            <select name="account_id"{{if and (ne $device.Role $.RoleChild) (ne $device.Role $.RoleParent)}} disabled{{end}}>
+              <option value="">(no account)</option>
+              {{range $account := $.Accounts}}<option value="{{$account.ID}}"{{if eq $account.ID $picked}} selected{{end}}>{{$account.Name}}</option>{{end}}
+            </select>
+            {{end}}
+          </span>
+          <button type="submit">Save</button>
+          {{if $device.LacksAccount}}<span class="warning">pick an account</span>{{end}}
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{$.DeletePath}}">
+          <input type="hidden" name="device_id" value="{{$device.ID}}">
+          <button type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No device has connected yet.</p>
+{{end}}
+{{if .Exchange}}
+<h2>Who exchanges what</h2>
+<table>
+  <thead>
+    <tr><th>Child's account</th><th>Parents</th><th>Child devices</th></tr>
+  </thead>
+  <tbody>
+  {{range $row := .Exchange}}
+    <tr>
+      <td>{{$row.Account.Name}}</td>
+      <td>{{range $i, $name := $row.Parents}}{{if $i}}, {{end}}{{$name}}{{else}}<span class="warning">none</span>{{end}}</td>
+      <td>{{range $i, $name := $row.Children}}{{if $i}}, {{end}}{{$name}}{{else}}<span class="muted">none</span>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+<script>
+  // A child reads one account, a parent gets a dropdown per linked child plus a blank one, anything else none.
+  const childRole = {{.RoleChild}};
+  const parentRole = {{.RoleParent}};
+
+  function refreshPickers(role) {
+    const box = role.form.querySelector('.accounts');
+    const pickers = () => [...box.querySelectorAll('select')];
+    const many = role.value === parentRole;
+    const usable = many || role.value === childRole;
+    pickers().forEach((picker) => {
+      picker.disabled = !usable;
+      if (!usable) picker.value = '';
+      const isSpare = picker.value === '' || (!many && pickers().indexOf(picker) > 0);
+      if (isSpare && pickers().length > 1) picker.remove();
+    });
+    if (many && pickers().every((picker) => picker.value !== '')) {
+      const blank = pickers()[0].cloneNode(true);
+      blank.value = '';
+      blank.addEventListener('change', () => refreshPickers(role));
+      box.append(blank);
+    }
+  }
+
+  document.querySelectorAll('select[name="role"]').forEach((role) => {
+    role.addEventListener('change', () => refreshPickers(role));
+    role.form.querySelectorAll('.accounts select').forEach((picker) => {
+      picker.addEventListener('change', () => refreshPickers(role));
+    });
+  });
+</script>
+</body>
+</html>

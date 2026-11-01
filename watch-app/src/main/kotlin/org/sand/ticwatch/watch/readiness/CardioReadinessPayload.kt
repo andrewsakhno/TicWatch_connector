@@ -17,13 +17,34 @@ enum class VitalLevel(val code: Int, val argb: Int) {
 /** A value with its level; [text] is what the tile shows. */
 data class LeveledValue(val text: String, val level: VitalLevel)
 
-/** The phone's cardio readiness at [atEpochMs]: the score and the latest pressure / pulse, null without data. */
+/** Colour of [value] on screen: by its level, [muted] when it is stale or missing. */
+fun readinessValueColor(value: LeveledValue?, stale: Boolean, muted: Int): Int =
+    if (value == null || stale) muted else value.level.argb
+
+/**
+ * The phone's cardio readiness at [atEpochMs]: the score and the latest pressure / pulse, null without data.
+ * [loadReadiness] is the inverse of the phone's fatigue index, null with too few signals.
+ * [stateLabel], [advice] and [fatigueLabel] are already in the app language; null from a phone app that predates them.
+ */
 data class CardioReadinessSnapshot(
+    val scorePercent: Int,
     val score: LeveledValue,
     val pressure: LeveledValue?,
     val heartRate: LeveledValue?,
+    val loadReadinessPercent: Int?,
+    val loadReadiness: LeveledValue?,
+    val stateLabel: String?,
+    val advice: String?,
+    val fatigueLabel: String?,
     val atEpochMs: Long,
-)
+) {
+    fun isStale(nowEpochMs: Long): Boolean = nowEpochMs - atEpochMs > STALE_AFTER_MS
+
+    private companion object {
+        /** The phone re-sends after every sensor sync (30 min); older than this means the link is down. */
+        const val STALE_AFTER_MS = 3 * 60 * 60 * 1_000L
+    }
+}
 
 /** Decodes the phone's `/insights/readiness` JSON; mirrors phone-app's `advisor/CardioReadinessPayload.kt`. */
 object CardioReadinessPayload {
@@ -34,11 +55,18 @@ object CardioReadinessPayload {
     private const val PRESSURE_LEVEL = "bp_level"
     private const val HEART_RATE = "hr"
     private const val HEART_RATE_LEVEL = "hr_level"
+    private const val STATE_LABEL = "state_label"
+    private const val ADVICE = "advice"
+    private const val LOAD_READINESS = "load_readiness"
+    private const val LOAD_LEVEL = "load_level"
+    private const val FATIGUE_LABEL = "fatigue_label"
     private const val AT = "at"
 
     fun decode(text: String): CardioReadinessSnapshot {
         val json = JSONObject(text)
+        val loadReadinessPercent = if (json.has(LOAD_READINESS)) json.getInt(LOAD_READINESS) else null
         return CardioReadinessSnapshot(
+            scorePercent = json.getInt(SCORE),
             score = LeveledValue(json.getInt(SCORE).toString(), VitalLevel.ofCode(json.getInt(SCORE_LEVEL))),
             pressure = if (json.has(SYSTOLIC) && json.has(DIASTOLIC)) {
                 LeveledValue("${json.getInt(SYSTOLIC)}/${json.getInt(DIASTOLIC)}", VitalLevel.ofCode(json.getInt(PRESSURE_LEVEL)))
@@ -50,6 +78,11 @@ object CardioReadinessPayload {
             } else {
                 null
             },
+            loadReadinessPercent = loadReadinessPercent,
+            loadReadiness = loadReadinessPercent?.let { LeveledValue(it.toString(), VitalLevel.ofCode(json.getInt(LOAD_LEVEL))) },
+            stateLabel = json.optString(STATE_LABEL).ifEmpty { null },
+            advice = json.optString(ADVICE).ifEmpty { null },
+            fatigueLabel = json.optString(FATIGUE_LABEL).ifEmpty { null },
             atEpochMs = json.getLong(AT),
         )
     }

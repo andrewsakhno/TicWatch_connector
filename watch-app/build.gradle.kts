@@ -18,6 +18,19 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.0.1"
+        // The app's own languages; drops the other translations bundled by the libraries.
+        resourceConfigurations += listOf("en", "ru", "pl")
+    }
+
+    buildTypes {
+        release {
+            // R8: the APK goes to the watch over Bluetooth, unused library code is most of its size.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Same key as the debug build, so it installs over it and keeps the watch's data.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     buildFeatures {
@@ -39,6 +52,8 @@ kotlin {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.2")
+    // play-services-base pulls fragment 1.1.0, which the release lint rejects for the ActivityResult APIs.
+    implementation("androidx.fragment:fragment:1.8.3")
     implementation(platform("androidx.compose:compose-bom:2024.09.02"))
     implementation("androidx.wear.compose:compose-material:1.4.0")
     implementation("androidx.wear.compose:compose-foundation:1.4.0")

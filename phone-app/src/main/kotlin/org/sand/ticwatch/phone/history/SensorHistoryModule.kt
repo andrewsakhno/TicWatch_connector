@@ -1,6 +1,8 @@
 package org.sand.ticwatch.phone.history
 
 import android.content.Context
+import org.sand.ticwatch.phone.cloud.CloudModule
+import org.sand.ticwatch.phone.cloud.CloudOutbox
 import org.sand.ticwatch.phone.health.HealthConnectRecordWriter
 import org.sand.ticwatch.phone.health.HealthRecordWriter
 import java.time.Clock
@@ -20,15 +22,21 @@ object SensorHistoryModule {
     private val sleepSessionWriter = SleepSessionWriter()
     private val sleepStageWriter = SleepStageWriter()
 
+    private fun database(context: Context): SensorHistoryDatabase =
+        SensorHistoryDatabase.getInstance(context, rollupWriter, sleepSessionWriter)
+
     fun store(context: Context): SqliteSensorHistoryStore = SqliteSensorHistoryStore(
-        SensorHistoryDatabase.getInstance(context, rollupWriter, sleepSessionWriter),
+        database(context),
         // Sessions before stages: a stage arriving with its session links to it on insert.
         listOf(rollupWriter, sleepSessionWriter, sleepStageWriter),
         zone,
     )
 
-    fun routeStore(context: Context): SqliteExerciseRouteStore =
-        SqliteExerciseRouteStore(SensorHistoryDatabase.getInstance(context, rollupWriter, sleepSessionWriter))
+    fun routeStore(context: Context): SqliteExerciseRouteStore = SqliteExerciseRouteStore(database(context))
+
+    fun sleepSessionOutbox(context: Context): CloudOutbox<SleepSession> = SqliteSleepOutbox.sessions(database(context))
+
+    fun sleepStageOutbox(context: Context): CloudOutbox<SleepStage> = SqliteSleepOutbox.stages(database(context))
 
     fun retentionStore(context: Context): HistoryRetentionStore = SharedPreferencesEnumSettingStore(
         context, HistorySettingKeys.RETENTION, HistoryRetention.entries, HistoryRetention.DEFAULT,
@@ -40,7 +48,8 @@ object SensorHistoryModule {
 
     fun purger(context: Context): SensorHistoryPurger =
         SensorHistoryPurger(
-            store(context), routeStore(context), retentionStore(context), sleepSessionRetentionStore(context), clock, zone,
+            store(context), routeStore(context), retentionStore(context), sleepSessionRetentionStore(context),
+            CloudModule.retentionHold(context), clock, zone,
         )
 
     fun delivery(writer: HealthRecordWriter, historyLog: SensorHistoryLog): AcknowledgedDelivery =

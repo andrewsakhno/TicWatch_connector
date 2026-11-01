@@ -9,10 +9,11 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import org.sand.ticwatch.phone.ecg.EcgModule
 import java.util.concurrent.TimeUnit
 
 /**
- * Daily WorkManager job: runs [SensorHistoryPurger], then [FailedDeliveryRetrier]. Rows still
+ * Daily WorkManager job: runs [SensorHistoryPurger] and the cardiogram purge, then [FailedDeliveryRetrier]. Rows still
  * failing stay FAILED for the next run. WorkManager persists the schedule across reboots.
  */
 class SensorHistoryPurgeWorker(
@@ -25,6 +26,7 @@ class SensorHistoryPurgeWorker(
         // Purge first so expired rows are not re-sent.
         val deleted = SensorHistoryModule.purger(applicationContext).purge()
         Log.i(TAG, "Purged $deleted expired history row(s) and rollup bucket(s)")
+        Log.i(TAG, "Purged ${EcgModule.purger(applicationContext).purge()} expired cardiogram(s)")
         val resent = SensorHistoryModule.retrier(applicationContext).retry()
         Log.i(TAG, "Re-sent $resent failed history row(s) to Health Connect")
     }.fold(

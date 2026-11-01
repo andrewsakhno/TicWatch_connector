@@ -6,6 +6,7 @@ import org.sand.ticwatch.phone.health.SensorSample
 import org.sand.ticwatch.phone.health.medianOrNull
 import org.sand.ticwatch.phone.history.SleepSession
 import org.sand.ticwatch.phone.medication.MedicationEffect
+import org.sand.ticwatch.phone.sleep.SleepAdvancedInsights
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
@@ -166,5 +167,24 @@ class CalibrationAccuracyCalculator {
 
     companion object {
         val MAX_GAP: Duration = Duration.ofMinutes(30)
+    }
+}
+
+/** Averages the nights' [SleepAdvancedInsights] into the report's somnology section. */
+class SleepReportCalculator {
+
+    fun summarize(nights: List<SleepAdvancedInsights>): SleepReportSummary {
+        val continuity = nights.mapNotNull { it.continuity }
+        val ratios = nights.mapNotNull { it.recovery?.ratio }
+        return SleepReportSummary(
+            nights = nights.size,
+            meanWaso = continuity.takeIf { it.isNotEmpty() }?.let { list -> Duration.ofMillis(list.map { it.waso.toMillis() }.average().toLong()) },
+            meanAwakenings = continuity.takeIf { it.isNotEmpty() }?.map { it.awakenings.toDouble() }?.average(),
+            meanVagalRecoveryRatio = ratios.takeIf { it.isNotEmpty() }?.average(),
+            recoveryNights = ratios.size,
+            snoreEpisodes = nights.sumOf { it.snore.episodes },
+            assessedSnoreEpisodes = nights.sumOf { it.snore.assessedEpisodes },
+            snoreCardiacSpikes = nights.sumOf { it.snore.cardiacSpikes },
+        )
     }
 }

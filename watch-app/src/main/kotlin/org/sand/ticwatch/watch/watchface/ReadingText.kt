@@ -9,6 +9,7 @@ object ReadingText {
     const val NO_VALUE = "--"
     const val HEART_RATE_UNIT = "BPM"
     const val TEMPERATURE_UNIT = "°C"
+    const val READINESS_UNIT = "%"
     private const val TEMPERATURE_FORMAT = "%.1f"
 
     fun heartRate(readings: LatestReadings): String =

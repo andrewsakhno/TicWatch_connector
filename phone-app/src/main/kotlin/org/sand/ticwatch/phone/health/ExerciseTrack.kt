@@ -61,6 +61,9 @@ data class TrackLap(val start: Instant, val end: Instant, val meters: Double)
 /** Geometry of a GPS track (ascending fixes): distances, fixed-duration segments and distance laps. */
 class ExerciseTrack(private val points: List<RoutePoint>) {
 
+    /** Length of the whole track. */
+    fun meters(): Double = points.zipWithNext { a, b -> meters(a, b) }.sum()
+
     /** Consecutive segments of at least [length] each; the trailing remainder shorter than that is dropped. */
     fun segments(length: Duration): List<TrackSegment> {
         val segments = mutableListOf<TrackSegment>()

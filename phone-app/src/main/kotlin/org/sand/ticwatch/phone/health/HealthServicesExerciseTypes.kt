@@ -1,6 +1,8 @@
 package org.sand.ticwatch.phone.health
 
+import androidx.annotation.StringRes
 import androidx.health.connect.client.records.ExerciseSessionRecord
+import org.sand.ticwatch.phone.R
 
 /**
  * Wire contract with watch-app: an EXERCISE sample's value is the Health Services
@@ -65,6 +67,38 @@ object HealthServicesExerciseTypes {
         YOGA to ExerciseSessionRecord.EXERCISE_TYPE_YOGA,
     )
 
+    private val LABELS = mapOf(
+        BADMINTON to R.string.exercise_badminton,
+        BASKETBALL to R.string.exercise_basketball,
+        BIKING to R.string.exercise_biking,
+        BIKING_STATIONARY to R.string.exercise_biking_stationary,
+        DANCING to R.string.exercise_dancing,
+        ELLIPTICAL to R.string.exercise_elliptical,
+        GOLF to R.string.exercise_golf,
+        HIGH_INTENSITY_INTERVAL_TRAINING to R.string.exercise_hiit,
+        HIKING to R.string.exercise_hiking,
+        PILATES to R.string.exercise_pilates,
+        ROWING to R.string.exercise_rowing,
+        ROWING_MACHINE to R.string.exercise_rowing_machine,
+        RUNNING to R.string.exercise_running,
+        RUNNING_TREADMILL to R.string.exercise_running_treadmill,
+        SKIING to R.string.exercise_skiing,
+        SOCCER to R.string.exercise_soccer,
+        STAIR_CLIMBING to R.string.exercise_stair_climbing,
+        STAIR_CLIMBING_MACHINE to R.string.exercise_stair_climbing_machine,
+        STRENGTH_TRAINING to R.string.exercise_strength_training,
+        STRETCHING to R.string.exercise_stretching,
+        SWIMMING_OPEN_WATER to R.string.exercise_swimming_open_water,
+        SWIMMING_POOL to R.string.exercise_swimming_pool,
+        TENNIS to R.string.exercise_tennis,
+        WALKING to R.string.exercise_walking,
+        WEIGHTLIFTING to R.string.exercise_weightlifting,
+        YOGA to R.string.exercise_yoga,
+    )
+
     fun toHealthConnect(healthServicesId: Int): Int =
         TO_HEALTH_CONNECT[healthServicesId] ?: ExerciseSessionRecord.EXERCISE_TYPE_OTHER_WORKOUT
+
+    @StringRes
+    fun label(healthServicesId: Int): Int = LABELS[healthServicesId] ?: R.string.exercise_other
 }

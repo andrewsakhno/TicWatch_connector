@@ -1,9 +1,11 @@
 package org.sand.ticwatch.phone.spaceweather
 
-import org.json.JSONArray
-import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
+import org.json.JSONArray
+import org.json.JSONObject
+import org.sand.ticwatch.phone.text.TextResolver
+import org.sand.ticwatch.phone.text.uiText
 
 /**
  * JSON of [SpaceWeather], both the phone's stored copy and the `/insights/space-weather` payload; mirrors
@@ -28,15 +30,16 @@ object SpaceWeatherPayload {
     const val KP = "kp"
     const val ORIGIN = "origin"
 
-    fun encode(weather: SpaceWeather): String {
+    /** [labels] resolves the level labels the watch shows; the phone's stored copy needs none (decode ignores them). */
+    fun encode(weather: SpaceWeather, labels: TextResolver? = null): String {
         val json = JSONObject().put(FETCHED_AT, weather.fetchedAt.toEpochMilli())
         weather.current?.let {
             json.put(CURRENT_KP, it.kp)
                 .put(CURRENT_AT, it.start.toEpochMilli())
                 .put(CURRENT_ORIGIN, it.origin.noaaName)
-                .put(CURRENT_LEVEL, GeomagneticLevel.of(it.kp).label)
+            labels?.let { texts -> json.put(CURRENT_LEVEL, texts.resolve(uiText(GeomagneticLevel.of(it.kp).label))) }
         }
-        json.put(DAYS, JSONArray().apply { weather.days.forEach { put(day(it)) } })
+        json.put(DAYS, JSONArray().apply { weather.days.forEach { put(day(it, labels)) } })
         json.put(SLOTS, JSONArray().apply { weather.slots.forEach { put(slot(it)) } })
         return json.toString()
     }
@@ -64,14 +67,16 @@ object SpaceWeatherPayload {
         return SpaceWeather(Instant.ofEpochMilli(json.getLong(FETCHED_AT)), current, days, slots)
     }
 
-    private fun day(day: SpaceWeatherDay): JSONObject {
+    private fun day(day: SpaceWeatherDay, labels: TextResolver?): JSONObject {
         val json = JSONObject()
             .put(DATE, day.date.toString())
             .put(MAX_KP, day.maxKp)
-            .put(LEVEL, day.level.label)
             .put(FORECAST, day.forecast)
         day.radioFlux?.let { json.put(RADIO_FLUX, it) }
-        day.solarActivity?.let { json.put(SOLAR_ACTIVITY, it.label) }
+        labels?.let { texts ->
+            json.put(LEVEL, texts.resolve(uiText(day.level.label)))
+            day.solarActivity?.let { json.put(SOLAR_ACTIVITY, texts.resolve(uiText(it.label))) }
+        }
         return json
     }
 

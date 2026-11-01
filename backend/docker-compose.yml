@@ -1,0 +1,36 @@
+# TicWatch cloud history: `docker compose up -d --build` from this directory.
+# Port 8766 must be reachable from the phone's Wi-Fi (it scans its /24 for it).
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ticwatch
+      POSTGRES_USER: ticwatch
+      POSTGRES_PASSWORD: ticwatch
+    volumes:
+      - ticwatch-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticwatch -d ticwatch"]
+      interval: 5s
+      retries: 20
+
+  cloud:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TICWATCH_DB_URL: jdbc:postgresql://db:5432/ticwatch
+      TICWATCH_DB_USER: ticwatch
+      TICWATCH_DB_PASSWORD: ticwatch
+      # Leave empty on the home LAN; set to require "Authorization: Bearer <key>".
+      TICWATCH_CLOUD_API_KEY: ""
+    ports:
+      - "8766:8766"
+
+volumes:
+  ticwatch-db:

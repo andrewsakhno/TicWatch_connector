@@ -6,6 +6,10 @@
     <string name="tile_name">TicWatch Pulse</string>
     <string name="tile_open">Открыть</string>
     <string name="tile_readiness_name">Кардиоготовность</string>
+    <string name="readiness_percent">%1$d%%</string>
+    <string name="gauge_cardio">Кардио</string>
+    <string name="gauge_load">Нагрузка</string>
+    <string name="gauge_with_label">%1$s: %2$s</string>
     <string name="heart_rate">Пульс</string>
     <string name="readiness_hrv">Готовность / ВСР</string>
     <string name="sleep_score">Оценка сна</string>
@@ -62,6 +66,11 @@
     <string name="band_active">Активно</string>
     <string name="band_storm">Буря</string>
     <string name="band_low">Низкий</string>
+    <string name="fatigue_index">Индекс утомленности</string>
+    <string name="band_fresh">Свежий</string>
+    <string name="band_moderate_fatigue">Умеренная</string>
+    <string name="band_pronounced_fatigue">Выраженная</string>
+    <string name="band_exhausted">Истощение</string>
     <string name="blood_pressure">Давление</string>
     <string name="mmhg">мм рт. ст.</string>
     <string name="pulse_value">пульс %1$d</string>

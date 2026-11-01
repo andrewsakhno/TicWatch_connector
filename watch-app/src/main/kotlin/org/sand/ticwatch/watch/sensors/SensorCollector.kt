@@ -41,6 +41,12 @@ enum class SensorType {
 
     // Point from [HeartRateAlertSampleSource] (`mobvoi_hr_alert`); value = undecoded values[0].
     HEART_RATE_ALERT,
+
+    // Interval from [PulseAmplitudeDropDetector] during sleep; value = how far the pulse shrank, percent.
+    PULSE_AMPLITUDE_DROP,
+
+    // A session like EXERCISE, for a workout this app started on its own (automatic walk).
+    AUTO_EXERCISE,
 }
 
 /**

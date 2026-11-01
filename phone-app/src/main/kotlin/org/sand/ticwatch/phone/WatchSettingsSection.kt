@@ -17,6 +17,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,26 +44,36 @@ fun WatchSettingsSection(appContainer: AppContainer) {
     }
 
     Column {
-        Text(text = "Watch features", style = MaterialTheme.typography.titleMedium)
-        Text(text = "They drain the watch battery (snore analysis only on the watch microphone); applied on the watch at the next contact.")
+        Text(text = stringResource(R.string.watch_features), style = MaterialTheme.typography.titleMedium)
+        Text(text = stringResource(R.string.watch_features_hint))
         SettingSwitch(
-            label = "Auto blood pressure at rest (every 5 min)",
+            label = stringResource(R.string.setting_auto_bp),
             checked = settings?.autoBloodPressure,
             onCheckedChange = { on -> change { it.copy(autoBloodPressure = on) } },
         )
         SettingSwitch(
-            label = "Watch log capture (debug)",
+            label = stringResource(R.string.setting_log_capture),
             checked = settings?.logCapture,
             onCheckedChange = { on -> change { it.copy(logCapture = on) } },
         )
         SettingSwitch(
-            label = "Snore analysis while asleep",
+            label = stringResource(R.string.setting_snore_analysis),
             checked = settings?.snoreAnalysis,
             onCheckedChange = { on -> change { it.copy(snoreAnalysis = on) } },
         )
         SnoreMicrophoneChoice(
             selected = settings?.snoreMicrophone,
             onSelect = { microphone -> change { it.copy(snoreMicrophone = microphone) } },
+        )
+        SettingSwitch(
+            label = stringResource(R.string.setting_night_pulse_wave),
+            checked = settings?.nightPulseWave,
+            onCheckedChange = { on -> change { it.copy(nightPulseWave = on) } },
+        )
+        SettingSwitch(
+            label = stringResource(R.string.setting_night_monitor_intermittent),
+            checked = settings?.nightMonitorIntermittent,
+            onCheckedChange = { on -> change { it.copy(nightMonitorIntermittent = on) } },
         )
     }
 }
@@ -74,17 +85,22 @@ private fun SnoreMicrophoneChoice(selected: SnoreMicrophone?, onSelect: (SnoreMi
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = "Snore microphone", modifier = Modifier.weight(1f))
+        Text(text = stringResource(R.string.setting_snore_microphone), modifier = Modifier.weight(1f))
         SnoreMicrophone.entries.forEach { microphone ->
             FilterChip(
                 selected = microphone == selected,
                 onClick = { onSelect(microphone) },
                 enabled = selected != null,
-                label = { Text(microphone.label) },
+                label = { Text(stringResource(microphoneLabel(microphone))) },
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
     }
+}
+
+private fun microphoneLabel(microphone: SnoreMicrophone): Int = when (microphone) {
+    SnoreMicrophone.WATCH -> R.string.microphone_watch
+    SnoreMicrophone.PHONE -> R.string.microphone_phone
 }
 
 @Composable

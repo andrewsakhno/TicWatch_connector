@@ -11,6 +11,18 @@ fun interface SleepStageEstimator {
     suspend fun estimate(start: Instant, end: Instant): List<SleepStage>
 }
 
+/** These ascending stages cut to [start]..[end] and to the end of the stage before each; emptied ones are dropped. */
+fun List<SleepStage>.clippedTo(start: Instant, end: Instant): List<SleepStage> {
+    var previousEnd = start
+    return mapNotNull { stage ->
+        val stageStart = maxOf(stage.start, previousEnd)
+        val stageEnd = minOf(stage.end, end)
+        if (!stageEnd.isAfter(stageStart)) return@mapNotNull null
+        previousEnd = stageEnd
+        stage.copy(start = stageStart, end = stageEnd)
+    }
+}
+
 /**
  * Builds a sleep session's Health Connect stages from the stages stored inside it - or, when those cover
  * less than [minStoredCoverage] of the session, from [fallback]. Health Connect rejects a session whose
@@ -30,16 +42,10 @@ class SleepStageFactory(
         return clip(estimator.estimate(start, end), start, end).ifEmpty { stored }
     }
 
-    private fun clip(source: List<SleepStage>, start: Instant, end: Instant): List<SleepSessionRecord.Stage> {
-        var previousEnd = start
-        return source.mapNotNull { stage ->
-            val stageStart = maxOf(stage.start, previousEnd)
-            val stageEnd = minOf(stage.end, end)
-            if (!stageEnd.isAfter(stageStart)) return@mapNotNull null
-            previousEnd = stageEnd
-            SleepSessionRecord.Stage(startTime = stageStart, endTime = stageEnd, stage = stage.type.healthConnectType)
+    private fun clip(source: List<SleepStage>, start: Instant, end: Instant): List<SleepSessionRecord.Stage> =
+        source.clippedTo(start, end).map {
+            SleepSessionRecord.Stage(startTime = it.start, endTime = it.end, stage = it.type.healthConnectType)
         }
-    }
 
     private fun coverage(stages: List<SleepSessionRecord.Stage>, start: Instant, end: Instant): Double {
         val session = Duration.between(start, end).toMillis()

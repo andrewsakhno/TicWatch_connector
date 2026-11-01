@@ -14,6 +14,7 @@ import org.sand.ticwatch.phone.watchsettings.SnoreMicrophone
 import org.sand.ticwatch.phone.watchsettings.WatchSettings
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 
 /** Switches the phone's snoring analysis on the watch's sleep-session messages. */
 interface SnoreMonitorControl {
@@ -26,7 +27,8 @@ interface SnoreMonitorControl {
  * for it on the phone, and stores each epoch's snoring share as a history-only [SensorType.SNORING] interval
  * ([SampleSource.PHONE]) - the same shape as the watch's night monitor, so the per-night summary adds them up.
  * Stops on [stop], when the setting changes, or after [maxNight] (a night ended by watch-sensor silence sends no
- * stop). An epoch cut short by [stop] is dropped. A partial wake lock keeps the CPU on while listening.
+ * stop), or when one of [wakeSignals] (checked every [wakeCheckInterval]) says the user is up. An epoch cut short
+ * is dropped. A partial wake lock keeps the CPU on while listening.
  */
 class PhoneSnoreMonitor(
     private val meter: SnoreMeter,
@@ -35,8 +37,10 @@ class PhoneSnoreMonitor(
     private val powerManager: PowerManager,
     private val scope: CoroutineScope,
     private val clock: Clock,
+    private val wakeSignals: List<WakeSignal>,
     private val epoch: Duration = Duration.ofMinutes(5),
     private val maxNight: Duration = Duration.ofHours(12),
+    private val wakeCheckInterval: Duration = Duration.ofMinutes(5),
 ) {
 
     private var night: Job? = null
@@ -45,7 +49,16 @@ class PhoneSnoreMonitor(
     fun start() {
         if (night?.isActive == true) return
         if (!isWanted()) return Unit.also { Log.i(TAG, "Snore analysis on the phone not enabled; ignoring sleep start") }
-        night = scope.launch { listen() }
+        night = scope.launch {
+            val nightStart = clock.instant()
+            val listening = launch { listen() }
+            val watcher = launch {
+                awaitWake(nightStart)
+                listening.cancel()
+            }
+            listening.join()
+            watcher.cancel()
+        }
     }
 
     @Synchronized
@@ -55,6 +68,20 @@ class PhoneSnoreMonitor(
     }
 
     private fun isWanted(): Boolean = settings().let { it.snoreAnalysis && it.snoreMicrophone == SnoreMicrophone.PHONE }
+
+    /** Returns once a wake signal fires; the first check right away primes the alarm signal. */
+    private suspend fun awaitWake(nightStart: Instant) {
+        while (true) {
+            val now = clock.instant()
+            val fired = wakeSignals.firstOrNull { signal ->
+                runCatching { signal.isAwake(nightStart, now) }
+                    .onFailure { Log.w(TAG, "Wake signal ${signal.name} failed", it) }
+                    .getOrDefault(false)
+            }
+            if (fired != null) return Unit.also { Log.i(TAG, "User is up (${fired.name}); ending phone snore analysis") }
+            delay(wakeCheckInterval.toMillis())
+        }
+    }
 
     private suspend fun listen() {
         val deadline = clock.instant().plus(maxNight)

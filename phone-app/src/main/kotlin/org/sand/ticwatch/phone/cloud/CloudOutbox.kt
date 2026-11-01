@@ -1,10 +1,9 @@
 package org.sand.ticwatch.phone.cloud
 
-import java.time.Instant
-
 /**
- * Local rows the cloud server has not acknowledged yet, oldest first. Every store holding watch data
- * implements one; [CloudSyncEngine] drains them through an [OutboxUploadChannel].
+ * Local rows the cloud server has not acknowledged yet, oldest first. Every store holding history data
+ * implements one; [CloudSyncEngine] drains them through an [OutboxUploadChannel]. A retention purge never
+ * deletes a row still pending here while [CloudRetentionHold] holds.
  */
 interface CloudOutbox<T> {
     suspend fun pendingUpload(limit: Int): List<T>
@@ -15,8 +14,7 @@ interface CloudOutbox<T> {
     suspend fun pendingUploadCount(): Long
 }
 
-/** How long rows the server has not acknowledged survive the local retention purge. */
+/** Decides whether the local retention purge spares rows the server has not acknowledged. */
 fun interface CloudRetentionHold {
-    /** Purge cutoff for not-yet-uploaded rows, given the retention's [cutoff]; never later than it. */
-    suspend fun unsyncedCutoff(cutoff: Instant): Instant
+    suspend fun keepsUnsynced(): Boolean
 }

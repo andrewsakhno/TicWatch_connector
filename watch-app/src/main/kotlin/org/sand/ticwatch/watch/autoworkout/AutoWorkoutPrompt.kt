@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import androidx.annotation.StringRes
+import org.sand.ticwatch.watch.R
 
 /** What the wearer sees of automatic workouts. */
 interface AutoWorkoutPrompt {
@@ -33,15 +35,15 @@ class NotificationAutoWorkoutPrompt(
 
     private val manager by lazy {
         context.getSystemService(NotificationManager::class.java).also {
-            it.createNotificationChannel(NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH))
+            it.createNotificationChannel(NotificationChannel(CHANNEL_ID, context.getString(R.string.auto_workout_channel), NotificationManager.IMPORTANCE_HIGH))
         }
     }
 
     override fun askToStart() {
         manager.notify(
             NOTIFICATION_ID,
-            builder("Walking detected", "Record it as a workout?")
-                .addAction(action(android.R.drawable.ic_media_play, "Start", startAction, START_REQUEST_CODE))
+            builder(R.string.walk_detected, R.string.walk_record_question)
+                .addAction(action(android.R.drawable.ic_media_play, R.string.start, startAction, START_REQUEST_CODE))
                 .setAutoCancel(true)
                 .build(),
         )
@@ -50,8 +52,8 @@ class NotificationAutoWorkoutPrompt(
     override fun showRunning() {
         manager.notify(
             NOTIFICATION_ID,
-            builder("Walk workout", "Recording - ends when you stop walking")
-                .addAction(action(android.R.drawable.ic_media_pause, "End", endAction, END_REQUEST_CODE))
+            builder(R.string.walk_workout, R.string.walk_recording)
+                .addAction(action(android.R.drawable.ic_media_pause, R.string.end, endAction, END_REQUEST_CODE))
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .build(),
@@ -62,24 +64,23 @@ class NotificationAutoWorkoutPrompt(
         manager.cancel(NOTIFICATION_ID)
     }
 
-    private fun builder(title: String, text: String): Notification.Builder =
+    private fun builder(@StringRes title: Int, @StringRes text: Int): Notification.Builder =
         Notification.Builder(context, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle(context.getString(title))
+            .setContentText(context.getString(text))
             .setSmallIcon(android.R.drawable.ic_menu_directions)
             .setCategory(Notification.CATEGORY_WORKOUT)
 
-    private fun action(icon: Int, title: String, intentAction: String, requestCode: Int): Notification.Action {
+    private fun action(icon: Int, @StringRes title: Int, intentAction: String, requestCode: Int): Notification.Action {
         val intent = Intent(context, serviceClass).setAction(intentAction)
         val pending = PendingIntent.getService(
             context, requestCode, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        return Notification.Action.Builder(Icon.createWithResource(context, icon), title, pending).build()
+        return Notification.Action.Builder(Icon.createWithResource(context, icon), context.getString(title), pending).build()
     }
 
     private companion object {
         const val CHANNEL_ID = "auto_workout"
-        const val CHANNEL_NAME = "Automatic walk workouts"
         const val NOTIFICATION_ID = 44
         const val START_REQUEST_CODE = 1
         const val END_REQUEST_CODE = 2

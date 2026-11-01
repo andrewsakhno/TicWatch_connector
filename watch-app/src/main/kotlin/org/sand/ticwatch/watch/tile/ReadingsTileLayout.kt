@@ -22,23 +22,26 @@ import org.sand.ticwatch.watch.watchface.WatchFacePalette
 data class TileReading(val iconId: String, val value: String, val unit: String, val accent: Int)
 
 /**
- * Builds the tile: refresh time on top, the readings side by side with an accent glyph and
- * unit under each, and an "Open" chip. Colours follow the watch face's interactive palette.
+ * Builds the tile: refresh time on top, the readiness gauge in the middle with one reading on each side (accent glyph
+ * above, unit below), and an "Open" chip. A tile can't scroll, so all of it fits one screen. Colours follow the watch
+ * face's interactive palette.
  */
 class ReadingsTileLayout(private val context: Context) {
 
     private val palette = WatchFacePalette.INTERACTIVE
+    private val gauge = ReadinessGaugeTileElement(context)
 
     fun build(
         deviceParameters: DeviceParameters,
         updatedAt: String,
+        readiness: TileReadiness,
         readings: List<TileReading>,
         onClick: ModifiersBuilders.Clickable,
     ): LayoutElement {
         val layout = PrimaryLayout.Builder(deviceParameters)
             .setResponsiveContentInsetEnabled(true)
             .setPrimaryLabelTextContent(text(updatedAt, Typography.TYPOGRAPHY_CAPTION1, palette.label))
-            .setContent(readingsRow(readings))
+            .setContent(readingsAroundGauge(readings, readiness))
             .setPrimaryChipContent(
                 CompactChip.Builder(context, context.getString(R.string.tile_open), onClick, deviceParameters)
                     .setChipColors(ChipColors.primaryChipColors(CHIP_COLORS))
@@ -61,13 +64,14 @@ class ReadingsTileLayout(private val context: Context) {
         .addIdToImageMapping(ICON_THERMOMETER, image(R.drawable.ic_tile_thermometer))
         .build()
 
-    private fun readingsRow(readings: List<TileReading>): LayoutElement {
+    /** The first half of [readings] left of the gauge, the rest right of it. */
+    private fun readingsAroundGauge(readings: List<TileReading>, readiness: TileReadiness): LayoutElement {
         val row = LayoutElementBuilders.Row.Builder()
             .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
-        readings.forEachIndexed { index, reading ->
-            if (index > 0) row.addContent(divider())
-            row.addContent(readingColumn(reading))
-        }
+        val leftCount = readings.size / 2
+        readings.take(leftCount).forEach { row.addContent(readingColumn(it)) }
+        row.addContent(gauge.build(readiness))
+        readings.drop(leftCount).forEach { row.addContent(readingColumn(it)) }
         return row.build()
     }
 
@@ -83,18 +87,8 @@ class ReadingsTileLayout(private val context: Context) {
                 .build(),
         )
         .addContent(spacer(ICON_GAP_DP))
-        .addContent(text(reading.value, Typography.TYPOGRAPHY_DISPLAY3, palette.time))
+        .addContent(text(reading.value, Typography.TYPOGRAPHY_TITLE1, palette.time))
         .addContent(text(reading.unit, Typography.TYPOGRAPHY_CAPTION2, reading.accent))
-        .build()
-
-    private fun divider(): LayoutElement = LayoutElementBuilders.Box.Builder()
-        .setWidth(dp(DIVIDER_WIDTH_DP))
-        .setHeight(dp(DIVIDER_HEIGHT_DP))
-        .setModifiers(
-            ModifiersBuilders.Modifiers.Builder()
-                .setBackground(ModifiersBuilders.Background.Builder().setColor(argb(palette.divider)).build())
-                .build(),
-        )
         .build()
 
     private fun spacer(heightDp: Float): LayoutElement =
@@ -115,11 +109,10 @@ class ReadingsTileLayout(private val context: Context) {
         const val ICON_HEART = "heart"
         const val ICON_THERMOMETER = "thermometer"
 
-        private const val READING_WIDTH_DP = 64f
+        /** Narrow enough for two readings plus [ReadinessGaugeTileElement.GAUGE_SIZE_DP] on the smallest round screen. */
+        private const val READING_WIDTH_DP = 54f
         private const val ICON_SIZE_DP = 22f
         private const val ICON_GAP_DP = 2f
-        private const val DIVIDER_WIDTH_DP = 1f
-        private const val DIVIDER_HEIGHT_DP = 52f
 
         private val CHIP_COLORS = Colors(
             WatchFacePalette.INTERACTIVE.date,

@@ -6,8 +6,6 @@ import androidx.wear.protolayout.ResourceBuilders
 import androidx.wear.protolayout.TimelineBuilders
 import androidx.wear.tiles.RequestBuilders
 import androidx.wear.tiles.TileBuilders
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.sand.ticwatch.watch.MainActivity
 import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
 
@@ -20,13 +18,11 @@ class CardioReadinessTileService : SuspendingTileService() {
     private val layout by lazy { CardioReadinessTileLayout(this) }
 
     override suspend fun tileRequest(requestParams: RequestBuilders.TileRequest): TileBuilders.Tile {
-        // First access of the stores reads their preferences file.
-        val snapshot = withContext(Dispatchers.IO) { PhonePayloadStores.get(applicationContext).cardioReadiness.latest.value }
-        val stale = snapshot == null || System.currentTimeMillis() - snapshot.atEpochMs > STALE_AFTER_MS
+        val readiness = loadTileReadiness(applicationContext)
         return TileBuilders.Tile.Builder()
             .setResourcesVersion(RESOURCES_VERSION)
             .setFreshnessIntervalMillis(FRESHNESS_MS)
-            .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout.build(snapshot, stale, openApp())))
+            .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout.build(readiness, openApp())))
             .build()
     }
 
@@ -53,8 +49,5 @@ class CardioReadinessTileService : SuspendingTileService() {
 
         /** Re-render now and then so the values grey out once stale even without new payloads. */
         const val FRESHNESS_MS = 30 * 60 * 1_000L
-
-        /** The phone re-sends after every sensor sync (30 min); older than this means the link is down. */
-        const val STALE_AFTER_MS = 3 * 60 * 60 * 1_000L
     }
 }

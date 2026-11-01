@@ -20,6 +20,8 @@ data class WatchFacePalette(
     val label: Int,
     val heart: Int,
     val thermometer: Int,
+    /** Colour of the readiness glyph, null to colour it by the phone's level instead. */
+    val readiness: Int?,
     val divider: Int,
     val glyphStyle: Paint.Style,
 ) {
@@ -34,6 +36,7 @@ data class WatchFacePalette(
             label = Color.parseColor("#8C9BC8"),
             heart = Color.parseColor("#FF4D6D"),
             thermometer = Color.parseColor("#FFB547"),
+            readiness = null,
             divider = Color.parseColor("#2E3655"),
             glyphStyle = Paint.Style.FILL,
         )
@@ -48,6 +51,7 @@ data class WatchFacePalette(
             label = Color.parseColor("#6A6A6A"),
             heart = Color.parseColor("#9A9A9A"),
             thermometer = Color.parseColor("#9A9A9A"),
+            readiness = Color.parseColor("#9A9A9A"),
             divider = Color.BLACK,
             glyphStyle = Paint.Style.STROKE,
         )
@@ -69,7 +73,19 @@ object ReadingGlyphs {
         addCircle(0f, 0.3f, 0.2f, Path.Direction.CW)
     }
 
+    private val bolt = Path().apply {
+        moveTo(0.1f, -0.5f)
+        lineTo(-0.28f, 0.08f)
+        lineTo(-0.03f, 0.08f)
+        lineTo(-0.1f, 0.5f)
+        lineTo(0.28f, -0.1f)
+        lineTo(0.03f, -0.1f)
+        close()
+    }
+
     fun drawHeart(canvas: Canvas, x: Float, y: Float, size: Float, paint: Paint) = draw(canvas, heart, x, y, size, paint)
+
+    fun drawBolt(canvas: Canvas, x: Float, y: Float, size: Float, paint: Paint) = draw(canvas, bolt, x, y, size, paint)
 
     fun drawThermometer(canvas: Canvas, x: Float, y: Float, size: Float, paint: Paint) =
         draw(canvas, thermometer, x, y, size, paint)

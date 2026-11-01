@@ -1,6 +1,8 @@
 package org.sand.ticwatch.phone.health
 
+import androidx.annotation.StringRes
 import java.time.Instant
+import org.sand.ticwatch.phone.R
 
 /**
  * A single sensor sample synced from the watch, in a transport-neutral shape. When
@@ -21,12 +23,12 @@ data class SensorSample(
  * Measuring device of a sample; [code] is its persisted history value (explicit, never `ordinal`). WATCH also covers
  * everything the phone derives from watch data, including the wrist blood pressure estimate.
  */
-enum class SampleSource(val code: Int, val label: String) {
-    WATCH(0, "TicWatch"),
-    BLOOD_PRESSURE_CUFF(1, "Bioland cuff"),
+enum class SampleSource(val code: Int, @StringRes val label: Int) {
+    WATCH(0, R.string.source_watch),
+    BLOOD_PRESSURE_CUFF(1, R.string.source_blood_pressure_cuff),
 
     /** The phone's own sensors (the microphone's snoring analysis). */
-    PHONE(2, "Phone");
+    PHONE(2, R.string.source_phone);
 
     companion object {
         fun of(code: Int): SampleSource = entries.firstOrNull { it.code == code } ?: WATCH
@@ -67,6 +69,12 @@ enum class SensorType {
     AUTO_EXERCISE, VO2_MAX_EXERCISE, SLEEP_SCORE, TRAINING_LOAD,
     HEART_RATE_ZONE_1, HEART_RATE_ZONE_2, HEART_RATE_ZONE_3, HEART_RATE_ZONE_4, HEART_RATE_ZONE_5,
     HEART_RATE_ALERT, BLOOD_PRESSURE_SYSTOLIC, BLOOD_PRESSURE_DIASTOLIC,
+
+    // Watch night monitor, history only: an interval whose pulse shrank (value = depth, percent).
+    PULSE_AMPLITUDE_DROP,
+
+    // Phone-derived, history only: current fatigue, 0..100 percent (FatigueIndexDeriver).
+    FATIGUE_INDEX,
 }
 
 /**

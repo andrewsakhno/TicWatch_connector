@@ -6,6 +6,7 @@ import org.sand.ticwatch.phone.history.RollupResolution
 import org.sand.ticwatch.phone.history.SensorHistoryQueries
 import org.sand.ticwatch.phone.history.SleepSession
 import org.sand.ticwatch.phone.history.SleepStageQueries
+import org.sand.ticwatch.phone.sleep.SleepNightInsightsSource
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -25,6 +26,7 @@ class HistoryHealthInsightsSource(
     private val queries: SensorHistoryQueries,
     private val stages: SleepStageQueries,
     private val skinBaselines: SkinBaselineSource,
+    private val nightInsights: SleepNightInsightsSource,
     private val scorer: ReadinessScorer,
     private val clock: Clock,
     private val zone: ZoneId,
@@ -91,6 +93,7 @@ class HistoryHealthInsightsSource(
             desaturationIndexPerHour =
                 average(SensorType.OXYGEN_DESATURATION_INDEX, RollupResolution.FIVE_MINUTES, night.start, night.end),
             snoringMinutes = average(SensorType.SNORING_DURATION, RollupResolution.FIVE_MINUTES, night.start, night.end),
+            advanced = nightInsights.night(night),
         )
     }
 

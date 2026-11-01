@@ -1,6 +1,10 @@
 package org.sand.ticwatch.watch.datalayer
 
 import android.content.Context
+import android.hardware.SensorManager
+import android.os.PowerManager
+import org.sand.ticwatch.watch.power.WakeLockAwakeRunner
+import org.sand.ticwatch.watch.sensors.RawPpgProbe
 import org.sand.ticwatch.watch.sensors.DeviceCapabilityProbe
 import org.sand.ticwatch.watch.sensors.FileRawWindowEventLog
 import org.sand.ticwatch.watch.sensors.FileTemperatureChannelLog
@@ -40,6 +44,14 @@ fun defaultDebugProbeRoutes(context: Context): List<DebugProbeRoute> = listOf(
         DataLayerPaths.MESSAGE_DEBUG_VENDOR_DATA_REQUEST,
         DataLayerPaths.MESSAGE_DEBUG_VENDOR_DATA_RESPONSE,
         VendorDataProbe(context),
+    ),
+    DebugProbeRoute(
+        DataLayerPaths.MESSAGE_DEBUG_RAW_PPG_REQUEST,
+        DataLayerPaths.MESSAGE_DEBUG_RAW_PPG_RESPONSE,
+        RawPpgProbe(
+            context.getSystemService(SensorManager::class.java),
+            WakeLockAwakeRunner(context.getSystemService(PowerManager::class.java), RawPpgProbe.WAKE_LOCK_TAG),
+        ),
     ),
     DebugProbeRoute(
         DataLayerPaths.MESSAGE_DEBUG_SLEEP_LOG_REQUEST,

@@ -1,5 +1,7 @@
 package org.sand.ticwatch.watch.sensors
 
+import android.hardware.SensorManager
+
 import android.hardware.Sensor
 import java.time.Duration
 import java.time.Instant
@@ -13,6 +15,9 @@ import kotlin.math.sqrt
  * [VendorDataProbe]); Mobvoi doesn't document them.
  */
 interface VendorReadingAggregator : WindowSensorListener {
+    /** What this aggregator produces; null when it only records raw events. */
+    val metric: SensorType?
+
     fun result(windowStart: Instant, windowEnd: Instant): SensorSample?
 }
 
@@ -20,6 +25,10 @@ interface VendorReadingAggregator : WindowSensorListener {
 interface WindowSensorListener {
     /** Android sensor type this listener decodes: a [VendorSensorTypes] id or a standard `Sensor.TYPE_*`. */
     val sensorType: Int
+
+    /** Requested sampling period; most vendor sensors report slowly anyway. */
+    val samplingPeriodUs: Int get() = SensorManager.SENSOR_DELAY_NORMAL
+
     fun onEvent(values: FloatArray, at: Instant)
 }
 
@@ -56,6 +65,7 @@ object VendorSensorTypes {
  */
 class Spo2Aggregator : VendorReadingAggregator {
     override val sensorType = VendorSensorTypes.SPO2
+    override val metric = SensorType.SPO2
     private val readings = mutableListOf<Double>()
     private var lastReadingAt: Instant? = null
 
@@ -99,6 +109,7 @@ object Spo2Reading {
  */
 class RmssdAggregator : VendorReadingAggregator {
     override val sensorType = VendorSensorTypes.RR_INTERVAL
+    override val metric = SensorType.HRV_RMSSD
     private val intervals = mutableListOf<Double>()
 
     override fun onEvent(values: FloatArray, at: Instant) {
@@ -146,6 +157,7 @@ class RriRespirationRateAggregator(
     private val estimator: RespiratorySinusArrhythmiaEstimator = RespiratorySinusArrhythmiaEstimator(),
 ) : VendorReadingAggregator {
     override val sensorType = VendorSensorTypes.RR_INTERVAL
+    override val metric = SensorType.RESPIRATION_RATE
     private val beats = mutableListOf<Beat>()
     private var elapsedSeconds = 0.0
 
@@ -173,6 +185,7 @@ class SkinTemperatureAggregator(
     private val channelSink: TemperatureChannelSink,
 ) : VendorReadingAggregator {
     override val sensorType = VendorSensorTypes.TEMPERATURE
+    override val metric = SensorType.SKIN_TEMPERATURE
     private val readings = mutableListOf<Double>()
     private val channelSums = DoubleArray(CHANNEL_COUNT)
     private val channelCounts = IntArray(CHANNEL_COUNT)
@@ -215,7 +228,7 @@ class SkinTemperatureAggregator(
  */
 open class TimeWeightedMeanAggregator(
     override val sensorType: Int,
-    private val outputType: SensorType,
+    override val metric: SensorType,
     private val validRange: ClosedFloatingPointRange<Double>,
 ) : VendorReadingAggregator {
     private val readings = mutableListOf<Pair<Instant, Double>>()
@@ -235,7 +248,7 @@ open class TimeWeightedMeanAggregator(
         val totalWeight = weights.sum()
         val mean = if (totalWeight > 0) sorted.indices.sumOf { sorted[it].second * weights[it] } / totalWeight
         else sorted.map { it.second }.average()
-        return SensorSample(outputType, mean, windowStart, windowEnd)
+        return SensorSample(metric, mean, windowStart, windowEnd)
     }
 
     private companion object {
@@ -280,6 +293,7 @@ class RawEventRecorder(
     override val sensorType: Int,
     private val rawEvents: RawWindowEventSink,
 ) : VendorReadingAggregator {
+    override val metric: SensorType? = null
     private val events = mutableListOf<RawSensorEvent>()
 
     override fun onEvent(values: FloatArray, at: Instant) {

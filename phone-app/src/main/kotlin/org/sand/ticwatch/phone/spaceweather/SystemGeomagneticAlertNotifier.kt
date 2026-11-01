@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import org.sand.ticwatch.phone.MainActivity
+import org.sand.ticwatch.phone.R
 
 /** Posts a [GeomagneticAlert] on [CHANNEL_ID]; tapping it opens the app with the cardio advice sheet. */
 class SystemGeomagneticAlertNotifier(context: Context) : GeomagneticAlertNotifier {
@@ -21,7 +22,7 @@ class SystemGeomagneticAlertNotifier(context: Context) : GeomagneticAlertNotifie
             return
         }
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL_ID, context.getString(R.string.geomagnetic_alert_channel), NotificationManager.IMPORTANCE_DEFAULT),
         )
         val openAdvice = PendingIntent.getActivity(
             context,
@@ -29,12 +30,13 @@ class SystemGeomagneticAlertNotifier(context: Context) : GeomagneticAlertNotifie
             MainActivity.cardioAdviceIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = "⚠️ Geomagnetic storm forecast (Kp = ${"%.1f".format(alert.maxKp)}, ${alert.level.label})"
+        val title = context.getString(R.string.geomagnetic_alert_title, alert.maxKp, context.getString(alert.level.label))
+        val text = context.getString(R.string.geomagnetic_alert_text)
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_warning)
             .setContentTitle(title)
-            .setContentText(TEXT)
-            .setStyle(Notification.BigTextStyle().bigText(TEXT))
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(openAdvice)
             .setAutoCancel(true)
             .build()
@@ -44,9 +46,7 @@ class SystemGeomagneticAlertNotifier(context: Context) : GeomagneticAlertNotifie
     private companion object {
         const val TAG = "GeomagneticAlert"
         const val CHANNEL_ID = "channel_space_weather_alerts"
-        const val CHANNEL_NAME = "Geomagnetic storm alerts"
         const val NOTIFICATION_ID = 4_101
         const val OPEN_REQUEST_CODE = 4_102
-        const val TEXT = "A geomagnetic disturbance is expected. Check your blood pressure with the cuff and reduce peak exertion."
     }
 }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.sand.ticwatch.phone.cloud.LocalFirstCloudReads
 
 /**
  * Observable state holder of one screen: the single source of truth the UI renders by collecting [state]. Every
@@ -42,6 +43,14 @@ abstract class UiStateStore<S>(
             .onFailure { if (it is CancellationException) throw it }
         onResult(result)
     }
+
+    /**
+     * [launchIo] for what a screen renders from the history: computed at once from what is on the phone, never waiting
+     * for the cloud server. Older data is fetched meanwhile; re-read on `AppContainer.cloudHistoryArrivals` to show it.
+     * Not for work that stores or exports its result: that needs the complete data.
+     */
+    protected fun <T> launchLocalFirstRead(work: suspend () -> T, onResult: (Result<T>) -> Unit): Job =
+        launchIo({ withContext(LocalFirstCloudReads()) { work() } }, onResult)
 
     /** Listens to [source] (collected upstream on [ioDispatcher]) and hands every value to [onValue] on [scope]. */
     protected fun <T> observe(source: Flow<T>, onValue: (T) -> Unit): Job = scope.launch {
@@ -68,7 +77,7 @@ class ReloadingStore<T>(
 
     fun reload() {
         loadJob?.cancel()
-        loadJob = launchIo(load) { result ->
+        loadJob = launchLocalFirstRead(load) { result ->
             result.fold(onSuccess = { value -> setState { value } }, onFailure = { Log.w(TAG, "Screen data load failed", it) })
         }
     }

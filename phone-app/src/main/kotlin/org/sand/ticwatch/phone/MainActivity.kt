@@ -6,9 +6,10 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,8 +31,8 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,25 +40,32 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
-import org.sand.ticwatch.phone.datalayer.WatchNode
+import org.sand.ticwatch.phone.cloud.CloudSyncWorker
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
+import org.sand.ticwatch.phone.history.SensorHistoryModule
 import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
+import org.sand.ticwatch.phone.snore.ProcessAppActivity
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherRefreshWorker
 import org.sand.ticwatch.phone.sync.SyncDirection
-import org.sand.ticwatch.phone.sync.SyncTransfer
 import org.sand.ticwatch.phone.sync.SyncStatusRepository
+import org.sand.ticwatch.phone.sync.SyncTransfer
 import org.sand.ticwatch.phone.transport.BluetoothLinkServerService
-import kotlin.math.roundToInt
+import org.sand.ticwatch.phone.ui.LOAD_ONCE
+import org.sand.ticwatch.phone.ui.ReloadingStore
+import org.sand.ticwatch.phone.ui.anyChangeOf
+import org.sand.ticwatch.phone.ui.rememberStore
 
-private enum class Screen(val label: String) {
-    Dashboard("Dashboard"),
-    Settings("Settings"),
-    McpAgent("MCP agent"),
+private enum class Screen(@StringRes val label: Int) {
+    Dashboard(R.string.screen_dashboard),
+    Settings(R.string.screen_settings),
+    McpAgent(R.string.screen_mcp_agent),
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var appContainer: AppContainer
 
@@ -88,7 +96,10 @@ class MainActivity : ComponentActivity() {
         appContainer = AppContainer(applicationContext)
         SensorHistoryPurgeWorker.schedule(applicationContext)
         SpaceWeatherRefreshWorker.schedule(applicationContext)
+        CloudSyncWorker.schedule(applicationContext)
+        CloudSyncWorker.requestSoon(applicationContext)
         BodyTemperatureBackfillWorker.enqueue(applicationContext)
+        appContainer.liveWatchSync.bindTo(this)
 
         val startupPermissions = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)
@@ -116,6 +127,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Opening the app counts as being up: the phone snore monitor ends its night on it.
+        ProcessAppActivity.markActive(SensorHistoryModule.clock.instant())
     }
 
     private fun startBluetoothLinkService() {
@@ -157,11 +174,13 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // Swipe must not open the drawer (it clashes with horizontal gestures); only the hamburger does.
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ModalDrawerSheet {
                 Screen.entries.forEach { screen ->
                     NavigationDrawerItem(
-                        label = { Text(text = screen.label) },
+                        label = { Text(text = stringResource(screen.label)) },
                         selected = screen == currentScreen,
                         onClick = {
                             currentScreen = screen
@@ -175,11 +194,15 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(text = "TicWatch Connector") },
+                    title = { Text(text = stringResource(R.string.app_name)) },
                     navigationIcon = {
                         IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
-                            Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
+                            Icon(imageVector = Icons.Default.Menu, contentDescription = stringResource(R.string.menu))
                         }
+                    },
+                    actions = {
+                        CloudSyncIndicator(appContainer)
+                        WatchBatteryIndicator(appContainer, SensorHistoryModule.clock)
                     },
                 )
             },
@@ -207,11 +230,11 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
     }
 }
 
-private enum class DashboardTab(val label: String) {
-    METRICS("Metrics"),
-    ADVISOR("Advisor"),
-    BLOOD_PRESSURE("Blood Pressure"),
-    SYSTEM("System"),
+private enum class DashboardTab(@StringRes val label: Int) {
+    METRICS(R.string.tab_metrics),
+    ADVISOR(R.string.tab_advisor),
+    BLOOD_PRESSURE(R.string.tab_blood_pressure),
+    SYSTEM(R.string.tab_system),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -225,16 +248,20 @@ private fun DashboardScreen(appContainer: AppContainer, initialTab: DashboardTab
                 Tab(
                     selected = tab == selectedTab,
                     onClick = { selectedTab = tab },
-                    text = { Text(text = tab.label) },
+                    text = { Text(text = stringResource(tab.label)) },
                 )
             }
         }
         when (selectedTab) {
             DashboardTab.METRICS -> HealthInsightsScreen(appContainer)
-            DashboardTab.ADVISOR -> CardioAdvisorScreen(appContainer.cardioReadiness)
+            DashboardTab.ADVISOR -> CardioAdvisorScreen(
+                appContainer.cardioReadiness,
+                anyChangeOf(appContainer.historyChanges, appContainer.bloodPressureChanges, appContainer.cloudHistoryArrivals),
+            )
             DashboardTab.BLOOD_PRESSURE -> BloodPressureScreen(
-                appContainer.bloodPressureMonitor, appContainer.cuffStatusStore,
-                appContainer.medicationTracking, appContainer.cardioReportComposer,
+                appContainer.bloodPressureMonitor, appContainer.watchSyncRequester, appContainer.cuffStatusStore,
+                appContainer.medicationTracking, appContainer.cardioReportComposer, appContainer.ecgDependencies,
+                anyChangeOf(appContainer.bloodPressureChanges, appContainer.historyChanges, appContainer.cloudHistoryArrivals),
             )
             DashboardTab.SYSTEM -> PairedWatchesScreen(appContainer)
         }
@@ -243,21 +270,25 @@ private fun DashboardScreen(appContainer: AppContainer, initialTab: DashboardTab
 
 @Composable
 private fun PairedWatchesScreen(appContainer: AppContainer) {
-    var watches by remember { mutableStateOf<List<WatchNode>>(emptyList()) }
+    // Watch updates start here: they get the link to themselves.
+    DisposableEffect(appContainer) {
+        appContainer.liveWatchSync.setPaused(true)
+        onDispose { appContainer.liveWatchSync.setPaused(false) }
+    }
+    val store = rememberStore(appContainer) { scope, io ->
+        ReloadingStore(scope, io, LOAD_ONCE, appContainer.watchAppManager::listPairedWatches)
+    }
+    val watches = store.state.collectAsState().value.orEmpty()
     val transfers by SyncStatusRepository.transfers.collectAsState()
 
-    LaunchedEffect(Unit) {
-        watches = appContainer.watchAppManager.listPairedWatches()
-    }
-
     Column(modifier = Modifier.padding(16.dp)) {
-        Text(text = "TicWatch Connector", style = MaterialTheme.typography.headlineSmall)
+        Text(text = stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall)
         transfers.forEach { SyncProgressIndicator(it) }
         if (watches.isEmpty()) {
-            Text(text = "No paired watches found.")
+            Text(text = stringResource(R.string.no_paired_watches))
         } else {
             watches.forEach { watch ->
-                Text(text = "${watch.displayName} (${if (watch.isNearby) "nearby" else "reachable"})")
+                Text(text = stringResource(if (watch.isNearby) R.string.watch_nearby else R.string.watch_reachable, watch.displayName))
             }
         }
     }
@@ -272,8 +303,8 @@ private fun PairedWatchesScreen(appContainer: AppContainer) {
 @Composable
 private fun SyncProgressIndicator(status: SyncTransfer) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-        val arrow = if (status.direction == SyncDirection.TO_WATCH) "Phone -> Watch" else "Watch -> Phone"
-        Text(text = "$arrow: ${status.description}", style = MaterialTheme.typography.bodyMedium)
+        val direction = if (status.direction == SyncDirection.TO_WATCH) R.string.sync_phone_to_watch else R.string.sync_watch_to_phone
+        Text(text = stringResource(direction, stringResource(status.description)), style = MaterialTheme.typography.bodyMedium)
 
         val total = status.totalBytes
         val fraction = status.fraction

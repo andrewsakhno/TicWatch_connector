@@ -1,16 +1,17 @@
 package org.sand.ticwatch.phone.datalayer
 
 import android.util.Log
+import java.time.Clock
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.health.BloodPressureLogListener
 import org.sand.ticwatch.phone.health.BloodPressureReading
 import org.sand.ticwatch.phone.health.RecentBloodPressureReadings
+import org.sand.ticwatch.phone.text.TextResolver
 import org.sand.ticwatch.phone.transport.DeviceLinkTransport
 import org.sand.ticwatch.phone.transport.sendMessage
-import java.time.Clock
-import java.time.Duration
-import java.util.concurrent.atomic.AtomicReference
 
 /** Tells the watch about the latest saved blood pressure readings. */
 fun interface BloodPressureHistoryPublisher : WatchStatePublisher
@@ -26,6 +27,7 @@ class WatchBloodPressurePublisher(
     private val transport: DeviceLinkTransport,
     private val clock: Clock,
     private val scope: CoroutineScope,
+    private val texts: TextResolver,
 ) : BloodPressureHistoryPublisher, BloodPressureLogListener {
 
     private val lastSent = AtomicReference<String?>()
@@ -33,15 +35,17 @@ class WatchBloodPressurePublisher(
     override fun onLogChanged() = publish()
 
     override fun publish() {
-        scope.launch {
-            val payload = runCatching { BloodPressureWatchPayloads.encodeHistory(lastDay()) }
-                .onFailure { Log.w(TAG, "Reading blood pressure history failed", it) }
-                .getOrNull() ?: return@launch
-            if (payload == lastSent.get()) return@launch
-            transport.sendMessage(DataLayerPaths.MESSAGE_BLOOD_PRESSURE_HISTORY, payload.toByteArray(Charsets.UTF_8))
-                .onSuccess { lastSent.set(payload) }
-                .onFailure { Log.w(TAG, "Sending blood pressure history to the watch failed", it) }
-        }
+        scope.launch { publishAndWait() }
+    }
+
+    override suspend fun publishAndWait() {
+        val payload = runCatching { BloodPressureWatchPayloads.encodeHistory(lastDay(), texts) }
+            .onFailure { Log.w(TAG, "Reading blood pressure history failed", it) }
+            .getOrNull() ?: return
+        if (payload == lastSent.get()) return
+        transport.sendMessage(DataLayerPaths.MESSAGE_BLOOD_PRESSURE_HISTORY, payload.toByteArray(Charsets.UTF_8))
+            .onSuccess { lastSent.set(payload) }
+            .onFailure { Log.w(TAG, "Sending blood pressure history to the watch failed", it) }
     }
 
     private suspend fun lastDay(): List<BloodPressureReading> =

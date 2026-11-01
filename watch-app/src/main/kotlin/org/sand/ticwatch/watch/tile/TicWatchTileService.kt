@@ -17,7 +17,7 @@ import java.util.Date
 /**
  * Tile with the live heart rate and ambient temperature of [SensorCollectionService][
  * org.sand.ticwatch.watch.sensors.SensorCollectionService], read over its local binder like the
- * watch face. Tapping it opens [MainActivity].
+ * watch face, around the phone's readiness gauge. Tapping it opens [MainActivity].
  */
 class TicWatchTileService : SuspendingTileService() {
 
@@ -41,6 +41,7 @@ class TicWatchTileService : SuspendingTileService() {
         val content = layout.build(
             deviceParameters = requestParams.deviceConfiguration,
             updatedAt = DateFormat.getTimeFormat(this).format(Date()),
+            readiness = loadTileReadiness(applicationContext),
             readings = listOf(
                 TileReading(
                     ReadingsTileLayout.ICON_HEART,

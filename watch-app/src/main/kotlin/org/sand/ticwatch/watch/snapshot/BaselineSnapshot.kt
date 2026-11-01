@@ -1,10 +1,15 @@
 package org.sand.ticwatch.watch.snapshot
 
 import android.util.Log
+import androidx.annotation.StringRes
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
+import org.sand.ticwatch.watch.R
 import org.sand.ticwatch.watch.power.AwakeRunner
 import org.sand.ticwatch.watch.sensors.AggregatorGroup
 import org.sand.ticwatch.watch.sensors.QualifierProbe
@@ -13,20 +18,33 @@ import org.sand.ticwatch.watch.sensors.SensorSample
 import org.sand.ticwatch.watch.sensors.SensorType
 import org.sand.ticwatch.watch.sensors.WindowGate
 import org.sand.ticwatch.watch.sensors.WindowMeasurer
+import org.sand.ticwatch.watch.sensors.WindowObserver
 import org.sand.ticwatch.watch.sensors.WindowQualifier
 import org.sand.ticwatch.watch.sensors.median
-import java.time.Clock
-import java.time.Duration
-import java.time.Instant
 
 /** Outcome of a snapshot; wire contract with phone-app's `SnapshotStatus` (matched by name). */
-enum class SnapshotStatus(val message: String) {
-    COMPLETED("Snapshot captured"),
-    NOT_WORN("Put the watch on"),
-    NOT_STILL("Keep the wrist still and retry"),
-    NO_READINGS("No sensor produced a reading"),
-    BUSY("A snapshot is already running"),
+enum class SnapshotStatus(@StringRes val message: Int) {
+    COMPLETED(R.string.snapshot_completed),
+    NOT_WORN(R.string.put_watch_on),
+    NOT_STILL(R.string.snapshot_not_still),
+    NO_READINGS(R.string.snapshot_no_readings),
+    BUSY(R.string.snapshot_busy),
 }
+
+/** What a running snapshot is doing now; wire contract with phone-app's `SnapshotStage` (matched by name). */
+enum class SnapshotStage {
+    STILLNESS_CHECK,
+    MEASURING,
+    SYNCING,
+    SENDING_RESULT,
+}
+
+/** A running snapshot's [stage] and, while measuring, the metrics [polled] and those already [answering]. */
+data class SnapshotProgress(
+    val stage: SnapshotStage,
+    val polled: Set<SensorType> = emptySet(),
+    val answering: Set<SensorType> = emptySet(),
+)
 
 /** One Baseline Snapshot: every metric measured together in a single window, at rest. */
 data class SnapshotResult(
@@ -40,7 +58,27 @@ data class SnapshotResult(
 
 /** Takes a full snapshot of all available metrics now. */
 fun interface SnapshotCapturer {
-    suspend fun captureFullSnapshot(): SnapshotResult
+    /** [onProgress] hears each stage and metric change as it happens; a request answered [SnapshotStatus.BUSY] reports none. */
+    suspend fun captureFullSnapshot(onProgress: (SnapshotProgress) -> Unit): SnapshotResult
+}
+
+/** Builds up one capture's [SnapshotProgress]; sensors answer on the main thread while the capture runs elsewhere. */
+private class SnapshotProgressTracker(private val report: (SnapshotProgress) -> Unit) : WindowObserver {
+    private var current = SnapshotProgress(SnapshotStage.STILLNESS_CHECK)
+
+    @Synchronized
+    fun startStage(stage: SnapshotStage) = publish(SnapshotProgress(stage))
+
+    @Synchronized
+    override fun onPolling(metrics: Set<SensorType>) = publish(current.copy(polled = current.polled + metrics))
+
+    @Synchronized
+    override fun onAnswering(metric: SensorType) = publish(current.copy(answering = current.answering + metric))
+
+    private fun publish(progress: SnapshotProgress) {
+        current = progress
+        report(progress)
+    }
 }
 
 /** Timing of [BaselineSnapshotCapturer]. */
@@ -72,31 +110,41 @@ class BaselineSnapshotCapturer(
 
     private val running = Mutex()
 
-    override suspend fun captureFullSnapshot(): SnapshotResult {
+    override suspend fun captureFullSnapshot(onProgress: (SnapshotProgress) -> Unit): SnapshotResult {
         val startedAt = clock.instant()
         if (!running.tryLock()) return finished(SnapshotStatus.BUSY, startedAt)
         return try {
-            awakeRunner.runAwake(timing.stillnessProbe.plus(timing.window).plus(WAKE_SLACK)) { capture(startedAt) }
+            awakeRunner.runAwake(timing.stillnessProbe.plus(timing.window).plus(WAKE_SLACK)) {
+                capture(startedAt, SnapshotProgressTracker(onProgress))
+            }
         } finally {
             running.unlock()
         }
     }
 
-    private suspend fun capture(startedAt: Instant): SnapshotResult {
+    private suspend fun capture(startedAt: Instant, progress: SnapshotProgressTracker): SnapshotResult {
         if (!worn.isOpen()) return finished(SnapshotStatus.NOT_WORN, startedAt)
+        progress.startStage(SnapshotStage.STILLNESS_CHECK)
         if (!probe.accepts(stillness(), timing.stillnessProbe)) return finished(SnapshotStatus.NOT_STILL, startedAt)
+        progress.startStage(SnapshotStage.MEASURING)
+        progress.onPolling(setOf(SensorType.HEART_RATE))
         val samples = coroutineScope {
-            val heartRateMedian = async { medianHeartRate() }
-            measurer.measure(groups(), timing.window) + listOfNotNull(heartRateMedian.await())
+            val heartRateMedian = async { medianHeartRate(progress) }
+            measurer.measure(groups(), timing.window, progress) + listOfNotNull(heartRateMedian.await())
         }
         val status = if (samples.isEmpty()) SnapshotStatus.NO_READINGS else SnapshotStatus.COMPLETED
         Log.i(TAG, "Snapshot $status: ${samples.map { "${it.type}=${it.value}" }}")
         return finished(status, startedAt, samples)
     }
 
-    private suspend fun medianHeartRate(): SensorSample? {
+    private suspend fun medianHeartRate(observer: WindowObserver): SensorSample? {
         val readings = mutableListOf<Double>()
-        withTimeoutOrNull(timing.window.toMillis()) { heartRate.heartRateSamples().collect { readings += it.value } }
+        withTimeoutOrNull(timing.window.toMillis()) {
+            heartRate.heartRateSamples().collect {
+                readings += it.value
+                if (it.value > 0) observer.onAnswering(SensorType.HEART_RATE)
+            }
+        }
         val valid = readings.filter { it > 0 }
         return if (valid.isEmpty()) null else SensorSample(SensorType.HEART_RATE, valid.median(), clock.instant())
     }

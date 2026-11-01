@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="com.google.android.gms.permission.WEARABLE" />
 
+    <!-- Wi-Fi link for large phone->watch payloads (WifiLinkServer): a LAN socket, plus requesting
+         the Wi-Fi network so it stays up during the transfer. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
     <!-- Foreground service type for SensorCollectionService, which keeps heart-rate
          collection running for as long as the watch is on, not just while the app is
          in the foreground. -->
@@ -73,6 +79,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Recording screen of the heart rhythm strip; opened by SensorCollectionService. -->
+        <activity
+            android:name=".ecg.EcgCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:turnScreenOn="true" />
 
         <!-- Keeps heart-rate collection (and the bridge sync to the phone) running for
              as long as the watch is powered on, independent of MainActivity's lifecycle. -->
@@ -147,6 +163,21 @@
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
                 android:resource="@drawable/tile_preview" />
+        </service>
+
+        <!-- Tile with the phone's cardio readiness score, blood pressure and pulse. -->
+        <service
+            android:name=".tile.CardioReadinessTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_heart"
+            android:label="@string/tile_readiness_name"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/ic_tile_heart" />
         </service>
 
         <!-- Restarts the long-running services after reboot / app update. -->

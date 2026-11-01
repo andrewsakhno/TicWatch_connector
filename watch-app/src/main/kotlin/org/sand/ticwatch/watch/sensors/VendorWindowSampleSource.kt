@@ -73,8 +73,21 @@ class VendorWindowSampleSource(
 }
 
 /** Measures [AggregatorGroup]s together for one window and returns their results. */
-fun interface WindowMeasurer {
-    suspend fun measure(groups: List<AggregatorGroup>, window: Duration): List<SensorSample>
+interface WindowMeasurer {
+    suspend fun measure(groups: List<AggregatorGroup>, window: Duration, observer: WindowObserver = WindowObserver.NONE): List<SensorSample>
+}
+
+/** Hears which metrics a measurement window polls and which of them have started answering. */
+interface WindowObserver {
+    fun onPolling(metrics: Set<SensorType>)
+    fun onAnswering(metric: SensorType)
+
+    companion object {
+        val NONE = object : WindowObserver {
+            override fun onPolling(metrics: Set<SensorType>) = Unit
+            override fun onAnswering(metric: SensorType) = Unit
+        }
+    }
 }
 
 /**
@@ -90,47 +103,85 @@ class SensorWindowMeasurer(
     private val powerManager: PowerManager,
 ) : WindowMeasurer {
 
-    override suspend fun measure(groups: List<AggregatorGroup>, window: Duration): List<SensorSample> {
-        val openGroups = groups.filter { it.gate.isOpen() }
+    override suspend fun measure(groups: List<AggregatorGroup>, window: Duration, observer: WindowObserver): List<SensorSample> {
+        val openGroups = groups.filter { it.gate.isOpen() && it.startGate.isOpen() }
         if (openGroups.isEmpty()) {
             Log.i(TAG, "Vendor window skipped: every group is gated off")
             return emptyList()
         }
         val aggregatorsByGroup = openGroups.associateWith { group -> group.factories.map { it() } }
         val qualifiersByGroup = openGroups.associateWith { group -> group.qualifiers.map { it() } }
-        val windowListeners = aggregatorsByGroup.values.flatten() + qualifiersByGroup.values.flatten()
-        val listeners = windowListeners.mapNotNull { windowListener ->
-            val sensor = nonWakeupSensor(windowListener.sensorType)
-                ?: return@mapNotNull null.also { Log.w(TAG, "Sensor ${windowListener.sensorType} not found") }
-            AggregatingListener(windowListener).takeIf {
-                sensorManager.registerListener(it, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-            }
+        val listenersByGroup = openGroups.associateWith { group ->
+            register(aggregatorsByGroup.getValue(group) + qualifiersByGroup.getValue(group), observer)
         }
+        observer.onPolling(listenersByGroup.values.flatten().mapNotNull { it.metric }.toSet())
 
+        val rejected = mutableSetOf<AggregatorGroup>()
         val wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
         val windowStart = Instant.now()
         wakeLock.acquire(window.plus(WAKE_LOCK_SLACK).toMillis())
         try {
-            delay(window.toMillis())
+            awaitWindow(window) { progress ->
+                openGroups.filter { group -> group !in rejected && qualifiersByGroup.getValue(group).any { it.alreadyRejects(progress) } }
+                    .forEach { group ->
+                        Log.i(TAG, "${group.group} stopped early: its qualifier can't accept this window anymore")
+                        listenersByGroup.getValue(group).forEach { sensorManager.unregisterListener(it) }
+                        rejected += group
+                    }
+                rejected.size < openGroups.size
+            }
         } finally {
-            listeners.forEach { sensorManager.unregisterListener(it) }
+            listenersByGroup.values.flatten().forEach { sensorManager.unregisterListener(it) }
             if (wakeLock.isHeld) wakeLock.release()
         }
         val windowEnd = Instant.now()
 
         val samples = aggregatorsByGroup
-            .filterKeys { group -> group.gate.isOpen() && qualifiersByGroup.getValue(group).all { it.accepts() } }
+            .filterKeys { group -> group !in rejected && group.gate.isOpen() && qualifiersByGroup.getValue(group).all { it.accepts() } }
             .values.flatten()
             .mapNotNull { it.result(windowStart, windowEnd) }
         Log.i(TAG, "Vendor window done: ${samples.map { "${it.type}=${it.value}" }}")
         return samples
     }
 
+    private fun register(windowListeners: List<WindowSensorListener>, observer: WindowObserver): List<AggregatingListener> =
+        windowListeners.mapNotNull { windowListener ->
+            val sensor = nonWakeupSensor(windowListener.sensorType)
+                ?: return@mapNotNull null.also { Log.w(TAG, "Sensor ${windowListener.sensorType} not found") }
+            AggregatingListener(windowListener, (windowListener as? VendorReadingAggregator)?.metric, observer).takeIf {
+                sensorManager.registerListener(it, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+        }
+
+    /** Waits out [window], asking [keepGoing] with the elapsed part of it every [REJECTION_CHECK]; false ends it early. */
+    private suspend fun awaitWindow(window: Duration, keepGoing: (Double) -> Boolean) {
+        var remaining = window.toMillis()
+        while (remaining > 0) {
+            val step = minOf(remaining, REJECTION_CHECK.toMillis())
+            delay(step)
+            remaining -= step
+            if (!keepGoing(1.0 - remaining.toDouble() / window.toMillis())) return
+        }
+    }
+
     private fun nonWakeupSensor(type: Int): Sensor? =
         sensorManager.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.type == type && !it.isWakeUpSensor }
 
-    private class AggregatingListener(private val windowListener: WindowSensorListener) : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent) = windowListener.onEvent(event.values, event.wallClockTime())
+    private class AggregatingListener(
+        private val windowListener: WindowSensorListener,
+        val metric: SensorType?,
+        private val observer: WindowObserver,
+    ) : SensorEventListener {
+        private var answered = false
+
+        override fun onSensorChanged(event: SensorEvent) {
+            windowListener.onEvent(event.values, event.wallClockTime())
+            if (metric != null && !answered) {
+                answered = true
+                observer.onAnswering(metric)
+            }
+        }
+
         override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
     }
 
@@ -138,6 +189,9 @@ class SensorWindowMeasurer(
         const val TAG = "VendorWindowSource"
         const val WAKE_LOCK_TAG = "TicWatchConnector:VendorWindow"
         val WAKE_LOCK_SLACK: Duration = Duration.ofSeconds(10)
+
+        /** How often a running window asks its qualifiers whether a group is already lost, to switch its sensors off. */
+        val REJECTION_CHECK: Duration = Duration.ofSeconds(10)
     }
 }
 
@@ -152,14 +206,19 @@ fun interface WindowGate {
 
 /**
  * Aggregators that are measured together under one [gate], kept only if every [qualifiers] one accepts the window;
- * paced as [group] by the adaptive cadence.
+ * paced as [group] by the adaptive cadence. [startGate] is checked at the window start only: a group whose window
+ * would be wasted anyway (the wearer is walking) doesn't light its sensor at all.
  */
 class AggregatorGroup(
     val group: MeasurementGroup,
     val factories: List<() -> VendorReadingAggregator>,
     val gate: WindowGate = WindowGate.ALWAYS,
     val qualifiers: List<() -> WindowQualifier> = emptyList(),
-)
+    val startGate: WindowGate = WindowGate.ALWAYS,
+) {
+    /** For a window whose caller has just checked stillness itself (a snapshot): stale step batches mustn't skip it. */
+    fun withoutStartGate() = AggregatorGroup(group, factories, gate, qualifiers)
+}
 
 /**
  * Converts [SensorEvent.timestamp] (elapsed-realtime nanos) to wall-clock time. Some vendor sensors

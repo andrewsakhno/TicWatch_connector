@@ -1,0 +1,82 @@
+package org.sand.ticwatch.phone
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import java.time.Duration
+import kotlinx.coroutines.flow.Flow
+import org.sand.ticwatch.phone.dashboard.HeartRateZoneChart
+import org.sand.ticwatch.phone.dashboard.ZoneChartSize
+import org.sand.ticwatch.phone.health.HealthServicesExerciseTypes
+import org.sand.ticwatch.phone.insights.WorkoutEntry
+import org.sand.ticwatch.phone.insights.WorkoutJournal
+import org.sand.ticwatch.phone.ui.ReloadingStore
+import org.sand.ticwatch.phone.ui.rememberStore
+
+private const val METERS_PER_KM = 1000.0
+private val SHEET_PADDING = 16.dp
+private val ITEM_SPACING = 12.dp
+private val SECTION_GAP = 8.dp
+
+/** Opened from the "Training load" card: the week's workouts by day, each with its type, time, distance and zones. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun WorkoutJournalSheet(journal: WorkoutJournal, changes: Flow<*>, onDismiss: () -> Unit) {
+    val store = rememberStore(journal) { scope, io -> ReloadingStore(scope, io, changes) { journal.lastWeek() } }
+    val workouts by store.state.collectAsState()
+    val days = remember(workouts) { workouts.orEmpty().groupBy { it.day } }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = SHEET_PADDING),
+            verticalArrangement = Arrangement.spacedBy(ITEM_SPACING),
+        ) {
+            item { Text(text = stringResource(R.string.workout_journal_title), style = MaterialTheme.typography.titleLarge) }
+            days.forEach { (day, entries) ->
+                item(key = day.toEpochDay()) { DayHeader(day) }
+                items(entries, key = { it.start.toEpochMilli() }) { WorkoutCard(it) }
+            }
+            when {
+                workouts == null -> item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                days.isEmpty() -> item { Text(text = stringResource(R.string.no_data), style = MaterialTheme.typography.bodyMedium) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkoutCard(workout: WorkoutEntry) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(SHEET_PADDING)) {
+            Text(text = workoutTitle(workout), style = MaterialTheme.typography.titleMedium)
+            Detail(
+                stringResource(R.string.workout_time),
+                "${formatTime(workout.start)} - ${formatTime(workout.end)} (${formatDuration(Duration.between(workout.start, workout.end))})",
+            )
+            Detail(stringResource(R.string.workout_distance), workout.distanceMeters?.let { stringResource(R.string.unit_km, it / METERS_PER_KM) })
+            HeartRateZoneChart(workout.zoneMinutes, ZoneChartSize.COMPACT, Modifier.fillMaxWidth().padding(top = SECTION_GAP))
+        }
+    }
+}
+
+@Composable
+private fun workoutTitle(workout: WorkoutEntry): String {
+    val type = stringResource(HealthServicesExerciseTypes.label(workout.exerciseTypeId))
+    return if (workout.automatic) stringResource(R.string.workout_automatic, type.lowercase()) else type
+}
