@@ -52,3 +52,10 @@ node_modules/
 dist/
 *.local
 .env
+
+### Private notes (not published) ###
+CLAUDE.md
+GEMINI.md
+OnePager_Telemetria_Kardiologiczna_PL.md
+Monitorowanie_zdrowia_zegarek_telefon.pdf
+grep.exe.stackdump
