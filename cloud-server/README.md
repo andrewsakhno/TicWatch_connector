@@ -54,3 +54,8 @@ Nothing the phone can send, all checked by `contract-diff.sh` except the last tw
 - The key must carry the `Bearer ` prefix; the Kotlin filter also accepts the bare key.
 - Bodies over 32 MiB get a 413; an ECG payload is stored as sent, where Jackson re-serialised it first (`2.50`
   stays `2.50`, compared to `2.5`).
+
+## License
+
+GNU Affero General Public License v3.0 (`AGPL-3.0-only`), see [LICENSE](LICENSE). The apps in the rest of the
+repository are under GPL-3.0 (root `LICENSE`).
