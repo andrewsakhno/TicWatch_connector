@@ -79,6 +79,7 @@ fun TrendChart(
     val low = valueRange?.start ?: points.minOf { it.value }
     val high = valueRange?.endInclusive ?: points.maxOf { it.value }
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val scrubColor = MaterialTheme.colorScheme.onSurface
     val measurer = rememberTextMeasurer()
     val axisStyle = TextStyle(fontSize = AXIS_TEXT_SIZE, color = axisColor)
     var scrubbedAt by remember { mutableStateOf<Instant?>(null) }
@@ -109,7 +110,7 @@ fun TrendChart(
                 drawPath(path, line.color, style = Stroke(LINE_WIDTH.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                 linePoints.forEach { drawCircle(line.color, POINT_RADIUS.toPx(), Offset(x(it.at), y(it.value))) }
             }
-            scrubbedAt?.let { at -> drawLine(Color.Black, Offset(x(at), 0f), Offset(x(at), size.height), SCRUB_LINE_WIDTH.toPx()) }
+            scrubbedAt?.let { at -> drawLine(scrubColor, Offset(x(at), 0f), Offset(x(at), size.height), SCRUB_LINE_WIDTH.toPx()) }
         }
         Row(modifier = Modifier.fillMaxWidth().padding(start = AXIS_GUTTER)) {
             Text(text = formatTime(start), style = MaterialTheme.typography.labelSmall, color = axisColor, modifier = Modifier.weight(1f))

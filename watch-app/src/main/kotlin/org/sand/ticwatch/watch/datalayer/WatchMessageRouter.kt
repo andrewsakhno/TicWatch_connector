@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import org.sand.ticwatch.watch.autoworkout.WorkoutCommandRequester
 import org.sand.ticwatch.watch.ecg.EcgRequester
 import org.sand.ticwatch.watch.install.ApkInstaller
 import org.sand.ticwatch.watch.install.PackageInstallerApkInstaller
@@ -40,6 +41,8 @@ class WatchMessageRouter(
     private val syncNowRequester: SyncNowRequester,
     /** Hands the phone's rhythm-recording command to the sensor service. */
     private val ecgRequester: EcgRequester,
+    /** Hands the phone's workout start/end commands to the sensor service, which runs the workout. */
+    private val workoutCommands: WorkoutCommandRequester,
     private val scope: CoroutineScope,
 ) {
     private val pendingInstallPackage = AtomicReference<String?>()
@@ -82,6 +85,24 @@ class WatchMessageRouter(
                 val requestId = SyncNowPayloads.decodeRequestId(payload)
                 Log.i(TAG, "Rhythm recording requested by the phone ($requestId)")
                 ecgRequester.request(requestId)
+            }
+
+            DataLayerPaths.MESSAGE_ECG_PROMPT -> {
+                val requestId = SyncNowPayloads.decodeRequestId(payload)
+                Log.i(TAG, "Prompted rhythm recording requested by the phone ($requestId)")
+                ecgRequester.prompt(requestId)
+            }
+
+            DataLayerPaths.MESSAGE_START_WORKOUT -> {
+                val requestId = SyncNowPayloads.decodeRequestId(payload)
+                Log.i(TAG, "Workout start requested by the phone ($requestId)")
+                workoutCommands.requestStart(requestId)
+            }
+
+            DataLayerPaths.MESSAGE_END_WORKOUT -> {
+                val requestId = SyncNowPayloads.decodeRequestId(payload)
+                Log.i(TAG, "Workout end requested by the phone ($requestId)")
+                workoutCommands.requestEnd(requestId)
             }
 
             in phonePayloads -> phonePayloads.getValue(path).accept(String(payload, Charsets.UTF_8))

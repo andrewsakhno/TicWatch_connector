@@ -6,7 +6,9 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.PowerManager
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -65,25 +67,38 @@ class NightBreathingSampleSource(
         val nightDetectors = detectors()
         val aggregators = epochAggregators()
         val router = EpochRouter(nightDetectors, newEpoch(aggregators))
-        val listeners = router.sensorTypes().mapNotNull { type ->
-            val sensor = sensorManager.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.type == type && !it.isWakeUpSensor }
-                ?: return@mapNotNull null.also { Log.w(TAG, "Sensor $type not found") }
-            RoutingListener(router).takeIf { sensorManager.registerListener(it, sensor, router.samplingPeriodUs(type)) }
-        }
         // Not reference counted: each epoch's timed acquire just extends the one hold.
         val wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply { setReferenceCounted(false) }
-        Log.i(TAG, "Night monitoring started with ${listeners.size} sensor(s)")
+        val listeners = mutableListOf<SensorEventListener>()
         try {
+            router.sensorTypes().forEach { type ->
+                val sensor = sensorManager.getSensorList(Sensor.TYPE_ALL).firstOrNull { it.type == type && !it.isWakeUpSensor }
+                if (sensor == null) {
+                    Log.w(TAG, "Sensor $type not found")
+                    return@forEach
+                }
+                val listener = RoutingListener(router)
+                if (sensorManager.registerListener(listener, sensor, router.samplingPeriodUs(type))) listeners += listener
+            }
+            Log.i(TAG, "Night monitoring started with ${listeners.size} sensor(s)")
+            // Nothing to stay awake for; returning at once would spin the caller's loop.
+            if (listeners.isEmpty()) return scheduler.awaitNext(idleCheckInterval())
             while (shouldMonitor()) {
                 wakeLock.acquire(epoch.plus(WAKE_LOCK_SLACK).toMillis())
                 val start = Instant.now()
                 val snoring = coroutineScope {
-                    val slot = async { snoreMeter.snoringFraction(snoreSlot) }
-                    delay(epoch.toMillis())
-                    slot.await()
+                    val slot = async { measureSnoring() }
+                    if (awaitEpochEnd()) {
+                        slot.await()
+                    } else {
+                        slot.cancelAndJoin()
+                        null
+                    }
                 }
                 val end = Instant.now()
-                val samples = router.closeEpoch(newEpoch(aggregators), start, end) +
+                val closed = router.closeEpoch(newEpoch(aggregators), start, end)
+                // PPG off the wrist reads as anything: an epoch that ended there reports nothing about the body.
+                val samples = (if (wearState.isWorn()) closed else emptyList()) +
                     listOfNotNull(snoring?.let { SensorSample(SensorType.SNORING, it, start, end) })
                 Log.i(TAG, "Night epoch done: ${samples.map { "${it.type}=${"%.2f".format(it.value)}" }}")
                 samples.forEach { emit(it) }
@@ -94,6 +109,31 @@ class NightBreathingSampleSource(
             if (wakeLock.isHeld) wakeLock.release()
             Log.i(TAG, "Night monitoring stopped")
         }
+    }
+
+    /**
+     * Waits out the epoch, but no longer than [STATE_CHECK_INTERVAL] past waking up or taking the watch off, so
+     * the PPG and the wake lock don't outlive the session by up to a whole [epoch]. False if it ended early.
+     */
+    private suspend fun awaitEpochEnd(): Boolean {
+        var remaining = epoch
+        while (remaining > Duration.ZERO) {
+            val step = minOf(remaining, STATE_CHECK_INTERVAL)
+            delay(step.toMillis())
+            remaining -= step
+            if (!shouldMonitor()) return false
+        }
+        return true
+    }
+
+    /** A failing microphone costs this slot's snoring, not the night's monitoring (or the whole sample flow). */
+    private suspend fun measureSnoring(): Double? = try {
+        snoreMeter.snoringFraction(snoreSlot)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RuntimeException) {
+        Log.w(TAG, "Snoring not measured", error)
+        null
     }
 
     private fun newEpoch(aggregators: List<() -> VendorReadingAggregator>) = Epoch(aggregators.map { it() }, epochQualifiers.map { it() })
@@ -138,5 +178,8 @@ class NightBreathingSampleSource(
         const val TAG = "NightBreathingSource"
         const val WAKE_LOCK_TAG = "TicWatchConnector:NightBreathing"
         val WAKE_LOCK_SLACK: Duration = Duration.ofSeconds(30)
+
+        /** The CPU is awake for the sensors anyway, so re-reading the (in-memory) states costs nothing. */
+        val STATE_CHECK_INTERVAL: Duration = Duration.ofSeconds(15)
     }
 }

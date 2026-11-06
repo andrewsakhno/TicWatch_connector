@@ -3,7 +3,9 @@ package org.sand.ticwatch.phone.cloud
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import org.sand.ticwatch.phone.deviation.DeviationEpisodeWithReasons
 import org.sand.ticwatch.phone.ecg.EcgRecordingEntity
+import org.sand.ticwatch.phone.ecg.EcgRecordingKind
 import org.sand.ticwatch.phone.health.OrphanSleepSessionDeriver
 import org.sand.ticwatch.phone.health.SampleSource
 import org.sand.ticwatch.phone.health.SensorType
@@ -57,6 +59,7 @@ object CloudUploadChannels {
 
     /** Strips carry ~30 s of 32 Hz pulse wave each. */
     private const val ECG_BATCH = 10
+    private const val DEVIATION_BATCH = 100
 
     fun samples(outbox: CloudOutbox<SensorHistoryRow>): CloudUploadChannel = OutboxUploadChannel(outbox, SAMPLE_BATCH) { api, rows ->
         api.uploadSamples(CloudSampleUpload(rows.map { it.toCloud() }))
@@ -91,6 +94,37 @@ object CloudUploadChannels {
         api.uploadEcgRecordings(CloudEcgRecordingUpload(rows.map { it.toCloud() }))
     }
 
+    /** Answered or not, so a later analysis also sees how many went unanswered. */
+    fun deviationEpisodes(outbox: CloudOutbox<DeviationEpisodeWithReasons>): CloudUploadChannel =
+        OutboxUploadChannel(outbox, DEVIATION_BATCH) { api, rows ->
+            api.uploadDeviationEpisodes(CloudDeviationEpisodeUpload(rows.map { it.toCloud() }))
+        }
+
+    private fun DeviationEpisodeWithReasons.toCloud() = CloudDeviationEpisode(
+        uid = episode.uid,
+        direction = episode.directionCode,
+        state = episode.stateCode,
+        startedAt = episode.startedAtMs,
+        endedAt = episode.endedAtMs,
+        peakBpm = episode.peakBpm,
+        reasons = reasons.map { it.reasonCode }.sorted(),
+        detectedAt = episode.detectedAtMs,
+        askedAt = episode.askedAtMs,
+        answeredAt = episode.answeredAtMs,
+        discardedAt = episode.discardedAtMs,
+        minor = episode.minor,
+        intensity = episode.intensityCode,
+        thresholdBpm = episode.thresholdBpm,
+        baselineBpm = episode.baselineBpm,
+        excessBpmMinutes = episode.excessBpmMinutes,
+        wornSince = episode.wornSinceMs,
+        stepsBefore = episode.stepsBefore,
+        rmssdBefore = episode.rmssdBefore,
+        sleepScore = episode.sleepScore,
+        fatiguePercent = episode.fatiguePercent,
+        lastMedicationAt = episode.lastMedicationAtMs,
+    )
+
     private fun SensorHistoryRow.toCloud() = CloudSample(
         type = SensorTypeCodes.code(sample.type),
         value = sample.value,
@@ -117,6 +151,7 @@ object CloudUploadChannels {
             addProperty("finishedAt", finishedAtMs)
             add("beats", JsonParser.parseString(beatsJson))
             add("wave", if (waveJson.isEmpty()) JsonNull.INSTANCE else JsonParser.parseString(waveJson))
+            addProperty("kind", EcgRecordingKind.of(kind).wireName)
         },
     )
 }

@@ -24,7 +24,8 @@ fun readinessValueColor(value: LeveledValue?, stale: Boolean, muted: Int): Int =
 /**
  * The phone's cardio readiness at [atEpochMs]: the score and the latest pressure / pulse, null without data.
  * [loadReadiness] is the inverse of the phone's fatigue index, null with too few signals.
- * [stateLabel], [advice] and [fatigueLabel] are already in the app language; null from a phone app that predates them.
+ * [autonomicPercent] is the nervous tone (100 = calm), [postStress] true while the phone sees an active post-stress window.
+ * [stateLabel], [advice], [fatigueLabel] and [autonomicLabel] are already in the app language; null from a phone app that predates them.
  */
 data class CardioReadinessSnapshot(
     val scorePercent: Int,
@@ -36,6 +37,10 @@ data class CardioReadinessSnapshot(
     val stateLabel: String?,
     val advice: String?,
     val fatigueLabel: String?,
+    val autonomicPercent: Int? = null,
+    val autonomic: LeveledValue? = null,
+    val autonomicLabel: String? = null,
+    val postStress: Boolean = false,
     val atEpochMs: Long,
 ) {
     fun isStale(nowEpochMs: Long): Boolean = nowEpochMs - atEpochMs > STALE_AFTER_MS
@@ -60,11 +65,16 @@ object CardioReadinessPayload {
     private const val LOAD_READINESS = "load_readiness"
     private const val LOAD_LEVEL = "load_level"
     private const val FATIGUE_LABEL = "fatigue_label"
+    private const val AUTONOMIC_READINESS = "autonomic_readiness"
+    private const val AUTONOMIC_LEVEL = "autonomic_level"
+    private const val AUTONOMIC_LABEL = "autonomic_label"
+    private const val POST_STRESS = "post_stress"
     private const val AT = "at"
 
     fun decode(text: String): CardioReadinessSnapshot {
         val json = JSONObject(text)
         val loadReadinessPercent = if (json.has(LOAD_READINESS)) json.getInt(LOAD_READINESS) else null
+        val autonomicPercent = if (json.has(AUTONOMIC_READINESS)) json.getInt(AUTONOMIC_READINESS) else null
         return CardioReadinessSnapshot(
             scorePercent = json.getInt(SCORE),
             score = LeveledValue(json.getInt(SCORE).toString(), VitalLevel.ofCode(json.getInt(SCORE_LEVEL))),
@@ -83,6 +93,10 @@ object CardioReadinessPayload {
             stateLabel = json.optString(STATE_LABEL).ifEmpty { null },
             advice = json.optString(ADVICE).ifEmpty { null },
             fatigueLabel = json.optString(FATIGUE_LABEL).ifEmpty { null },
+            autonomicPercent = autonomicPercent,
+            autonomic = autonomicPercent?.let { LeveledValue(it.toString(), VitalLevel.ofCode(json.getInt(AUTONOMIC_LEVEL))) },
+            autonomicLabel = json.optString(AUTONOMIC_LABEL).ifEmpty { null },
+            postStress = json.optBoolean(POST_STRESS, false),
             atEpochMs = json.getLong(AT),
         )
     }

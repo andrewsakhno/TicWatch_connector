@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 import tools.jackson.databind.ObjectMapper
+import java.sql.Types
 
 /** Workout GPS fixes; a re-sent fix (same time + source) replaces itself. */
 interface RoutePointRepository {
@@ -17,6 +18,66 @@ interface RoutePointRepository {
 /** Watch rhythm strips keyed by start time. */
 fun interface EcgRecordingRepository {
     fun upsert(deviceId: String, recordings: List<EcgRecordingDto>): Int
+}
+
+/** Heart rate deviation episodes and their answers, keyed by the phone's uid. */
+fun interface DeviationEpisodeRepository {
+    fun upsert(deviceId: String, episodes: List<DeviationEpisodeDto>): Int
+}
+
+@Repository
+class JdbcDeviationEpisodeRepository(
+    private val jdbc: NamedParameterJdbcTemplate,
+    private val objectMapper: ObjectMapper,
+) : DeviationEpisodeRepository {
+
+    @Transactional
+    override fun upsert(deviceId: String, episodes: List<DeviationEpisodeDto>): Int {
+        if (episodes.isEmpty()) return 0
+        val batch = episodes.map { episode ->
+            MapSqlParameterSource()
+                .addValue("uid", episode.uid)
+                .addValue("direction", episode.direction)
+                .addValue("state", episode.state)
+                .addValue("startedAt", episode.startedAt)
+                .addValue("endedAt", episode.endedAt)
+                .addValue("peakBpm", episode.peakBpm)
+                .addValue("reasons", objectMapper.writeValueAsString(episode.reasons))
+                .addValue("detectedAt", episode.detectedAt)
+                .addValue("askedAt", episode.askedAt, Types.BIGINT)
+                .addValue("answeredAt", episode.answeredAt, Types.BIGINT)
+                .addValue("discardedAt", episode.discardedAt, Types.BIGINT)
+                .addValue("minor", episode.minor)
+                .addValue("intensity", episode.intensity, Types.SMALLINT)
+                .addValue("thresholdBpm", episode.thresholdBpm, Types.DOUBLE)
+                .addValue("baselineBpm", episode.baselineBpm, Types.DOUBLE)
+                .addValue("excessBpmMinutes", episode.excessBpmMinutes, Types.DOUBLE)
+                .addValue("wornSince", episode.wornSince, Types.BIGINT)
+                .addValue("stepsBefore", episode.stepsBefore, Types.DOUBLE)
+                .addValue("rmssdBefore", episode.rmssdBefore, Types.DOUBLE)
+                .addValue("sleepScore", episode.sleepScore, Types.DOUBLE)
+                .addValue("fatiguePercent", episode.fatiguePercent, Types.DOUBLE)
+                .addValue("lastMedicationAt", episode.lastMedicationAt, Types.BIGINT)
+                .addValue("deviceId", deviceId)
+        }.toTypedArray()
+        return jdbc.batchUpdate(
+            """
+            INSERT INTO deviation_episode (uid, direction, state, started_at, ended_at, peak_bpm, reasons,
+                detected_at, asked_at, answered_at, discarded_at, device_id,
+                minor, intensity, threshold_bpm, baseline_bpm, excess_bpm_minutes, worn_since, steps_before, rmssd_before, sleep_score, fatigue_percent, last_medication_at)
+            VALUES (:uid, :direction, :state, :startedAt, :endedAt, :peakBpm, CAST(:reasons AS JSONB),
+                :detectedAt, :askedAt, :answeredAt, :discardedAt, :deviceId,
+                :minor, :intensity, :thresholdBpm, :baselineBpm, :excessBpmMinutes, :wornSince, :stepsBefore,
+                :rmssdBefore, :sleepScore, :fatiguePercent, :lastMedicationAt)
+            ON CONFLICT (uid) DO UPDATE SET direction = EXCLUDED.direction, state = EXCLUDED.state,
+                started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at, peak_bpm = EXCLUDED.peak_bpm,
+                reasons = EXCLUDED.reasons, detected_at = EXCLUDED.detected_at, asked_at = EXCLUDED.asked_at,
+                answered_at = EXCLUDED.answered_at, discarded_at = EXCLUDED.discarded_at,
+                minor = EXCLUDED.minor, intensity = EXCLUDED.intensity, threshold_bpm = EXCLUDED.threshold_bpm, baseline_bpm = EXCLUDED.baseline_bpm, excess_bpm_minutes = EXCLUDED.excess_bpm_minutes, worn_since = EXCLUDED.worn_since, steps_before = EXCLUDED.steps_before, rmssd_before = EXCLUDED.rmssd_before, sleep_score = EXCLUDED.sleep_score, fatigue_percent = EXCLUDED.fatigue_percent, last_medication_at = EXCLUDED.last_medication_at, received_at = now()
+            """.trimIndent(),
+            batch,
+        ).sumOf { maxOf(it, 0) }
+    }
 }
 
 @Repository

@@ -47,6 +47,10 @@ func (a *App) storeEcgRecordings(ctx context.Context, deviceID string, body EcgR
 	return a.ecgRecordings.Upsert(ctx, deviceID, body.Recordings)
 }
 
+func (a *App) storeDeviationEpisodes(ctx context.Context, deviceID string, body DeviationEpisodeUpload) (int, error) {
+	return a.deviationEpisodes.Upsert(ctx, deviceID, body.Episodes)
+}
+
 func (a *App) ping(w http.ResponseWriter, _ *http.Request) error {
 	return httpx.WriteJSON(w, PingResponse{
 		Service:    ServiceName,

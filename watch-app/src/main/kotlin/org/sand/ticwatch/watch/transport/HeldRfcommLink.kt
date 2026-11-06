@@ -6,6 +6,7 @@ import android.util.Log
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
+import java.time.Duration
 
 /** Keeps the sender's RFCOMM socket open across frames between [hold] and [release]. */
 interface LinkHold {
@@ -34,7 +35,7 @@ class HeldRfcommLink : LinkHold {
     }
 
     /** Sends one frame over the held socket and returns true; false when not held (nothing was sent). */
-    suspend fun trySend(connect: () -> BluetoothSocket, writeFrame: (BluetoothSocket) -> Unit): Boolean = sending.withLock {
+    suspend fun trySend(connect: suspend () -> BluetoothSocket, writeFrame: suspend (BluetoothSocket) -> Unit): Boolean = sending.withLock {
         if (!held) return false
         socket?.let { existing ->
             try {
@@ -69,13 +70,16 @@ class HeldRfcommLink : LinkHold {
     }
 }
 
-/** A connected socket to the link service of this device; closed again when the connect fails. */
-internal fun BluetoothDevice.connectLinkSocket(): BluetoothSocket =
+/** A connected socket to the link service of this device; closed again when the connect fails or stalls. */
+internal suspend fun BluetoothDevice.connectLinkSocket(): BluetoothSocket =
     createRfcommSocketToServiceRecord(TransportProtocol.SERVICE_UUID).apply {
         try {
-            connect()
+            withDeadline(CONNECT_DEADLINE, "Connecting to $address") { it.connect() }
         } catch (e: IOException) {
             runCatching { close() }
             throw e
         }
     }
+
+/** Paging, SDP and the RFCOMM open take seconds; past this the stack is stuck, not slow. */
+private val CONNECT_DEADLINE: Duration = Duration.ofSeconds(30)

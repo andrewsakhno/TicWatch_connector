@@ -1,0 +1,4 @@
+#!/bin/sh
+# Lid closed -> clean power-off (netbook runs as a home server; no suspend).
+grep -q closed /proc/acpi/button/lid/*/state && exec /sbin/shutdown -h -P now "Lid closed"
+exit 0

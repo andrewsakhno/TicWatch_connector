@@ -22,6 +22,7 @@ class BriskWalkDetector(
     var briskSince: Instant? = null
         private set
     private var lastBriskAt: Instant? = null
+    private var briskWalked: Duration = Duration.ZERO
 
     /** Last time the wearer moved at [movingCadence] or more; survives the end of a stretch. */
     var lastMovingAt: Instant? = null
@@ -40,7 +41,13 @@ class BriskWalkDetector(
         val cadence = (count.total - anchor.total) * MILLIS_PER_MINUTE / span.toMillis()
         if (cadence >= movingCadence) lastMovingAt = count.at
         if (cadence >= briskCadence) {
-            if (briskSince == null) briskSince = anchor.at
+            if (briskSince == null) {
+                briskSince = anchor.at
+                briskWalked = minOf(span, window)
+            } else {
+                // A pause since the last brisk report isn't walking: one report covers at most the cadence window.
+                briskWalked += minOf(Duration.between(lastBriskAt ?: anchor.at, count.at), window)
+            }
             lastBriskAt = count.at
         } else {
             expire(count.at)
@@ -53,11 +60,8 @@ class BriskWalkDetector(
         if (Duration.between(last, now) > maxGap) briskSince = null
     }
 
-    /** How long the current stretch has lasted, zero when there is none. */
-    fun briskDuration(): Duration {
-        val since = briskSince ?: return Duration.ZERO
-        return Duration.between(since, lastBriskAt ?: since)
-    }
+    /** How long the current stretch has actually been walked, pauses excluded; zero when there is none. */
+    fun briskDuration(): Duration = if (briskSince == null) Duration.ZERO else briskWalked
 
     /** Forgets the stretch, so the next workout needs a fresh one. */
     fun resetStretch() {

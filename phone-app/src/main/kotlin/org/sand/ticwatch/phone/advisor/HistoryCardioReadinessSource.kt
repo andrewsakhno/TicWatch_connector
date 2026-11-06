@@ -88,13 +88,14 @@ class ReadinessSnapshotReader(
     }
 }
 
-/** [CardioReadinessSource] composing the snapshot reader, the engine and the forecaster. */
+/** [CardioReadinessSource] composing the snapshot reader, the engine, the forecaster and the post-stress balance. */
 class HistoryCardioReadinessSource(
     private val reader: ReadinessSnapshotReader,
     private val engine: CardioReadinessEngine,
     private val forecaster: ReadinessForecaster,
     private val protection: MedicationProtectionTracker,
     private val recovery: VagalRecoverySource,
+    private val autonomic: AutonomicBalanceSource,
 ) : CardioReadinessSource {
 
     override suspend fun load(): CardioReadiness {
@@ -106,6 +107,7 @@ class HistoryCardioReadinessSource(
             medication = protection.protection(snapshot.inputs.lastIntakeAt, snapshot.inputs.at),
             recovery = recovery.lastNightRecovery(),
             fatigue = snapshot.fatigue,
+            autonomic = autonomic.current(snapshot.inputs),
         )
     }
 }

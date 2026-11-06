@@ -132,6 +132,7 @@ table_rows() { # container schema
 SELECT id, type, value, recorded_at, ended_at, source, snapshot, device_id FROM $2.sensor_sample ORDER BY id;
 SELECT * FROM $2.route_point ORDER BY recorded_at, source;
 SELECT started_at, payload, device_id FROM $2.ecg_recording ORDER BY started_at;
+SELECT uid, direction, state, started_at, ended_at, peak_bpm, reasons, detected_at, asked_at, answered_at, discarded_at, device_id FROM $2.deviation_episode ORDER BY uid;
 SQL
 }
 
@@ -204,6 +205,13 @@ upload "ecg: nested JSON" /ecg-recordings "$ECG"
 upload "ecg: re-sent" /ecg-recordings "$ECG"
 upload "ecg: replaced payload" /ecg-recordings '{"recordings":[{"startedAt":1790000100000,"payload":{"replaced":true}}]}'
 upload "ecg: empty" /ecg-recordings '{"recordings":[]}'
+DEVIATIONS='{"episodes":[{"uid":"a","direction":0,"state":1,"startedAt":1790000000000,"endedAt":1790000600000,"peakBpm":118.0,"reasons":[],"detectedAt":1790000700000},
+    {"uid":"b","direction":1,"state":0,"startedAt":1790001000000,"endedAt":1790001600000,"peakBpm":44.5,"reasons":[20,50],"detectedAt":1790001700000,"askedAt":1790001800000,"answeredAt":1790001900000}]}'
+upload "deviations: new" /deviation-episodes "$DEVIATIONS"
+upload "deviations: re-sent" /deviation-episodes "$DEVIATIONS"
+upload "deviations: answered later, then discarded" /deviation-episodes \
+    '{"episodes":[{"uid":"a","direction":0,"state":1,"startedAt":1790000000000,"endedAt":1790000900000,"peakBpm":125.5,"reasons":[60],"detectedAt":1790000700000,"askedAt":1790000800000,"answeredAt":1790000950000,"discardedAt":1790001000000}]}'
+upload "deviations: empty" /deviation-episodes '{"episodes":[]}'
 
 echo "== Reads"
 for resolution in FIVE_MINUTES HOUR DAY; do
@@ -254,6 +262,7 @@ echo "== Errors"
 check "no device header: samples" /samples -X POST -H "$JSON_HEADER" --data-binary '{"samples":[]}'
 check "no device header: route points" /route-points -X POST -H "$JSON_HEADER" --data-binary '{"points":[]}'
 check "no device header: ecg" /ecg-recordings -X POST -H "$JSON_HEADER" --data-binary '{"recordings":[]}'
+check "no device header: deviations" /deviation-episodes -X POST -H "$JSON_HEADER" --data-binary '{"episodes":[]}'
 check "empty device header is accepted" /samples -X POST -H "X-Device-Id;" -H "$JSON_HEADER" --data-binary '{"samples":[]}'
 upload "malformed JSON" /samples '{"samples":['
 upload "trailing tokens" /samples '{"samples":[]} {}'
@@ -264,6 +273,8 @@ upload "null value" /samples '{"samples":[{"type":1,"value":null,"recordedAt":1,
 upload "missing snapshot" /samples '{"samples":[{"type":1,"value":1.0,"recordedAt":1,"endedAt":null,"source":0}]}'
 upload "route point without latitude" /route-points '{"points":[{"recordedAt":1,"source":0,"longitude":1.0}]}'
 upload "ecg without payload" /ecg-recordings '{"recordings":[{"startedAt":1}]}'
+upload "deviation without reasons" /deviation-episodes '{"episodes":[{"uid":"c","direction":0,"state":1,"startedAt":1,"endedAt":2,"peakBpm":1.0,"detectedAt":3}]}'
+upload "deviation without uid" /deviation-episodes '{"episodes":[{"direction":0,"state":1,"startedAt":1,"endedAt":2,"peakBpm":1.0,"reasons":[],"detectedAt":3}]}'
 upload "type out of smallint range" /samples '{"samples":[{"type":70000,"value":1.0,"recordedAt":1,"endedAt":null,"source":0,"snapshot":false}]}'
 check "wrong content type" /samples -X POST -H "$DEVICE_HEADER" -H "Content-Type: text/plain" --data-binary '{"samples":[]}'
 check "charset in content type" /samples -X POST -H "$DEVICE_HEADER" -H "$JSON_HEADER; charset=UTF-8" --data-binary '{"samples":[]}'

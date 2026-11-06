@@ -25,6 +25,8 @@ data class EcgRecordingEntity(
     @ColumnInfo(name = "wave", defaultValue = "") val waveJson: String = "",
     /** True once the cloud server acknowledged the strip (v5). */
     @ColumnInfo(name = "cloud_synced", defaultValue = "0") val cloudSynced: Boolean = false,
+    /** [EcgRecordingKind.code] (v8). */
+    @ColumnInfo(name = "kind", defaultValue = "0") val kind: Int = EcgRecordingKind.REQUESTED.code,
 )
 
 @Dao
@@ -74,6 +76,7 @@ class RoomEcgRecordingLog(private val dao: EcgRecordingDao) : EcgRecordingLog, C
             finishedAtMs = recording.finishedAt.toEpochMilli(),
             beatsJson = EcgPayloads.encodeBeats(recording.beats),
             waveJson = if (recording.wave.isEmpty()) "" else EcgPayloads.encodeWave(recording.wave),
+            kind = recording.kind.code,
         ),
     )
 
@@ -84,6 +87,7 @@ class RoomEcgRecordingLog(private val dao: EcgRecordingDao) : EcgRecordingLog, C
             Instant.ofEpochMilli(row.finishedAtMs),
             EcgPayloads.decodeBeats(row.beatsJson),
             EcgPayloads.decodeWave(row.waveJson),
+            EcgRecordingKind.of(row.kind),
         )
     }
 

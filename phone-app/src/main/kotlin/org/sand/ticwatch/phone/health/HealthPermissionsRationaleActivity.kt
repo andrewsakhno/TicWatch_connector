@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import org.sand.ticwatch.phone.R
+import org.sand.ticwatch.phone.ui.TicWatchTheme
 
 /**
  * Privacy-policy / rationale screen Health Connect requires before it will show its
@@ -27,7 +28,7 @@ class HealthPermissionsRationaleActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            TicWatchTheme {
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.safeDrawingPadding().padding(24.dp)) {
                         Text(stringResource(R.string.hc_rationale_title), style = MaterialTheme.typography.headlineSmall)

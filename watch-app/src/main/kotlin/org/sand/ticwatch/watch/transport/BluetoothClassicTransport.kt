@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.DataOutputStream
 import java.io.IOException
+import java.time.Duration
 
 /**
  * [DeviceLinkTransport] that talks directly to the bonded phone over classic Bluetooth
@@ -31,7 +32,10 @@ class BluetoothClassicTransport(
             }
         }
 
-    private fun writeFrame(socket: BluetoothSocket, path: String, length: Long, source: PayloadSource) {
+    private suspend fun writeFrame(socket: BluetoothSocket, path: String, length: Long, source: PayloadSource) =
+        socket.withDeadline(FRAME_DEADLINE, "Sending $path") { writeFrameBlocking(it, path, length, source) }
+
+    private fun writeFrameBlocking(socket: BluetoothSocket, path: String, length: Long, source: PayloadSource) {
         val out = DataOutputStream(socket.outputStream)
         out.writeUTF(path)
         out.writeLong(length)
@@ -43,5 +47,13 @@ class BluetoothClassicTransport(
         // the payload buffered for a retry instead of dropping it.
         val reply = socket.inputStream.read()
         if (reply != TransportProtocol.ACK) throw IOException("Phone did not accept $path (reply=$reply)")
+    }
+
+    private companion object {
+        /**
+         * Covers the transfer and the phone's handling before its ACK (Health Connect writes, derivers); shorter than the
+         * sync flush's 2 min wake lock, so it fires before the watch can suspend with the flush still stuck.
+         */
+        val FRAME_DEADLINE: Duration = Duration.ofSeconds(90)
     }
 }

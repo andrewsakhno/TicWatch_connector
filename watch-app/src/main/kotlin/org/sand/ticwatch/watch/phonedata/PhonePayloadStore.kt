@@ -8,11 +8,15 @@ import androidx.wear.tiles.TileService
 import kotlinx.coroutines.flow.StateFlow
 import org.sand.ticwatch.watch.bloodpressure.BloodPressureHistory
 import org.sand.ticwatch.watch.bloodpressure.BloodPressureMeasureResult
+import org.sand.ticwatch.watch.bloodpressure.BloodPressureCalibrationPayload
 import org.sand.ticwatch.watch.bloodpressure.BloodPressurePayloads
+import org.sand.ticwatch.watch.bloodpressure.WatchBloodPressureCalibration
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
 import org.sand.ticwatch.watch.readiness.CardioReadinessPayload
 import org.sand.ticwatch.watch.readiness.CardioReadinessSnapshot
 import org.sand.ticwatch.watch.scores.HealthScoresPayload
+import org.sand.ticwatch.watch.sensors.adaptive.HeartRateCorridorPayload
+import org.sand.ticwatch.watch.sensors.adaptive.HeartRateCorridorSnapshot
 import org.sand.ticwatch.watch.scores.HealthScoresSnapshot
 import org.sand.ticwatch.watch.spaceweather.SpaceWeatherPayload
 import org.sand.ticwatch.watch.spaceweather.SpaceWeatherSnapshot
@@ -76,18 +80,24 @@ class PhonePayloadStores private constructor(prefs: SharedPreferences, onCardioR
         SharedPreferencesPhonePayloadStore(prefs, KEY_BLOOD_PRESSURE_HISTORY, BloodPressurePayloads::decodeHistory)
     val bloodPressureResult: PhonePayloadStore<BloodPressureMeasureResult> =
         SharedPreferencesPhonePayloadStore(prefs, KEY_BLOOD_PRESSURE_RESULT, BloodPressurePayloads::decodeResult)
+    val bloodPressureCalibration: PhonePayloadStore<WatchBloodPressureCalibration> =
+        SharedPreferencesPhonePayloadStore(prefs, KEY_BLOOD_PRESSURE_CALIBRATION, BloodPressureCalibrationPayload::decode)
     val spaceWeather: PhonePayloadStore<SpaceWeatherSnapshot> =
         SharedPreferencesPhonePayloadStore(prefs, KEY_SPACE_WEATHER, SpaceWeatherPayload::decode)
     val cardioReadiness: PhonePayloadStore<CardioReadinessSnapshot> =
         SharedPreferencesPhonePayloadStore(prefs, KEY_CARDIO_READINESS, CardioReadinessPayload::decode)
+    val heartRateCorridor: PhonePayloadStore<HeartRateCorridorSnapshot> =
+        SharedPreferencesPhonePayloadStore(prefs, KEY_HEART_RATE_CORRIDOR, HeartRateCorridorPayload::decode)
 
     /** Where each phone -> watch payload path is stored, for the message router. */
     val sinksByPath: Map<String, PhonePayloadSink> = mapOf(
         DataLayerPaths.MESSAGE_HEALTH_SCORES to healthScores,
         DataLayerPaths.MESSAGE_BLOOD_PRESSURE_HISTORY to bloodPressureHistory,
         DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_RESULT to bloodPressureResult,
+        DataLayerPaths.MESSAGE_BLOOD_PRESSURE_CALIBRATION to bloodPressureCalibration,
         DataLayerPaths.MESSAGE_SPACE_WEATHER to spaceWeather,
         DataLayerPaths.MESSAGE_CARDIO_READINESS to NotifyingPhonePayloadSink(cardioReadiness, onCardioReadiness),
+        DataLayerPaths.MESSAGE_HEART_RATE_CORRIDOR to heartRateCorridor,
     )
 
     companion object {
@@ -96,8 +106,10 @@ class PhonePayloadStores private constructor(prefs: SharedPreferences, onCardioR
         private const val KEY_HEALTH_SCORES = "payload"
         private const val KEY_BLOOD_PRESSURE_HISTORY = "blood_pressure_history"
         private const val KEY_BLOOD_PRESSURE_RESULT = "blood_pressure_result"
+        private const val KEY_BLOOD_PRESSURE_CALIBRATION = "blood_pressure_calibration"
         private const val KEY_SPACE_WEATHER = "space_weather"
         private const val KEY_CARDIO_READINESS = "cardio_readiness"
+        private const val KEY_HEART_RATE_CORRIDOR = "heart_rate_corridor"
 
         @Volatile private var instance: PhonePayloadStores? = null
 

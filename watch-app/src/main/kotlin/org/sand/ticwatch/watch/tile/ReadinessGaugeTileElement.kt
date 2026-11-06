@@ -12,8 +12,8 @@ import org.sand.ticwatch.watch.readiness.readinessValueColor
 import org.sand.ticwatch.watch.watchface.WatchFacePalette
 
 /**
- * The dashboard's two-ring gauge as a tile element: cardio readiness on the outer ring, load readiness on the inner
- * one, both values in the middle. Same open arc as `CardioReadinessPage`, which a tile can only draw with arc lines.
+ * The dashboard's three-ring gauge as a tile element: cardio readiness on the outer ring, load readiness in the middle,
+ * nervous tone inside (amber while post-stress, not pulsing - a tile can't animate it), the values in the middle. Same open arc as `CardioReadinessPage`, which a tile can only draw with arc lines.
  */
 class ReadinessGaugeTileElement(context: Context) {
 
@@ -22,19 +22,30 @@ class ReadinessGaugeTileElement(context: Context) {
 
     fun build(readiness: TileReadiness): LayoutElement {
         val (snapshot, stale) = readiness
+        val rings = listOf(
+            TileRing(snapshot?.scorePercent, snapshot?.score),
+            TileRing(snapshot?.loadReadinessPercent, snapshot?.loadReadiness),
+            TileRing(snapshot?.autonomicPercent, snapshot?.autonomic),
+        )
         val values = LayoutElementBuilders.Column.Builder()
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-            .addContent(valueText.build(snapshot?.score, stale, Typography.TYPOGRAPHY_TITLE3))
-            .addContent(valueText.build(snapshot?.loadReadiness, stale, Typography.TYPOGRAPHY_TITLE3))
-            .build()
-        return ring(GAUGE_SIZE_DP, snapshot?.scorePercent, snapshot?.score, stale)
-            .addContent(
-                ring(GAUGE_SIZE_DP - 2 * (STROKE_DP + RING_GAP_DP), snapshot?.loadReadinessPercent, snapshot?.loadReadiness, stale)
-                    .addContent(values)
-                    .build(),
-            )
-            .build()
+        rings.forEachIndexed { index, ring ->
+            val typography = if (index == 0) Typography.TYPOGRAPHY_TITLE3 else Typography.TYPOGRAPHY_CAPTION1
+            values.addContent(valueText.build(ring.value, stale, typography))
+        }
+        // Nested boxes, innermost first, so each ring sits on the edge of its own box around the next one.
+        var content: LayoutElement = values.build()
+        rings.indices.reversed().forEach { index ->
+            val ring = rings[index]
+            content = ring(GAUGE_SIZE_DP - 2 * index * (STROKE_DP + RING_GAP_DP), ring.percent, ring.value, stale)
+                .addContent(content)
+                .build()
+        }
+        return content
     }
+
+    /** One 0..100 ring: its arc length and the value whose level colours it. */
+    private data class TileRing(val percent: Int?, val value: LeveledValue?)
 
     /** A box of [sizeDp] with its ring on the box's edge; a null or zero [percent] leaves only the track. */
     private fun ring(sizeDp: Float, percent: Int?, value: LeveledValue?, stale: Boolean): LayoutElementBuilders.Box.Builder {
@@ -66,7 +77,7 @@ class ReadinessGaugeTileElement(context: Context) {
         /** Outer width of the gauge, for laying it out next to other content. */
         const val GAUGE_SIZE_DP = 92f
 
-        private const val STROKE_DP = 6f
+        private const val STROKE_DP = 5f
         private const val RING_GAP_DP = 2f
         private const val MAX_PERCENT = 100f
         private const val SWEEP_DEGREES = 270f

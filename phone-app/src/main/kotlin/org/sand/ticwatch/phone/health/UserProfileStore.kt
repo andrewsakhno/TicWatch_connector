@@ -56,6 +56,15 @@ interface BloodPressureCalibrationStore {
     suspend fun setBloodPressureCalibration(calibration: BloodPressureCalibration?)
 }
 
+/** A systolic correction in mmHg, applied to the estimates made from [since] on. */
+data class SystolicOffset(val mmHg: Double, val since: Instant)
+
+/** Persists the current [SystolicOffset] (ISP: kept apart from [UserProfileStore]). */
+interface SystolicOffsetStore {
+    suspend fun systolicOffset(): SystolicOffset?
+    suspend fun setSystolicOffset(offset: SystolicOffset)
+}
+
 private const val PREFS_NAME = "user_profile"
 private const val BIRTH_YEAR_KEY = "birth_year"
 private const val SEX_KEY = "sex"
@@ -68,9 +77,12 @@ private const val BP_HEART_RATE_KEY = "bp_calibrated_heart_rate"
 private const val BP_RMSSD_KEY = "bp_calibrated_rmssd"
 private const val BP_SKIN_TEMPERATURE_KEY = "bp_calibrated_skin_temperature"
 private const val BP_CALIBRATED_AT_KEY = "bp_calibrated_at_epoch_ms"
+private const val BP_SYSTOLIC_OFFSET_KEY = "bp_systolic_offset"
+private const val BP_SYSTOLIC_OFFSET_SINCE_KEY = "bp_systolic_offset_since_epoch_ms"
 
 /** [UserProfileStore] over SharedPreferences; every access hops to [Dispatchers.IO] (first read hits disk). */
-class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore, BloodPressureCalibrationStore, PatientNameStore {
+class SharedPreferencesUserProfileStore(context: Context) :
+    UserProfileStore, BloodPressureCalibrationStore, SystolicOffsetStore, PatientNameStore {
 
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
@@ -116,6 +128,19 @@ class SharedPreferencesUserProfileStore(context: Context) : UserProfileStore, Bl
         putDouble(BP_RMSSD_KEY, calibration?.rmssdMs)
         putDouble(BP_SKIN_TEMPERATURE_KEY, calibration?.skinTemperatureCelsius)
         if (calibration == null) remove(BP_CALIBRATED_AT_KEY) else putLong(BP_CALIBRATED_AT_KEY, calibration.calibratedAt.toEpochMilli())
+    }
+
+    override suspend fun systolicOffset(): SystolicOffset? = read {
+        if (!contains(BP_SYSTOLIC_OFFSET_SINCE_KEY)) return@read null
+        SystolicOffset(
+            mmHg = doubleOrNull(BP_SYSTOLIC_OFFSET_KEY) ?: return@read null,
+            since = Instant.ofEpochMilli(getLong(BP_SYSTOLIC_OFFSET_SINCE_KEY, 0L)),
+        )
+    }
+
+    override suspend fun setSystolicOffset(offset: SystolicOffset) = write {
+        putDouble(BP_SYSTOLIC_OFFSET_KEY, offset.mmHg)
+        putLong(BP_SYSTOLIC_OFFSET_SINCE_KEY, offset.since.toEpochMilli())
     }
 
     private fun SharedPreferences.doubleOrNull(key: String): Double? =

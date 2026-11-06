@@ -128,6 +128,8 @@ func run(cfg config) error {
 			ticwatch.NewSampleRepository(pool),
 			ticwatch.NewRoutePointRepository(pool),
 			ticwatch.NewEcgRecordingRepository(pool),
+			ticwatch.NewDeviationEpisodeRepository(pool),
+			ticwatch.NewStatsRepository(pool),
 			time.Now,
 		),
 		myapplication.New(

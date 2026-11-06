@@ -88,6 +88,6 @@ class GyroscopeStillnessQualifier : WindowQualifier {
         const val TAG = "GyroscopeStillness"
         const val AXES = 3
         const val MOVING_RAD_PER_SECOND = 0.35
-        const val MAX_MOVING_FRACTION = 0.1
+        const val MAX_MOVING_FRACTION = 0.2
     }
 }

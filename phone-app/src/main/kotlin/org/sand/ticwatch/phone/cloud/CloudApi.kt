@@ -43,6 +43,9 @@ interface CloudApi {
     @POST(ECG_RECORDINGS)
     suspend fun uploadEcgRecordings(@Body upload: CloudEcgRecordingUpload): CloudUploadResult
 
+    @POST(DEVIATION_EPISODES)
+    suspend fun uploadDeviationEpisodes(@Body upload: CloudDeviationEpisodeUpload): CloudUploadResult
+
     companion object {
         const val PORT = 8766
         const val SERVICE_NAME = "ticwatch-cloud"
@@ -55,6 +58,7 @@ interface CloudApi {
         const val ROLLUPS = "$BASE/rollups"
         const val ROUTE_POINTS = "$BASE/route-points"
         const val ECG_RECORDINGS = "$BASE/ecg-recordings"
+        const val DEVIATION_EPISODES = "$BASE/deviation-episodes"
     }
 }
 
@@ -99,3 +103,34 @@ data class CloudRoutePointUpload(val points: List<CloudRoutePoint>)
 data class CloudEcgRecording(val startedAt: Long, val payload: JsonElement)
 
 data class CloudEcgRecordingUpload(val recordings: List<CloudEcgRecording>)
+
+/**
+ * Codes are [org.sand.ticwatch.phone.deviation.DeviationDirection], `RestState`, `DeviationReason` and `DeviationIntensity`;
+ * a re-sent [uid] replaces the row. The fields after [discardedAt] are the detection's corridor and context, null when unknown.
+ */
+data class CloudDeviationEpisode(
+    val uid: String,
+    val direction: Int,
+    val state: Int,
+    val startedAt: Long,
+    val endedAt: Long,
+    val peakBpm: Double,
+    val reasons: List<Int>,
+    val detectedAt: Long,
+    val askedAt: Long?,
+    val answeredAt: Long?,
+    val discardedAt: Long?,
+    val minor: Boolean,
+    val intensity: Int?,
+    val thresholdBpm: Double?,
+    val baselineBpm: Double?,
+    val excessBpmMinutes: Double?,
+    val wornSince: Long?,
+    val stepsBefore: Double?,
+    val rmssdBefore: Double?,
+    val sleepScore: Double?,
+    val fatiguePercent: Double?,
+    val lastMedicationAt: Long?,
+)
+
+data class CloudDeviationEpisodeUpload(val episodes: List<CloudDeviationEpisode>)

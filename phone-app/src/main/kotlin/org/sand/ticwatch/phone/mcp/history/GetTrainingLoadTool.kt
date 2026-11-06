@@ -21,8 +21,8 @@ class GetTrainingLoadTool(
         "Per local day: cardio load (Banister TRIMP summed over the day's workouts, watch and auto-detected), " +
             "acute load (7-day sum), chronic load (28-day weekly mean), ratio = acute / chronic (null without " +
             "chronic load) with balance: Detraining < 0.8, Optimal 0.8-1.3, High 1.3-1.5, Overreaching > 1.5 (Optimal " +
-            "instead when acute load < 150 or over 85% of the 7-day zone minutes are in zones 1-2); and " +
-            "minutes per Karvonen zone (1: 50-60%, 2: 60-70%, 3: 70-80%, 4: 80-90%, 5: >= 90% of HR reserve). " +
+            "instead when acute load < 150 or over 85% of the 7-day zone minutes are in zones 0-2); and " +
+            "minutes per Karvonen zone (0: below 50%, 1: 50-60%, 2: 60-70%, 3: 70-80%, 4: 80-90%, 5: >= 90% of HR reserve). " +
             "zone_minutes_total sums the range. Needs the birth year in the profile. Uses day rollups (kept " +
             "forever). The last entry is today. Default range: the last $DEFAULT_DAYS days."
     override val inputSchema: JSONObject = HistoryToolSchema.dayRangeSchema(DEFAULT_DAYS)

@@ -169,6 +169,104 @@ func (u EcgRecordingUpload) Size() int { return len(u.Recordings) }
 // Validate implements upload.
 func (u EcgRecordingUpload) Validate() error { return requirePresent(u.Recordings == nil) }
 
+// DeviationEpisode is one heart rate deviation and its answer; a re-sent uid replaces the stored row.
+type DeviationEpisode struct {
+	UID         string
+	Direction   int32
+	State       int32
+	StartedAt   int64
+	EndedAt     int64
+	PeakBpm     JavaDouble
+	Reasons     []int32
+	DetectedAt  int64
+	AskedAt     *int64
+	AnsweredAt  *int64
+	DiscardedAt *int64
+	// Optional since V3: the detection's corridor and context, nil when unknown.
+	Minor            bool
+	Intensity        *int32
+	ThresholdBpm     *JavaDouble
+	BaselineBpm      *JavaDouble
+	ExcessBpmMinutes *JavaDouble
+	WornSince        *int64
+	StepsBefore      *JavaDouble
+	RmssdBefore      *JavaDouble
+	SleepScore       *JavaDouble
+	FatiguePercent   *JavaDouble
+	LastMedicationAt *int64
+}
+
+// UnmarshalJSON rejects a missing or null required field.
+func (e *DeviationEpisode) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		UID              *string     `json:"uid"`
+		Direction        *int32      `json:"direction"`
+		State            *int32      `json:"state"`
+		StartedAt        *int64      `json:"startedAt"`
+		EndedAt          *int64      `json:"endedAt"`
+		PeakBpm          *JavaDouble `json:"peakBpm"`
+		Reasons          []int32     `json:"reasons"`
+		DetectedAt       *int64      `json:"detectedAt"`
+		AskedAt          *int64      `json:"askedAt"`
+		AnsweredAt       *int64      `json:"answeredAt"`
+		DiscardedAt      *int64      `json:"discardedAt"`
+		Minor            *bool       `json:"minor"`
+		Intensity        *int32      `json:"intensity"`
+		ThresholdBpm     *JavaDouble `json:"thresholdBpm"`
+		BaselineBpm      *JavaDouble `json:"baselineBpm"`
+		ExcessBpmMinutes *JavaDouble `json:"excessBpmMinutes"`
+		WornSince        *int64      `json:"wornSince"`
+		StepsBefore      *JavaDouble `json:"stepsBefore"`
+		RmssdBefore      *JavaDouble `json:"rmssdBefore"`
+		SleepScore       *JavaDouble `json:"sleepScore"`
+		FatiguePercent   *JavaDouble `json:"fatiguePercent"`
+		LastMedicationAt *int64      `json:"lastMedicationAt"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if wire.UID == nil || wire.Direction == nil || wire.State == nil || wire.StartedAt == nil || wire.EndedAt == nil ||
+		wire.PeakBpm == nil || wire.Reasons == nil || wire.DetectedAt == nil {
+		return errMissingField
+	}
+	*e = DeviationEpisode{
+		UID:              *wire.UID,
+		Direction:        *wire.Direction,
+		State:            *wire.State,
+		StartedAt:        *wire.StartedAt,
+		EndedAt:          *wire.EndedAt,
+		PeakBpm:          *wire.PeakBpm,
+		Reasons:          wire.Reasons,
+		DetectedAt:       *wire.DetectedAt,
+		AskedAt:          wire.AskedAt,
+		AnsweredAt:       wire.AnsweredAt,
+		DiscardedAt:      wire.DiscardedAt,
+		Minor:            wire.Minor != nil && *wire.Minor,
+		Intensity:        wire.Intensity,
+		ThresholdBpm:     wire.ThresholdBpm,
+		BaselineBpm:      wire.BaselineBpm,
+		ExcessBpmMinutes: wire.ExcessBpmMinutes,
+		WornSince:        wire.WornSince,
+		StepsBefore:      wire.StepsBefore,
+		RmssdBefore:      wire.RmssdBefore,
+		SleepScore:       wire.SleepScore,
+		FatiguePercent:   wire.FatiguePercent,
+		LastMedicationAt: wire.LastMedicationAt,
+	}
+	return nil
+}
+
+// DeviationEpisodeUpload is the body of POST deviation-episodes.
+type DeviationEpisodeUpload struct {
+	Episodes []DeviationEpisode `json:"episodes"`
+}
+
+// Size implements upload.
+func (u DeviationEpisodeUpload) Size() int { return len(u.Episodes) }
+
+// Validate implements upload.
+func (u DeviationEpisodeUpload) Validate() error { return requirePresent(u.Episodes == nil) }
+
 func requirePresent(missing bool) error {
 	if missing {
 		return errMissingField

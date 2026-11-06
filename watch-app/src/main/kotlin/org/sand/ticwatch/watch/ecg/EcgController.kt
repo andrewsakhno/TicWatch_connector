@@ -5,6 +5,7 @@ import java.time.Clock
 import java.time.Duration
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -15,8 +16,11 @@ import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
 
 /** Starts a rhythm recording for the phone's command (its id is echoed in progress and result). */
-fun interface EcgRequester {
+interface EcgRequester {
     fun request(requestId: String?)
+
+    /** Same, but the wearer has to accept it on the watch first. */
+    fun prompt(requestId: String?)
 }
 
 /**
@@ -30,41 +34,66 @@ class EcgController(
     private val scope: CoroutineScope,
     private val progressInterval: Duration,
     private val recording: Duration,
+    private val promptTimeout: Duration,
     private val screen: EcgCaptureScreen,
     private val state: EcgCaptureStateSink,
+    private val promptAnswers: EcgPromptAnswers,
     private val clock: Clock,
     private val strings: Strings,
 ) : EcgRequester {
 
     override fun request(requestId: String?) {
         scope.launch {
-            val recorded = RecordedSoFar()
-            var progress = EcgCaptureProgress(EcgCapturePhase.FINDING_PULSE, recording.toMillis())
-            state.publish(progress)
+            state.publish(EcgCaptureProgress(EcgCapturePhase.FINDING_PULSE, recording.toMillis()))
             screen.show()
-            val sender = launch { sendProgress(requestId, recorded) }
-            val result = capturer.capture(object : EcgCaptureListener {
-                override fun onRecordingStarted() {
-                    progress = progress.copy(phase = EcgCapturePhase.RECORDING, recordingStartedAtMs = clock.millis())
+            record(requestId)
+        }
+    }
+
+    override fun prompt(requestId: String?) {
+        scope.launch {
+            state.publish(EcgCaptureProgress(EcgCapturePhase.AWAITING_CONFIRMATION, recording.toMillis()))
+            screen.showPrompt()
+            val accepted = promptAnswers.awaitAnswer(promptTimeout.toMillis())
+            screen.hide()
+            if (accepted) {
+                record(requestId)
+            } else {
+                val now = clock.instant()
+                sendResult(EcgCaptureResult(EcgCaptureStatus.DECLINED, now, now, emptyList()), requestId)
+            }
+        }
+    }
+
+    private suspend fun record(requestId: String?) = coroutineScope {
+        val recorded = RecordedSoFar()
+        var progress = EcgCaptureProgress(EcgCapturePhase.FINDING_PULSE, recording.toMillis())
+        val sender = launch { sendProgress(requestId, recorded) }
+        val result = capturer.capture(object : EcgCaptureListener {
+            override fun onRecordingStarted() {
+                progress = progress.copy(phase = EcgCapturePhase.RECORDING, recordingStartedAtMs = clock.millis())
+                state.publish(progress)
+            }
+
+            override fun onBeat(beat: EcgBeat) {
+                recorded.add(beat)
+                if (beat.clean) {
+                    progress = progress.copy(heartRateBpm = (MS_PER_MINUTE / beat.rrMs).roundToInt())
                     state.publish(progress)
                 }
+            }
 
-                override fun onBeat(beat: EcgBeat) {
-                    recorded.add(beat)
-                    if (beat.clean) {
-                        progress = progress.copy(heartRateBpm = (MS_PER_MINUTE / beat.rrMs).roundToInt())
-                        state.publish(progress)
-                    }
-                }
+            override fun onWave(sample: EcgWaveSample) = recorded.add(sample)
+        })
+        sender.cancel()
+        state.publish(progress.copy(phase = EcgCapturePhase.FINISHED, outcome = result.status.message))
+        screen.hide()
+        sendResult(result, requestId)
+    }
 
-                override fun onWave(sample: EcgWaveSample) = recorded.add(sample)
-            })
-            sender.cancel()
-            state.publish(progress.copy(phase = EcgCapturePhase.FINISHED, outcome = result.status.message))
-            screen.hide()
-            transport.sendMessage(DataLayerPaths.MESSAGE_ECG_RESULT, EcgPayloads.encodeResult(result, requestId, strings))
-                .onFailure { Log.w(TAG, "Rhythm recording not delivered", it) }
-        }
+    private suspend fun sendResult(result: EcgCaptureResult, requestId: String?) {
+        transport.sendMessage(DataLayerPaths.MESSAGE_ECG_RESULT, EcgPayloads.encodeResult(result, requestId, strings))
+            .onFailure { Log.w(TAG, "Rhythm recording not delivered", it) }
     }
 
     private suspend fun sendProgress(requestId: String?, recorded: RecordedSoFar) {

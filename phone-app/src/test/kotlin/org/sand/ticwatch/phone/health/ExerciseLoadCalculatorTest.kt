@@ -33,12 +33,12 @@ class ExerciseLoadCalculatorTest {
     }
 
     @Test
-    fun `easy heart rate is below every zone and adds little load`() {
+    fun `easy heart rate counts as zone 0 and adds little load`() {
         val readings = listOf(heartRate(70.0, start))
 
         val load = calculator.load(readings, start.plusSeconds(30), RESTING, MAX, TrimpCoefficient.FEMALE)
 
-        assertEquals(emptyMap<HeartRateZone, Duration>(), load.zoneDurations)
+        assertEquals(mapOf(HeartRateZone.ZONE_0 to Duration.ofSeconds(30)), load.zoneDurations)
         assertEquals(0.5 * (10.0 / 120) * 0.64 * exp(1.67 * 10.0 / 120), load.trimp, DELTA)
     }
 

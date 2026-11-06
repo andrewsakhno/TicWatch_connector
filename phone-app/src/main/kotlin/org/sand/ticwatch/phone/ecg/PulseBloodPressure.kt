@@ -10,6 +10,9 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import org.sand.ticwatch.phone.health.BloodPressureReading
+import org.sand.ticwatch.phone.health.HealthRecordWriter
+import org.sand.ticwatch.phone.health.SensorSample
+import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.health.SampleSource
 import java.time.Duration
 import java.time.Instant
@@ -201,5 +204,39 @@ class RidgePulseBloodPressureEstimator(private val pairs: PulseBloodPressurePair
         const val MAX_PAIRS = 60
         const val RIDGE_LAMBDA = 1.0
         const val EXTRAPOLATION_MMHG = 15.0
+    }
+}
+
+/**
+ * Estimates blood pressure from each stored [EcgRecordingKind.NIGHT_PULSE] strip with the personal pulse-wave
+ * [estimator] and stores it through [writer] as PULSE_WAVE_DIASTOLIC + PULSE_WAVE_SYSTOLIC (history only, so it
+ * reaches the cloud with the other samples). Until the model has enough cuff pairs nothing is stored; the strip itself
+ * stays, so its features can be re-read once the model can use them.
+ */
+class NightPulseBloodPressureRecorder(
+    private val analyzer: CardiogramAnalyzer,
+    private val estimator: PulseBloodPressureEstimator,
+    private val writer: HealthRecordWriter,
+) : EcgRecordingStoredListener {
+
+    override suspend fun onStored(recording: EcgRecording) {
+        if (recording.kind != EcgRecordingKind.NIGHT_PULSE) return
+        val features = PulseFeatures.of(analyzer.analyze(recording.beats, recording.wave)) ?: run {
+            Log.i(TAG, "Night strip at ${recording.startedAt}: no usable pulse wave")
+            return
+        }
+        when (val estimate = estimator.estimate(features)) {
+            is PulseBloodPressure.NeedsCalibration -> Log.i(TAG, "Night strip kept, model has ${estimate.pairs}/${estimate.required} cuff pairs")
+            is PulseBloodPressure.Estimate -> writer.write(
+                listOf(
+                    SensorSample(SensorType.PULSE_WAVE_DIASTOLIC, estimate.diastolic, recording.startedAt),
+                    SensorSample(SensorType.PULSE_WAVE_SYSTOLIC, estimate.systolic, recording.startedAt),
+                ),
+            ).onFailure { Log.w(TAG, "Night pulse-wave estimate not stored", it) }
+        }
+    }
+
+    private companion object {
+        const val TAG = "NightPulseBp"
     }
 }

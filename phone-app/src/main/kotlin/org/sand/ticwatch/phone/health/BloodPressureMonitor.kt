@@ -45,12 +45,17 @@ class WristSignalsReader(private val samples: SampleWindowReader) {
     }
 
     private suspend fun storedHeartRate(now: Instant): HeartRateReading? {
-        val heartRates = samples.samples(setOf(SensorType.HEART_RATE), now.minus(HEART_RATE_LOOKBACK), now, emptyList())
-            .filter { it.value in VALID_HEART_RATE && it.source == SampleSource.WATCH }
+        val heartRates = heartRates(now.minus(HEART_RATE_LOOKBACK), now)
         val latest = heartRates.lastOrNull() ?: return null
-        val recent = heartRates.filter { !it.recordedAt.isBefore(latest.recordedAt.minus(HEART_RATE_SPAN)) }.map { it.value }
-        return HeartRateReading(recent.sorted()[recent.size / 2], latest.recordedAt)
+        val recent = heartRates.filter { !it.at.isBefore(latest.at.minus(HEART_RATE_SPAN)) }.map { it.bpm }
+        return HeartRateReading(recent.sorted()[recent.size / 2], latest.at)
     }
+
+    /** Watch heart rates recorded in [from, to), ascending. */
+    suspend fun heartRates(from: Instant, to: Instant): List<HeartRateReading> =
+        samples.samples(setOf(SensorType.HEART_RATE), from, to, emptyList())
+            .filter { it.value in VALID_HEART_RATE && it.source == SampleSource.WATCH }
+            .map { HeartRateReading(it.value, it.recordedAt) }
 
     /** The day's resting heart rate, the calibration's fallback when no live heart rate is stored. */
     suspend fun restingHeartRate(now: Instant): Double? = latestValue(SensorType.RESTING_HEART_RATE, now, RESTING_LOOKBACK)
@@ -61,16 +66,8 @@ class WristSignalsReader(private val samples: SampleWindowReader) {
         val cadence = samples.samples(setOf(SensorType.STEPS_CADENCE), windowStart, now, emptyList()).maxOfOrNull { it.value } ?: 0.0
         // Step intervals that began before the window still count for their overlapping part.
         val steps = samples.samples(setOf(SensorType.STEPS), windowStart.minus(MAX_STEP_INTERVAL), now, emptyList())
-            .sumOf { sample -> sample.value * overlapFraction(sample, windowStart, now) }
+            .sumOf { sample -> sample.value * sample.overlapFraction(windowStart, now) }
         return maxOf(cadence, steps / REST_WINDOW.toMinutes())
-    }
-
-    private fun overlapFraction(sample: SensorSample, from: Instant, to: Instant): Double {
-        val end = sample.endedAt ?: return if (sample.recordedAt.isBefore(from)) 0.0 else 1.0
-        val length = Duration.between(sample.recordedAt, end).toMillis()
-        if (length <= 0) return if (sample.recordedAt.isBefore(from)) 0.0 else 1.0
-        val overlap = Duration.between(maxOf(sample.recordedAt, from), minOf(end, to)).toMillis()
-        return overlap.coerceAtLeast(0).toDouble() / length
     }
 
     private suspend fun latestValue(type: SensorType, now: Instant, lookback: Duration = SIGNAL_LOOKBACK): Double? =
@@ -171,6 +168,9 @@ sealed interface CalibrationResult {
 
     /** The reading is older than the calibration already in use. */
     data object Outdated : CalibrationResult
+
+    /** The wrist signals at the cuff reading don't describe rest (stress, just after walking). */
+    data class NotAtRest(val violation: CalibrationRestViolation) : CalibrationResult
 }
 
 /** Saved readings read back from the history. */
@@ -180,6 +180,11 @@ interface RecentBloodPressureReadings {
 
     /** Readings from [from] until now, oldest first. */
     suspend fun since(from: Instant): List<BloodPressureReading>
+}
+
+/** The systolic correction in mmHg to add to an estimate made at a given moment. */
+fun interface SystolicOffsetSource {
+    suspend fun offsetAt(now: Instant): Double
 }
 
 /** Estimates now and saves the estimate, for measurements started remotely. */
@@ -192,6 +197,9 @@ class BloodPressureMonitor(
     private val calibrations: BloodPressureCalibrationStore,
     private val signals: WristSignalsReader,
     private val estimator: BloodPressureEstimator,
+    private val systolicOffset: SystolicOffsetSource,
+    private val restCheck: CalibrationRestCheck,
+    private val restingFloor: RestingHeartRateFloor,
     val log: BloodPressureLog,
     private val clock: Clock,
 ) : RecentBloodPressureReadings, BloodPressureMeasurer {
@@ -227,6 +235,7 @@ class BloodPressureMonitor(
         val current = signals.current(signalsAt, liveHeartRate)
             ?.takeIf { Duration.between(measuredAt, it.heartRateAt).abs() <= CUFF_SIGNAL_MAX_GAP }
             ?: return CalibrationResult.NoHeartRate
+        restCheck.violation(current.heartRate, current.heartRateAt)?.let { return CalibrationResult.NotAtRest(it) }
         return store(systolic, diastolic, current.heartRate, current, measuredAt)
     }
 
@@ -256,7 +265,8 @@ class BloodPressureMonitor(
         val stepRate = signals.recentStepRate(now)
         if (stepRate > REST_MAX_STEPS_PER_MINUTE) return BloodPressureMeasurement.NotAtRest(stepRate)
         val current = signals.current(now, liveHeartRate) ?: return BloodPressureMeasurement.NoHeartRate
-        return BloodPressureMeasurement.Estimated(estimator.estimate(calibration, current, now), current)
+        val reading = estimator.estimate(calibration, current, now, systolicOffset.offsetAt(now), restingFloor.lowBpm(now))
+        return BloodPressureMeasurement.Estimated(reading, current)
     }
 
     /**

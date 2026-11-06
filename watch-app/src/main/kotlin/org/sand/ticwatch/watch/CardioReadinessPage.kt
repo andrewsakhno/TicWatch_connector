@@ -1,6 +1,10 @@
 package org.sand.ticwatch.watch
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +24,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -29,6 +34,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.sand.ticwatch.watch.readiness.CardioReadinessSnapshot
 import org.sand.ticwatch.watch.readiness.LeveledValue
+import org.sand.ticwatch.watch.readiness.VitalLevel
 import org.sand.ticwatch.watch.readiness.readinessValueColor
 import org.sand.ticwatch.watch.watchface.ReadingText
 import org.sand.ticwatch.watch.watchface.WatchFacePalette
@@ -40,12 +46,17 @@ private const val START_DEGREES = 135f
 private const val GAUGE_ANIMATION_MS = 900
 private const val ADVICE_MAX_LINES = 2
 private const val RING_LABEL_MAX_LINES = 1
-private val GAUGE_SIZE = 100.dp
-private val GAUGE_STROKE = 7.dp
-private val GAUGE_RING_GAP = 3.dp
+private const val PULSE_MS = 800
+private const val PULSE_MIN_ALPHA = 0.35f
+private val GAUGE_SIZE = 112.dp
+private val GAUGE_STROKE = 6.dp
+private val GAUGE_RING_GAP = 2.dp
 private val VITALS_GAP = 12.dp
 
-/** Dashboard's first page: the phone Advisor's gauge (cardio readiness outside, load readiness inside), the advice, then the latest pressure and pulse. */
+/**
+ * Dashboard's first page: the phone Advisor's gauge (cardio readiness outside, load readiness in the middle, nervous tone inside,
+ * pulsing amber in a post-stress window), the advice - a breathing pause while post-stress - then the latest pressure and pulse.
+ */
 @Composable
 internal fun CardioReadinessPage(readiness: StateFlow<CardioReadinessSnapshot?>?) {
     val snapshot by (readiness ?: NO_READINESS).collectAsState()
@@ -54,10 +65,13 @@ internal fun CardioReadinessPage(readiness: StateFlow<CardioReadinessSnapshot?>?
     PageColumn {
         val cardio = GaugeRing(current?.scorePercent, valueColor(current?.score, stale))
         val load = GaugeRing(current?.loadReadinessPercent, valueColor(current?.loadReadiness, stale))
-        DualRingGauge(cardio, load)
+        val postStress = current?.postStress == true && !stale
+        val autonomic = GaugeRing(current?.autonomicPercent, autonomicColor(current?.autonomic, postStress, stale), pulsing = postStress)
+        RingGauge(listOf(cardio, load, autonomic))
         RingLabel(stringResource(R.string.gauge_cardio), current?.stateLabel, cardio.color)
         RingLabel(stringResource(R.string.gauge_load), current?.fatigueLabel, load.color)
-        current?.advice?.let {
+        RingLabel(stringResource(R.string.gauge_autonomic), current?.autonomicLabel, autonomic.color)
+        (if (postStress) stringResource(R.string.advice_breathing_pause) else current?.advice)?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.caption3,
@@ -73,27 +87,41 @@ internal fun CardioReadinessPage(readiness: StateFlow<CardioReadinessSnapshot?>?
     }
 }
 
-/** A 0..100 ring of the gauge; a null [percent] leaves it empty. */
-private data class GaugeRing(val percent: Int?, val color: Color)
+/** A 0..100 ring of the gauge; a null [percent] leaves it empty, [pulsing] makes it breathe to draw attention. */
+private data class GaugeRing(val percent: Int?, val color: Color, val pulsing: Boolean = false)
 
-/** Same open rings as the phone's gauge: they start lower left and run clockwise over the top, [outer]'s value on top in the middle. */
+/** Same open rings as the phone's gauge, outermost first: they start lower left and run clockwise over the top, the values in the middle. */
 @Composable
-private fun DualRingGauge(outer: GaugeRing, inner: GaugeRing) {
-    val outerProgress = animatedProgress(outer.percent)
-    val innerProgress = animatedProgress(inner.percent)
+private fun RingGauge(rings: List<GaugeRing>) {
+    val progress = rings.map { animatedProgress(it.percent) }
+    val pulse = pulseAlpha()
     val track = MaterialTheme.colors.surface
     Box(modifier = Modifier.size(GAUGE_SIZE), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(GAUGE_SIZE)) {
             val strokeWidth = GAUGE_STROKE.toPx()
-            val outerInset = strokeWidth / 2
-            drawRing(outer.color, track, outerProgress, outerInset, strokeWidth)
-            drawRing(inner.color, track, innerProgress, outerInset + strokeWidth + GAUGE_RING_GAP.toPx(), strokeWidth)
+            val step = strokeWidth + GAUGE_RING_GAP.toPx()
+            rings.forEachIndexed { index, ring ->
+                val color = if (ring.pulsing) ring.color.copy(alpha = pulse) else ring.color
+                drawRing(color, track, progress[index], strokeWidth / 2 + index * step, strokeWidth)
+            }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            RingPercent(outer)
-            RingPercent(inner)
+            rings.forEachIndexed { index, ring ->
+                RingPercent(ring, if (index == 0) MaterialTheme.typography.title3 else MaterialTheme.typography.caption1)
+            }
         }
     }
+}
+
+@Composable
+private fun pulseAlpha(): Float {
+    val alpha by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 1f,
+        targetValue = PULSE_MIN_ALPHA,
+        animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse),
+        label = "pulseAlpha",
+    )
+    return alpha
 }
 
 @Composable
@@ -115,10 +143,10 @@ private fun DrawScope.drawRing(color: Color, track: Color, progress: Float, inse
 }
 
 @Composable
-private fun RingPercent(ring: GaugeRing) {
+private fun RingPercent(ring: GaugeRing, style: TextStyle) {
     Text(
         ring.percent?.let { stringResource(R.string.readiness_percent, it) } ?: ReadingText.NO_VALUE,
-        style = MaterialTheme.typography.title3,
+        style = style,
         color = ring.color,
     )
 }
@@ -139,6 +167,10 @@ private fun RingLabel(title: String, label: String?, color: Color) {
 private fun VitalText(value: LeveledValue?, stale: Boolean) {
     Text(value?.text ?: ReadingText.NO_VALUE, style = MaterialTheme.typography.caption1, color = valueColor(value, stale))
 }
+
+/** The phone's level colour, amber whatever the level while a post-stress window is open. */
+private fun autonomicColor(value: LeveledValue?, postStress: Boolean, stale: Boolean): Color =
+    if (postStress) Color(VitalLevel.ELEVATED.argb) else valueColor(value, stale)
 
 private fun valueColor(value: LeveledValue?, stale: Boolean): Color =
     Color(readinessValueColor(value, stale, WatchFacePalette.INTERACTIVE.label))

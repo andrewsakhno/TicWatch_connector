@@ -13,6 +13,7 @@
          the Wi-Fi network so it stays up during the transfer. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <!-- Foreground service type for SensorCollectionService, which keeps heart-rate
@@ -51,6 +52,9 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!-- Keeps the CPU up during the periodic vendor-sensor measurement window. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Exact allow-while-idle alarms for AlarmWindowScheduler: Doze otherwise defers windows and sync for hours.
+         Granted at install from API 33 (minSdk). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- Mobvoi's own health/fitness data; granted only if Mobvoi declared them non-signature. On other
          watches the permissions don't exist: Android ignores the request, nothing checks or requests them
          at runtime (VendorDataProbe only reports their state), so the app installs and runs unaffected. -->
@@ -109,6 +113,10 @@
 
         <receiver
             android:name=".install.InstallResultReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".sensors.WakeAlarmReceiver"
             android:exported="false" />
 
         <!-- Accepts direct-Bluetooth connections from the phone's BluetoothClassicTransport

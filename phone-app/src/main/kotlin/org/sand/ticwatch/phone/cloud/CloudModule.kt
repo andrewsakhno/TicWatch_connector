@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone.cloud
 
 import android.content.Context
+import org.sand.ticwatch.phone.deviation.DeviationModule
 import org.sand.ticwatch.phone.ecg.EcgModule
 import org.sand.ticwatch.phone.history.SensorHistoryModule
 
@@ -24,13 +25,14 @@ object CloudModule {
         }.also { apiProvider = it }
     }
 
-    /** Everything received from the watch: raw samples of every type, sleep tables, workout routes, rhythm strips. */
+    /** Everything received from the watch: raw samples of every type, sleep tables, workout routes, rhythm strips; plus deviation answers. */
     fun channels(context: Context): List<CloudUploadChannel> = listOf(
         CloudUploadChannels.samples(SensorHistoryModule.store(context)),
         CloudUploadChannels.sleepSessions(SensorHistoryModule.sleepSessionOutbox(context)),
         CloudUploadChannels.sleepStages(SensorHistoryModule.sleepStageOutbox(context)),
         CloudUploadChannels.routePoints(SensorHistoryModule.routeStore(context)),
         CloudUploadChannels.ecgRecordings(EcgModule.log(context)),
+        CloudUploadChannels.deviationEpisodes(DeviationModule.log(context)),
     )
 
     @Volatile private var engine: CloudSyncEngine? = null

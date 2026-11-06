@@ -47,6 +47,9 @@ enum class SensorType {
 
     // A session like EXERCISE, for a workout this app started on its own (automatic walk).
     AUTO_EXERCISE,
+
+    // A cuffless estimate the watch made itself while the phone was unreachable (mmHg, same instant; diastolic first).
+    BLOOD_PRESSURE_SYSTOLIC, BLOOD_PRESSURE_DIASTOLIC,
 }
 
 /**

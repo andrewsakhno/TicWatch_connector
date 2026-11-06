@@ -79,7 +79,10 @@ data class Vitals(
     val spo2Percent: Double?,
 )
 
-/** Everything the Advisor tab, its widget and the MCP tool show; [recovery] is null without last night's RMSSD, [fatigue] with too few signals. */
+/**
+ * Everything the Advisor tab, its widget and the MCP tool show; [recovery] is null without last night's RMSSD, [fatigue] with too few
+ * signals, [autonomic] without recent heart rate or RMSSD.
+ */
 data class CardioReadiness(
     val assessment: ReadinessAssessment,
     val forecast: List<ReadinessForecastHour>,
@@ -87,6 +90,7 @@ data class CardioReadiness(
     val medication: MedicationProtection,
     val recovery: VagalRecovery?,
     val fatigue: FatigueIndex?,
+    val autonomic: AutonomicBalance? = null,
 ) {
     val nextWalkWindow: ReadinessForecastHour? get() = forecast.firstOrNull { it.walkWindow }
 }

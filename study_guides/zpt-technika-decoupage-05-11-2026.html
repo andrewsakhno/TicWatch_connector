@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
+<title>Zajęcia praktyczno-techniczne (Technika) – Klasa 4: Decoupage (05.11.2026)</title>
+<style>
+  * { box-sizing: border-box; }
+  
+  /* =========================================================
+     1. WIDOK EKRANOWY / TELEFON (MOBILE FIRST - WYGODA CZYTANIA)
+     ========================================================= */
+  @media screen {
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #1e293b;
+      background: #f1f5f9;
+      margin: 0;
+      padding: 12px 10px;
+    }
+    .page-container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .print-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #065f46;
+      color: #ffffff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .print-bar-title {
+      font-size: 13.5px;
+      font-weight: 600;
+    }
+    .print-btn {
+      background: #10b981;
+      color: #ffffff;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .print-btn:hover { background: #059669; }
+    .page {
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      padding: 20px 16px;
+      margin-bottom: 18px;
+      border: 1px solid #e2e8f0;
+    }
+    .page-badge {
+      display: inline-block;
+      background: #e2e8f0;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    h1 {
+      font-size: 18px;
+      line-height: 1.3;
+      margin: 0 0 4px 0;
+      color: #065f46;
+      border-bottom: 2px solid #10b981;
+      padding-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #64748b;
+      margin-bottom: 14px;
+      font-weight: 500;
+    }
+    h2 {
+      font-size: 15.5px;
+      background: #ecfdf5;
+      color: #047857;
+      border-left: 4px solid #10b981;
+      padding: 6px 10px;
+      margin: 14px 0 8px 0;
+      border-radius: 0 6px 6px 0;
+    }
+    .grid-2 {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .card {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      margin-bottom: 8px;
+    }
+    .alert-notice {
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 10px 0;
+      font-size: 14px;
+    }
+    .alert-warn {
+      background: #fff7ed;
+      border-left: 4px solid #ea580c;
+      border-radius: 0 8px 8px 0;
+      padding: 10px 12px;
+      margin: 10px 0;
+      font-size: 14px;
+    }
+    .table-wrapper {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin: 10px 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      min-width: 520px;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    th, td {
+      padding: 8px 10px;
+      border: 1px solid #e2e8f0;
+    }
+    th { background: #f8fafc; font-weight: 700; color: #0f172a; }
+    p, ul, ol { margin: 6px 0; }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 4px; }
+    .quiz-q { font-weight: 700; color: #0f172a; margin-top: 6px; font-size: 14.5px; }
+    .quiz-a {
+      color: #047857;
+      font-weight: 600;
+      background: #ecfdf5;
+      padding: 6px 10px;
+      border-radius: 6px;
+      display: block;
+      margin-top: 4px;
+      border: 1px solid #a7f3d0;
+      font-size: 14px;
+    }
+  }
+
+  /* =========================================================
+     2. WIDOK DRUKU / A4 PRINT (3 STRONY BEZ ROZLEWANIA)
+     ========================================================= */
+  @media print {
+    @page {
+      size: A4 portrait;
+      margin: 9mm 12mm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 9.3pt;
+      line-height: 1.33;
+      color: #1a202c;
+      background: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+    .no-print { display: none !important; }
+    .page-container {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 0;
+    }
+    .page {
+      page-break-after: always;
+      break-after: page;
+      min-height: 98%;
+      box-shadow: none;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      margin: 0;
+      background: transparent;
+    }
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+      min-height: auto;
+    }
+    .page-badge { display: none; }
+    h1 {
+      font-size: 13.5pt;
+      margin: 0 0 2px 0;
+      color: #065f46;
+      border-bottom: 2px solid #059669;
+      padding-bottom: 2px;
+      text-transform: uppercase;
+    }
+    .subtitle {
+      font-size: 8.8pt;
+      color: #4b5563;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    h2 {
+      font-size: 10.5pt;
+      background: #ecfdf5;
+      color: #047857;
+      border-left: 4px solid #10b981;
+      padding: 3px 7px;
+      margin: 7px 0 4px 0;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+    .card {
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 5px 7px;
+      background: #fafafa;
+      margin-bottom: 4px;
+    }
+    .alert-notice {
+      background: #eff6ff;
+      border: 1.5px solid #3b82f6;
+      border-radius: 4px;
+      padding: 5px 8px;
+      margin: 5px 0;
+      font-size: 8.8pt;
+    }
+    .alert-warn {
+      background: #fff7ed;
+      border-left: 4px solid #ea580c;
+      border-radius: 4px;
+      padding: 5px 8px;
+      margin: 5px 0;
+      font-size: 8.7pt;
+    }
+    .table-wrapper {
+      width: 100%;
+      overflow: visible;
+      border: none;
+      margin: 4px 0;
+    }
+    table {
+      width: 100%;
+      min-width: 0;
+      border-collapse: collapse;
+      font-size: 8.8pt;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 4px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f1f5f9; font-weight: 700; color: #0f172a; }
+    p, ul, ol { margin: 2px 0; }
+    ul, ol { padding-left: 17px; }
+    li { margin-bottom: 2px; }
+    .quiz-q { font-weight: 700; color: #0f172a; margin-top: 5px; font-size: 9.2pt; }
+    .quiz-a {
+      color: #047857;
+      font-weight: 600;
+      background: #ecfdf5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      display: inline-block;
+      margin-top: 2px;
+      border: none;
+      font-size: 9pt;
+    }
+  }
+
+  /* WSPÓLNE ELEMENTY */
+  .ru { color: #475569; font-style: italic; }
+  .pl-term { font-weight: 700; color: #065f46; }
+  .step-num {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    background: #047857;
+    color: #fff;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 20px;
+    font-size: 9pt;
+    font-weight: bold;
+    margin-right: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-container">
+
+  <!-- PASEK DRUKU (widoczny tylko na ekranie) -->
+  <div class="print-bar no-print">
+    <div class="print-bar-title">📱 Wersja mobilna | 📄 3 strony A4 do druku</div>
+    <button class="print-btn" onclick="window.print()">🖨️ Drukuj / Zapisz PDF</button>
+  </div>
+
+  <!-- ==================== STRONA 1 ==================== -->
+  <div class="page">
+    <div class="page-badge no-print">Strona 1 z 3 • Co przynieść i podstawy</div>
+    <h1>ZPT (TECHNIKA) — KLASA 4 | Technika Decoupage</h1>
+    <div class="subtitle">Техника / Труд — 4 класс | Памятка по сообщению учительницы Urszuli Filipowicz (Lekcja: 05.11.2026)</div>
+
+    <div class="alert-notice">
+      <strong>📩 Treść wiadomości od nauczycielki (Текст письма из Librus):</strong><br>
+      <em>„Dzień dobry, na lekcjach ZPT (lub techniki) będziemy odnawiać, upiększać techniką decoupage. Proszę o: małe szkatułki, małe ramki z drewna lub medale drewniane; serwetki papierowe wg własnego motywu; pędzel płaski; klej i lakier w jednym (decoupage 2w1 klej + lakier). Pozdrawiam, Urszula Filipowicz”</em>
+    </div>
+
+    <h2>1. Lista materiałów do przyniesienia na 05.11.2026 <span class="ru">(Что купить и взять в школу)</span></h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:25%;">Materiał (Nazwa PL)</th>
+            <th style="width:28%;">Перевод на русский</th>
+            <th style="width:47%;">Gdzie kupić i jak wybrać? (Советы)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Drewniana baza</strong><br>• <em>mała szkatułka</em><br>• <em>ramka z drewna</em><br>• <em>drewniane medale</em></td>
+            <td><strong>Деревянная заготовка</strong><br>• шкатулка<br>• фоторамка из дерева<br>• деревянные медальоны/спилы</td>
+            <td><strong>Action, Tedi, Empik, Castorama, sklepy plastyczne</strong>.<br>Drewno powinno być czyste, surowe (nielakierowane). Mała szkatułka lub prosta ramka to najlepszy wybór na 45-minutową lekcję.</td>
+          </tr>
+          <tr>
+            <td><strong>2. Serwetki papierowe</strong><br>(wg własnego motywu)</td>
+            <td><strong>Бумажные салфетки с узором</strong><br>(столовые, 3-слойные)</td>
+            <td>Bierzemy zwykłe serwetki z ładnym motywem (kwiaty, zwierzęta, auta, krajobrazy). <em>Ważne:</em> motyw nie powinien być zbyt drobny do wycięcia.</td>
+          </tr>
+          <tr>
+            <td><strong>3. Pędzel płaski</strong></td>
+            <td><strong>Плоская кисть</strong><br>(синтетическая)</td>
+            <td>Szerokość ok. 1–2 cm, płaskie, miękkie włosie syntetyczne. Miękkie włosie jest kluczowe, aby nie przedziurawić mokrej serwetki!</td>
+          </tr>
+          <tr>
+            <td><strong>4. Klej i lakier 2w1</strong><br>(klej z werniksem)</td>
+            <td><strong>Клей-лак 2в1 для декупажа</strong><br>(decoupage klej + lakier)</td>
+            <td>Preparat łączący funkcję kleju i lakieru ochronnego (np. marki <em>Pentart, Mod Podge, Loveart</em>). Kupimy w dziale plastycznym Action, Tedi lub Empik.</td>
+          </tr>
+          <tr>
+            <td><strong>Dodatkowe przybory</strong><br>• <em>nożyczki</em><br>• <em>ręcznik papierowy</em></td>
+            <td><strong>Дополнительно:</strong><br>• ножницы для вырезания<br>• салфетки вытирать пальцы</td>
+            <td>Małe, ostre nożyczki z ostrym czubkiem do wycinania wzorów + ręcznik papierowy do wycierania pędzla.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>2. Co to jest decoupage? <span class="ru">(Главное теоретическое определение)</span></h2>
+    <div class="card">
+      <p>• <span class="pl-term">Decoupage</span> (z francuskiego: <em>découper</em> = wycinać) — technika zdobnicza polegająca na przyklejaniu na powierzchnię (drewno, szkło, metal, ceramika) wzorów wyciętych z papieru lub cienkiej serwetki, a następnie zabezpieczeniu ich warstwą bezbarwnego lakieru.</p>
+      <p>• Często nazywana jest <strong>techniką serwetkową</strong> <span class="ru">(салфеточная техника)</span>, bo wielowarstwowa serwetka jest najprostszym i najefektowniejszym materiałem.</p>
+    </div>
+  </div>
+
+  <!-- ==================== STRONA 2 ==================== -->
+  <div class="page">
+    <div class="page-badge no-print">Strona 2 z 3 • Zasada 3 warstw i instrukcja krok po kroku</div>
+    <h2>3. Złota zasada 3 warstw serwetki <span class="ru">(Самое главное правило — не ошибиться!)</span></h2>
+    <div class="alert-warn">
+      ⚠️ <strong>UWAGA — NAJCZĘSTSZY BŁĄD UCZNIÓW!</strong><br>
+      Klasyczna serwetka papierowa składa się z <strong>3 warstw</strong> (jest trójwarstwowa):<br>
+      1. <strong>Warstwa wierzchnia (kolorowa z nadrukiem)</strong> &rarr; <strong style="color:#15803d;">TĘ JEDNĄ PRZYKLEJAMY!</strong><br>
+      2. Dwie warstwy spodnie (białe, bez nadruku) &rarr; <strong style="color:#b91c1c;">DELIKATNIE ODDZIELAMY I WYRZUCAMY!</strong><br>
+      <em>Jeśli przykleisz całą serwetkę bez rozdzielenia, papier natychmiast zroluje się, pomarszczy i odpadnie od drewna!</em>
+    </div>
+
+    <h2>4. Instrukcja wykonania krok po kroku <span class="ru">(Пошаговый план работы на уроке)</span></h2>
+    <div class="card">
+      <p><span class="step-num">1</span> <strong>Wybór i wycięcie motywu <span class="ru">(Выбор рисунка):</span></strong><br>
+      Wytnij nożyczkami wzór z serwetki. <em>Wskazówka:</em> możesz też delikatnie <strong>obrywać motyw palcami</strong> (*wydzierać*). Wyrwane, postrzępione krawędzie po polakierowaniu stają się całkowicie niewidoczne na drewnie!</p>
+    </div>
+
+    <div class="card">
+      <p><span class="step-num">2</span> <strong>Rozdzielenie warstw <span class="ru">(Отделение слоёв):</span></strong><br>
+      Oddziel dwie białe warstwy od kolorowej. Zostaje sama ultracienka bibułka z nadrukiem.</p>
+    </div>
+
+    <div class="card">
+      <p><span class="step-num">3</span> <strong>Przymiarka „na sucho” <span class="ru">(Примерка всухую):</span></strong><br>
+      Przyłóż wycięty motyw do drewnianej szkatułki lub ramki. Dopasuj najlepsze ułożenie, zanim użyjesz kleju.</p>
+    </div>
+
+    <div class="card">
+      <p><span class="step-num">4</span> <strong>Aplikacja kleju 2w1 OD ŚRODKA DO BRZEGÓW <span class="ru">(Приклеивание от центра к краям!):</span></strong><br>
+      Połóż suchą serwetkę na drewnie. Zamocz płaski pędzel w preparacie 2w1 i nakładaj klej <strong>BEZPOŚREDNIO NA WIERZCH SERWETKI</strong>, wykonując delikatne ruchy pędzlem <strong>OD ŚRODKA NA ZEWNĄTRZ</strong>. Klej przeniknie przez cienki papier i zwiąże go z drewnem, a ruchy pędzla wygładzą zmarszczki i usuną bąbelki powietrza.</p>
+    </div>
+
+    <div class="card">
+      <p><span class="step-num">5</span> <strong>Wysychanie i lakierowanie ochronne <span class="ru">(Сушка и лакирование):</span></strong><br>
+      Poczekaj, aż praca wyschnie. Na koniec pokryj cały przedmiot drugą warstwą tego samego preparatu 2w1 jako lakierem zabezpieczającym przed kurzem i zarysowaniami.</p>
+    </div>
+
+    <h2>5. Słowniczek polsko-rosyjski na lekcję techniki <span class="ru">(Термины для урока)</span></h2>
+    <div class="grid-2">
+      <div class="card">
+        • <strong>szkatułka z drewna</strong> — деревянная шкатулка<br>
+        • <strong>ramka na zdjęcia</strong> — фоторамка<br>
+        • <strong>pędzel płaski</strong> — плоская кисть<br>
+        • <strong>klej z werniksem / lakierem</strong> — клей-лак
+      </div>
+      <div class="card">
+        • <strong>warstwa wierzchnia</strong> — верхний красочный слой<br>
+        • <strong>od środka do brzegów</strong> — от центра к краям<br>
+        • <strong>pęcherzyki powietrza</strong> — пузырьки воздуха<br>
+        • <strong>wydzieranie motywu</strong> — обрывание рисунка пальцами
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== STRONA 3 ==================== -->
+  <div class="page">
+    <div class="page-badge no-print">Strona 3 z 3 • Symulator pytań z decoupage</div>
+    <h2>6. Symulator pytań z techniki decoupage <span class="ru">(Типичные вопросы учительницы на оценку 5-6)</span></h2>
+
+    <div class="card">
+      <div class="quiz-q">Pytanie 1. Skąd pochodzi nazwa „decoupage” i co oznacza?</div>
+      <div class="quiz-a">Odpowiedź: Słowo pochodzi z języka francuskiego (od czasownika „découper”) i oznacza „wycinać”.</div>
+    </div>
+
+    <div class="card">
+      <div class="quiz-q">Pytanie 2. Ile warstw ma typowa serwetka papierowa i którą warstwę przyklejamy do przedmiotu?</div>
+      <div class="quiz-a">Odpowiedź: Serwetka ma 3 warstwy. Przyklejamy TYLKO pierwszą, wierzchnią warstwę z kolorowym nadrukiem. Dwie białe warstwy należy oddzielić i wyrzucić.</div>
+    </div>
+
+    <div class="card">
+      <div class="quiz-q">Pytanie 3. W jaki sposób prowadzimy pędzel płaski podczas nakładania kleju na serwetkę?</div>
+      <div class="quiz-a">Odpowiedź: Pędzel prowadzimy delikatnie od środka motywu ku jego brzegom (na zewnątrz). W ten sposób wygładzamy serwetkę i wypychamy pęcherzyki powietrza.</div>
+    </div>
+
+    <div class="card">
+      <div class="quiz-q">Pytanie 4. Dlaczego warto czasem wydzierać motyw z serwetki zamiast wycinać go nożyczkami?</div>
+      <div class="quiz-a">Odpowiedź: Wyrwane, nieregularne brzegi serwetki są cieńsze i po nałożeniu lakieru płynniej stapiają się z tłem drewnianego przedmiotu, stając się niewidoczne.</div>
+    </div>
+
+    <div class="card">
+      <div class="quiz-q">Pytanie 5. Jaką rolę pełni preparat „2 w 1” (klej + lakier)?</div>
+      <div class="quiz-a">Odpowiedź: Najpierw działa jako klej (przesiąka przez bibułkę i mocuje ją do drewna), a po wyschnięciu kolejna warstwa tworzy przezroczystą powłokę lakierniczą chroniącą przed brudem i uszkodzeniami.</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

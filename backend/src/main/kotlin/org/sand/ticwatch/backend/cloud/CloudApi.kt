@@ -8,6 +8,7 @@ object CloudApi {
     const val ROLLUPS = "$BASE/rollups"
     const val ROUTE_POINTS = "$BASE/route-points"
     const val ECG_RECORDINGS = "$BASE/ecg-recordings"
+    const val DEVIATION_EPISODES = "$BASE/deviation-episodes"
 
     /** Identifies the uploading phone install; stored with every row, never used to filter reads. */
     const val DEVICE_HEADER = "X-Device-Id"

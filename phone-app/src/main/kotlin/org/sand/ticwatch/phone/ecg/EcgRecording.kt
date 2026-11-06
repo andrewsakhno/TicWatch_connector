@@ -10,6 +10,7 @@ enum class EcgCaptureStatus {
     NOT_WORN,
     NO_BEATS,
     BUSY,
+    DECLINED,
 }
 
 /** One heartbeat: [offsetMs] from the strip start (running sum of intervals), the interval ending at it, its quality. */
@@ -17,6 +18,19 @@ data class EcgBeat(val offsetMs: Long, val rrMs: Double, val clean: Boolean)
 
 /** One raw PPG reading of the pulsatile channel, [offsetMs] from the strip start (watch clock, not the RR sum). */
 data class EcgWaveSample(val offsetMs: Long, val value: Long)
+
+/** Why a strip was recorded; [code] is stored in `ecg_recording.kind`, [wireName] goes to the cloud payload. */
+enum class EcgRecordingKind(val code: Int, val wireName: String) {
+    /** Asked for on the phone or after a cuff reading. */
+    REQUESTED(0, "requested"),
+
+    /** Recorded by the watch at a sleep blood pressure measurement, for the pulse-wave estimate. */
+    NIGHT_PULSE(1, "night_pulse");
+
+    companion object {
+        fun of(code: Int): EcgRecordingKind = entries.firstOrNull { it.code == code } ?: REQUESTED
+    }
+}
 
 /** A recorded rhythm strip; [id] is 0 until stored. */
 data class EcgRecording(
@@ -26,6 +40,7 @@ data class EcgRecording(
     val beats: List<EcgBeat>,
     /** The pulse wave recorded with the beats; empty for strips recorded before it existed. */
     val wave: List<EcgWaveSample> = emptyList(),
+    val kind: EcgRecordingKind = EcgRecordingKind.REQUESTED,
 ) {
     val durationMs: Long get() = maxOf(beats.lastOrNull()?.offsetMs ?: 0L, wave.lastOrNull()?.offsetMs ?: 0L)
 }

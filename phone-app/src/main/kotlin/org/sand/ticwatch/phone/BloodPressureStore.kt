@@ -83,6 +83,7 @@ class BloodPressureStore(
             CalibrationResult.Implausible -> uiText(R.string.calibration_implausible)
             CalibrationResult.NoHeartRate -> uiText(R.string.calibration_no_hr)
             CalibrationResult.Outdated -> uiText(R.string.calibration_outdated)
+            is CalibrationResult.NotAtRest -> uiText(R.string.calibration_not_at_rest, it.violation.heartRate.roundToInt())
         }
     }
 

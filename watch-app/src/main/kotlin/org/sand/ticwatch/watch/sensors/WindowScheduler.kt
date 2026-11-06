@@ -1,8 +1,8 @@
 package org.sand.ticwatch.watch.sensors
 
 import android.app.AlarmManager
-import android.os.Handler
-import android.os.Looper
+import android.app.PendingIntent
+import android.content.Context
 import android.os.PowerManager
 import android.os.SystemClock
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -18,38 +18,41 @@ fun interface WindowScheduler {
  * [WindowScheduler] on an `ELAPSED_REALTIME_WAKEUP` alarm. A coroutine `delay` runs on the
  * monotonic clock, which stops while the application processor is suspended - so on a
  * screen-off watch a 30 min delay effectively never elapsed and windows only ran at service
- * start. The alarm counts suspend time and wakes the device. An inexact [AlarmManager.setWindow]
- * needs no exact-alarm permission; Doze may defer it to a maintenance window, which is fine
- * for a 30 min cadence. On firing it takes a short wake lock so the device can't go back to
- * sleep before the window acquires its own.
+ * start. The alarm counts suspend time and wakes the device.
+ *
+ * It is an allow-while-idle alarm (exact through `USE_EXACT_ALARM` when granted): a plain `setWindow` alarm is
+ * deferred by Doze to its maintenance windows, which stopped measurements and sync for 4-5 h on still nights and
+ * left a dropped phone link down until the app was opened. Allow-while-idle alarms only exist with a
+ * [PendingIntent], so [WakeAlarmReceiver] hands the firing back through [WakeAlarms]. On firing it takes a short
+ * wake lock so the device can't go back to sleep before the window acquires its own.
  */
 class AlarmWindowScheduler(
+    private val context: Context,
     private val alarmManager: AlarmManager,
     private val powerManager: PowerManager,
     private val alarmTag: String,
 ) : WindowScheduler {
 
-    private val handler = Handler(Looper.getMainLooper())
-
     override suspend fun awaitNext(interval: Duration) = suspendCancellableCoroutine { continuation ->
-        val listener = AlarmManager.OnAlarmListener {
+        val id = WakeAlarms.register {
             powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).acquire(HANDOFF_WAKE_LOCK.toMillis())
             continuation.resume(Unit)
         }
-        alarmManager.setWindow(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + interval.toMillis(),
-            ALARM_WINDOW.toMillis(),
-            alarmTag,
-            listener,
-            handler,
-        )
-        continuation.invokeOnCancellation { alarmManager.cancel(listener) }
+        val operation = WakeAlarmReceiver.pendingIntent(context, alarmTag, id)
+        val triggerAt = SystemClock.elapsedRealtime() + interval.toMillis()
+        if (alarmManager.canScheduleExactAlarms()) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, operation)
+        } else {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, operation)
+        }
+        continuation.invokeOnCancellation {
+            alarmManager.cancel(operation)
+            WakeAlarms.unregister(id)
+        }
     }
 
     private companion object {
         const val WAKE_LOCK_TAG = "TicWatchConnector:AlarmHandoff"
-        val ALARM_WINDOW: Duration = Duration.ofMinutes(1)
 
         /** Held whole by every alarm, even one that finds nothing to do; covers the sleep check's 3 s flush settle. */
         val HANDOFF_WAKE_LOCK: Duration = Duration.ofSeconds(5)

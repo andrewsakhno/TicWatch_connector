@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.phone.cloud.CloudSyncWorker
+import org.sand.ticwatch.phone.deviation.DeviationEpisodesStore
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfillWorker
 import org.sand.ticwatch.phone.history.SensorHistoryModule
 import org.sand.ticwatch.phone.history.SensorHistoryPurgeWorker
@@ -56,11 +57,13 @@ import org.sand.ticwatch.phone.sync.SyncTransfer
 import org.sand.ticwatch.phone.transport.BluetoothLinkServerService
 import org.sand.ticwatch.phone.ui.LOAD_ONCE
 import org.sand.ticwatch.phone.ui.ReloadingStore
+import org.sand.ticwatch.phone.ui.TicWatchTheme
 import org.sand.ticwatch.phone.ui.anyChangeOf
 import org.sand.ticwatch.phone.ui.rememberStore
 
 private enum class Screen(@StringRes val label: Int) {
     Dashboard(R.string.screen_dashboard),
+    Deviations(R.string.screen_deviations),
     Settings(R.string.screen_settings),
     McpAgent(R.string.screen_mcp_agent),
 }
@@ -121,7 +124,7 @@ class MainActivity : AppCompatActivity() {
         val openAdvisor = intent.getBooleanExtra(EXTRA_ADVISOR, false)
 
         setContent {
-            MaterialTheme {
+            TicWatchTheme {
                 Surface {
                     AppScaffold(appContainer, initialScreen, openCardioAdvice, openAdvisor)
                 }
@@ -156,6 +159,10 @@ class MainActivity : AppCompatActivity() {
         fun mcpAgentIntent(context: Context): Intent =
             Intent(context, MainActivity::class.java).putExtra(EXTRA_SCREEN, Screen.McpAgent.name)
 
+        /** Opens the screen asking to explain deviation episodes (their notification's tap target). */
+        fun deviationsIntent(context: Context): Intent =
+            Intent(context, MainActivity::class.java).putExtra(EXTRA_SCREEN, Screen.Deviations.name)
+
         /** Opens the Blood Pressure tab with the cardio advice sheet (the geomagnetic alert's tap target). */
         fun cardioAdviceIntent(context: Context): Intent =
             Intent(context, MainActivity::class.java)
@@ -171,6 +178,10 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
     var showCardioAdvice by remember { mutableStateOf(openCardioAdvice) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
+    val deviations = rememberStore(appContainer) { scope, io ->
+        DeviationEpisodesStore(scope, io, appContainer.deviationEpisodeLog, appContainer.deviationAnswers)
+    }
+    val waitingDeviations = deviations.state.collectAsState().value.waitingCount
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -185,6 +196,9 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
                         onClick = {
                             currentScreen = screen
                             coroutineScope.launch { drawerState.close() }
+                        },
+                        badge = {
+                            if (screen == Screen.Deviations && waitingDeviations > 0) Text(text = waitingDeviations.toString())
                         },
                     )
                 }
@@ -217,6 +231,7 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
                             else -> DashboardTab.METRICS
                         },
                     )
+                    Screen.Deviations -> DeviationEpisodesScreen(deviations, SensorHistoryModule.zone)
                     Screen.Settings -> SettingsScreen(appContainer)
                     Screen.McpAgent -> McpAgentScreen(appContainer)
                 }

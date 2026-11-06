@@ -32,13 +32,14 @@ interface AdaptiveTrigger {
 }
 
 /**
- * Tachycardia (> [high]) or bradycardia (< [low]) while [rest] says the wearer isn't moving (no steps, no workout):
- * heart rate goes continuous and HRV + SpO2 are measured sooner. Moving explains a high rate, so it counts as normal.
+ * Heart rate outside [limits] (the phone's personal corridor of the current state, else fixed ones) while [rest] says
+ * the wearer isn't moving (no steps, no workout): heart rate goes continuous and HRV + SpO2 are measured at once and
+ * then sooner, so the stretch right after a jump - what tells a passing reaction from a lasting one - gets RMSSD.
+ * Moving explains a high rate, so it counts as normal.
  */
 class RestingHeartRateTrigger(
     private val rest: WindowGate,
-    private val low: Double,
-    private val high: Double,
+    private val limits: () -> RestingHeartRateLimits,
     private val boosts: List<CadenceBoost>,
 ) : AdaptiveTrigger {
     override val id = TriggerId.RESTING_HEART_RATE
@@ -46,9 +47,10 @@ class RestingHeartRateTrigger(
     override fun evaluate(sample: SensorSample): TriggerVerdict? {
         if (sample.type != SensorType.HEART_RATE) return null
         if (!rest.isOpen()) return TriggerVerdict.Normal
+        val range = limits()
         return when {
-            sample.value > high -> TriggerVerdict.Abnormal("Resting tachycardia ${sample.value} bpm", boosts)
-            sample.value < low -> TriggerVerdict.Abnormal("Resting bradycardia ${sample.value} bpm", boosts)
+            sample.value > range.highBpm -> TriggerVerdict.Abnormal("Resting heart rate ${sample.value} > ${range.highBpm} bpm", boosts)
+            sample.value < range.lowBpm -> TriggerVerdict.Abnormal("Resting heart rate ${sample.value} < ${range.lowBpm} bpm", boosts)
             else -> TriggerVerdict.Normal
         }
     }

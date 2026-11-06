@@ -17,7 +17,11 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "== Installing the power policy on $NETBOOK_SSH"
 ssh "$NETBOOK_SSH" "sudo tee /usr/local/sbin/battery-guard > /dev/null && sudo chmod 755 /usr/local/sbin/battery-guard" < "$SOURCE_DIR/netbook-power/battery-guard.sh"
 ssh "$NETBOOK_SSH" "sudo tee /etc/cron.d/battery-guard > /dev/null && sudo chmod 644 /etc/cron.d/battery-guard" < "$SOURCE_DIR/netbook-power/battery-guard.cron"
-ssh "$NETBOOK_SSH" "sudo sed -i 's/^#LID_SLEEP=true$/LID_SLEEP=true/' /etc/default/acpi-support"
+ssh "$NETBOOK_SSH" "sudo mkdir -p /etc/acpi/local && sudo tee /etc/acpi/local/lid.sh.pre > /dev/null && sudo chmod 755 /etc/acpi/local/lid.sh.pre" < "$SOURCE_DIR/netbook-power/lid.sh.pre"
+ssh "$NETBOOK_SSH" "sudo tee /usr/local/sbin/cloud-autostart > /dev/null && sudo chmod 755 /usr/local/sbin/cloud-autostart" < "$SOURCE_DIR/netbook-power/cloud-autostart.sh"
+ssh "$NETBOOK_SSH" "echo \"@reboot root /usr/local/sbin/cloud-autostart \$HOME/ticwatch-cloud\" | sudo tee /etc/cron.d/cloud-autostart > /dev/null && sudo chmod 644 /etc/cron.d/cloud-autostart"
+# Docker's own boot start, where the init system supports it (antiX: sysvinit or runit).
+ssh "$NETBOOK_SSH" "sudo update-rc.d docker defaults > /dev/null 2>&1 || true"
 
 echo "== Building $IMAGE for linux/$TARGET_ARCH"
 docker build --provenance=false --platform "linux/$TARGET_ARCH" -t "$IMAGE" "$SOURCE_DIR"

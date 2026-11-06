@@ -72,7 +72,8 @@ class PhoneMessageRouter(
 
             // Answers a request someone is waiting on (the MCP `get_watch_logs` tool, a blood pressure estimate's sync).
             DataLayerPaths.MESSAGE_DEBUG_LOGS_RESPONSE,
-            DataLayerPaths.MESSAGE_SYNC_NOW_RESULT -> {
+            DataLayerPaths.MESSAGE_SYNC_NOW_RESULT,
+            DataLayerPaths.MESSAGE_WORKOUT_COMMAND_RESULT -> {
                 val text = String(payload, Charsets.UTF_8)
                 runCatching { JSONObject(text).getString(REQUEST_ID) }
                     .onSuccess { replySink.deliver(it, text) }
@@ -107,6 +108,8 @@ class PhoneMessageRouter(
             DataLayerPaths.MESSAGE_ECG_PROGRESS -> ecg.onProgress(payload)
 
             DataLayerPaths.MESSAGE_ECG_RESULT -> handled = ecg.onResult(payload)
+
+            DataLayerPaths.MESSAGE_ECG_NIGHT_STRIP -> handled = ecg.onNightStrip(payload)
 
             DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST -> bloodPressureRequests.onMeasureRequested(payload)
 

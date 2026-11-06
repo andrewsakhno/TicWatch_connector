@@ -7,9 +7,11 @@ import kotlin.math.exp
 
 /**
  * Karvonen heart-rate zones as shares of the heart-rate reserve, each starting at [minReserveFraction];
- * [sensorType] stores the minutes a workout spent in the zone.
+ * [sensorType] stores the minutes a workout spent in the zone. [ZONE_0] is everything below zone 1, so a
+ * workout's zone minutes add up to its heart-rate coverage (an easy walk sits there almost entirely).
  */
 enum class HeartRateZone(val number: Int, val minReserveFraction: Double, val sensorType: SensorType) {
+    ZONE_0(0, 0.0, SensorType.HEART_RATE_ZONE_0),
     ZONE_1(1, 0.50, SensorType.HEART_RATE_ZONE_1),
     ZONE_2(2, 0.60, SensorType.HEART_RATE_ZONE_2),
     ZONE_3(3, 0.70, SensorType.HEART_RATE_ZONE_3),
@@ -17,8 +19,8 @@ enum class HeartRateZone(val number: Int, val minReserveFraction: Double, val se
     ZONE_5(5, 0.90, SensorType.HEART_RATE_ZONE_5);
 
     companion object {
-        /** The highest zone [reserveFraction] reaches, or null below zone 1. */
-        fun forReserve(reserveFraction: Double): HeartRateZone? = entries.lastOrNull { reserveFraction >= it.minReserveFraction }
+        /** The highest zone [reserveFraction] reaches; anything below zone 1 (negative too) is [ZONE_0]. */
+        fun forReserve(reserveFraction: Double): HeartRateZone = entries.lastOrNull { reserveFraction >= it.minReserveFraction } ?: ZONE_0
     }
 }
 
@@ -56,7 +58,7 @@ class ExerciseLoadCalculator(private val maxReadingSpan: Duration = Duration.ofS
             val next = readings.getOrNull(index + 1)?.recordedAt ?: end
             val span = Duration.between(reading.recordedAt, next).coerceIn(Duration.ZERO, maxReadingSpan)
             val reserve = ((reading.value - restingBpm) / (maxBpm - restingBpm)).coerceAtLeast(0.0)
-            HeartRateZone.forReserve(reserve)?.let { zone -> zones[zone] = (zones[zone] ?: Duration.ZERO) + span }
+            HeartRateZone.forReserve(reserve).let { zone -> zones[zone] = (zones[zone] ?: Duration.ZERO) + span }
             trimp += span.toMillis() / MILLIS_PER_MINUTE * reserve * TRIMP_SCALE * exp(coefficient.factor * reserve)
         }
         return ExerciseLoad(zones, trimp)

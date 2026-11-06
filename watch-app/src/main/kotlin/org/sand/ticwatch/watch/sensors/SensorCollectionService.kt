@@ -1,5 +1,16 @@
 package org.sand.ticwatch.watch.sensors
 
+import org.sand.ticwatch.watch.ecg.EcgCapturer
+import org.sand.ticwatch.watch.ecg.NightStripQueue
+import org.sand.ticwatch.watch.ecg.FileNightStripQueue
+import org.sand.ticwatch.watch.ecg.NightPulseStripRecorder
+import org.sand.ticwatch.watch.ecg.NightStripSender
+import org.sand.ticwatch.watch.bloodpressure.CompositeAsleepBloodPressureMeasurer
+import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressurePlanner
+import org.sand.ticwatch.watch.bloodpressure.LocalAsleepBloodPressureMeasurer
+import org.sand.ticwatch.watch.bloodpressure.OfflineBloodPressureEstimator
+import kotlinx.coroutines.flow.combine
+import java.time.ZoneId
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -50,13 +61,19 @@ import org.sand.ticwatch.watch.autoworkout.NotificationAutoWorkoutPrompt
 import org.sand.ticwatch.watch.autoworkout.SharedPreferencesAutoWorkoutSettings
 import org.sand.ticwatch.watch.autoworkout.StepCountSource
 import org.sand.ticwatch.watch.autoworkout.StepCounterSensorSource
+import org.sand.ticwatch.watch.autoworkout.WorkoutCommandRequester
+import org.sand.ticwatch.watch.autoworkout.WorkoutCommandResponder
 import org.sand.ticwatch.watch.battery.StickyIntentBatteryStatusReader
 import org.sand.ticwatch.watch.battery.WatchBatteryReporter
+import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressureCadence
 import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressureController
+import org.sand.ticwatch.watch.bloodpressure.CachedCalibrationOfflineEstimator
+import org.sand.ticwatch.watch.bloodpressure.LocalBloodPressureEstimator
 import org.sand.ticwatch.watch.bloodpressure.BloodPressureMeasureRequester
 import org.sand.ticwatch.watch.bloodpressure.NoWorkoutGate
 import org.sand.ticwatch.watch.bloodpressure.PhoneBloodPressureMeasureRequester
 import org.sand.ticwatch.watch.bloodpressure.RecentStepsGate
+import org.sand.ticwatch.watch.buffer.SensorSampleBuffer
 import org.sand.ticwatch.watch.buffer.SqliteSensorSampleBuffer
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
 import org.sand.ticwatch.watch.datalayer.ImmediateSyncResponder
@@ -86,7 +103,9 @@ import org.sand.ticwatch.watch.sensors.adaptive.LiveWindowCadence
 import org.sand.ticwatch.watch.sensors.adaptive.DesaturationTrigger
 import org.sand.ticwatch.watch.sensors.adaptive.MeasurementGroup
 import org.sand.ticwatch.watch.sensors.adaptive.MonitoringProfiles
+import org.sand.ticwatch.watch.sensors.adaptive.RestingHeartRateLimits
 import org.sand.ticwatch.watch.sensors.adaptive.RestingHeartRateTrigger
+import org.sand.ticwatch.watch.sensors.adaptive.SettingsBaseCadence
 import org.sand.ticwatch.watch.sensors.adaptive.SkinTemperatureRiseTrigger
 import org.sand.ticwatch.watch.settings.SharedPreferencesWatchSettingsStore
 import org.sand.ticwatch.watch.settings.WatchSettings
@@ -179,8 +198,10 @@ class SensorCollectionService : Service() {
             triggers = listOf(
                 RestingHeartRateTrigger(
                     rest = WindowGate { noStepsGate.isOpen() && noWorkoutGate.isOpen() },
-                    low = RESTING_HEART_RATE_LOW,
-                    high = RESTING_HEART_RATE_HIGH,
+                    limits = {
+                        PhonePayloadStores.get(applicationContext).heartRateCorridor.latest.value?.of(sleepState.isAsleep())
+                            ?: FIXED_RESTING_LIMITS
+                    },
                     boosts = listOf(
                         CadenceBoost(MeasurementGroup.HEART_RATE, CadenceBoost.CONTINUOUS),
                         CadenceBoost(MeasurementGroup.HRV, ALERT_BODY_INTERVAL),
@@ -196,7 +217,7 @@ class SensorCollectionService : Service() {
                     boostedInterval = ALERT_SKIN_TEMPERATURE_INTERVAL,
                 ),
             ),
-            baseIntervals = MeasurementGroup.entries.associateWith { VENDOR_WINDOW_INTERVAL },
+            base = SettingsBaseCadence(SharedPreferencesWatchSettingsStore.get(applicationContext).settings, VENDOR_WINDOW_INTERVAL),
             timing = AdaptiveTiming(
                 stableNormal = ADAPTIVE_STABLE_NORMAL,
                 alertWithoutReadings = ADAPTIVE_ALERT_WITHOUT_READINGS,
@@ -237,22 +258,31 @@ class SensorCollectionService : Service() {
         adaptiveScheduler.onSample(sample)
     }
 
+    /** One capturer for phone-requested strips and night pulse strips: its lock keeps them from overlapping. */
+    private val ecgCapturer: EcgCapturer by lazy {
+        RrEcgCapturer(
+            worn = WindowGate(offBodyDetector::isWorn),
+            beats = VendorRrBeatSource(getSystemService(SensorManager::class.java)),
+            wave = VendorPpgWaveSource(getSystemService(SensorManager::class.java), Clock.systemUTC()),
+            awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), ECG_WAKE_LOCK_TAG),
+            timing = EcgTiming(warmUp = ECG_WARM_UP, recording = ECG_RECORDING),
+            clock = Clock.systemUTC(),
+        )
+    }
+
+    private val nightStrips: NightStripQueue by lazy { FileNightStripQueue(File(noBackupFilesDir, NIGHT_STRIP_DIRECTORY)) }
+
     private val ecgController: EcgRequester by lazy {
         EcgController(
-            capturer = RrEcgCapturer(
-                worn = WindowGate(offBodyDetector::isWorn),
-                beats = VendorRrBeatSource(getSystemService(SensorManager::class.java)),
-                wave = VendorPpgWaveSource(getSystemService(SensorManager::class.java), Clock.systemUTC()),
-                awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), ECG_WAKE_LOCK_TAG),
-                timing = EcgTiming(warmUp = ECG_WARM_UP, recording = ECG_RECORDING),
-                clock = Clock.systemUTC(),
-            ),
+            capturer = ecgCapturer,
             transport = transport,
             scope = serviceScope,
             progressInterval = ECG_PROGRESS_INTERVAL,
             recording = ECG_RECORDING,
+            promptTimeout = ECG_PROMPT_TIMEOUT,
             screen = ActivityEcgCaptureScreen(applicationContext),
             state = EcgCaptureState,
+            promptAnswers = EcgCaptureState,
             clock = Clock.systemUTC(),
             strings = ContextStrings(applicationContext),
         )
@@ -262,12 +292,30 @@ class SensorCollectionService : Service() {
         ImmediateSyncResponder(flusher = { sensorSyncSender.flushNow() }, transport = transport, scope = serviceScope)
     }
 
+    private val workoutCommandResponder: WorkoutCommandResponder by lazy {
+        WorkoutCommandResponder(transport = transport, scope = serviceScope)
+    }
+
+    private val offlineBloodPressure: OfflineBloodPressureEstimator by lazy {
+        CachedCalibrationOfflineEstimator(
+            calibration = PhonePayloadStores.get(applicationContext).bloodPressureCalibration.latest,
+            corridor = PhonePayloadStores.get(applicationContext).heartRateCorridor.latest,
+            sleepState = sleepState,
+            readings = liveReadings,
+            rest = recentStepsGate,
+            estimator = LocalBloodPressureEstimator(),
+            buffer = sampleBuffer,
+            clock = Clock.systemUTC(),
+        )
+    }
+
     private val bloodPressureRequester: PhoneBloodPressureMeasureRequester by lazy {
         PhoneBloodPressureMeasureRequester(
             flusher = { sensorSyncSender.flushNow() },
             readings = liveReadings,
             transport = transport,
             results = PhonePayloadStores.get(applicationContext).bloodPressureResult,
+            offline = offlineBloodPressure,
             clock = Clock.systemUTC(),
             scope = serviceScope,
             strings = ContextStrings(applicationContext),
@@ -295,18 +343,46 @@ class SensorCollectionService : Service() {
         )
     }
 
+    private val sleepTracking by lazy {
+        SleepTrackingSessionStore(
+            next = SharedPreferencesOpenSleepSessionStore(applicationContext),
+            wakes = wakeTimes,
+            minNight = WAKE_TIME_MIN_NIGHT,
+        )
+    }
+
+    private val wakeTimes: WakeTimeHistory by lazy { SharedPreferencesWakeTimeHistory(applicationContext) }
+
     private val autoBloodPressure by lazy {
+        val settings = SharedPreferencesWatchSettingsStore.get(applicationContext).settings
         AutoBloodPressureController(
-            enabled = settingFlow(WatchSettings::autoBloodPressure),
+            changes = combine(settings, sleepState.sessionChanges) { current, inSession -> current to inSession },
+            planner = AutoBloodPressurePlanner(
+                dayEnabled = { settings.value.autoBloodPressure },
+                nightEnabled = { settings.value.nightBloodPressure },
+                sleepState = sleepState,
+                morning = MorningWindows(wakeTimes, BLOOD_PRESSURE_BEFORE_WAKE, BLOOD_PRESSURE_AFTER_WAKE, ZoneId::systemDefault),
+                cadence = AutoBloodPressureCadence(
+                    awake = BLOOD_PRESSURE_INTERVAL,
+                    asleep = BLOOD_PRESSURE_SLEEP_INTERVAL,
+                    beforeWake = BLOOD_PRESSURE_BEFORE_WAKE_INTERVAL,
+                    afterWake = BLOOD_PRESSURE_AFTER_WAKE_INTERVAL,
+                ),
+            ),
             gates = listOf(WindowGate(offBodyDetector::isWorn), noWorkoutGate, recentStepsGate),
+            asleepGates = listOf(SettledSleepStageGate(sleepTracking, BLOOD_PRESSURE_WAKE_SETTLE, Clock.systemUTC())),
             stillness = { listOf(GyroscopeStillnessQualifier()) },
             probe = SensorQualifierProbe(getSystemService(SensorManager::class.java)),
             requester = bloodPressureRequester,
-            scheduler = AlarmWindowScheduler(
-                getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), BLOOD_PRESSURE_ALARM_TAG,
+            asleep = CompositeAsleepBloodPressureMeasurer(
+                listOf(
+                    LocalAsleepBloodPressureMeasurer(offlineBloodPressure, liveReadings),
+                    NightPulseStripRecorder(ecgCapturer, nightStrips, ContextStrings(applicationContext)),
+                ),
             ),
+            scheduler = alarmScheduler(BLOOD_PRESSURE_ALARM_TAG),
             awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), BLOOD_PRESSURE_WAKE_LOCK_TAG),
-            interval = BLOOD_PRESSURE_INTERVAL,
+            clock = Clock.systemUTC(),
             probeDuration = BLOOD_PRESSURE_STILLNESS_PROBE,
         )
     }
@@ -340,15 +416,11 @@ class SensorCollectionService : Service() {
     private fun buildMobvoiMetricsProvider(): ExtendedMetricsProvider = MobvoiMetricsProvider(
         sensorManager = getSystemService(SensorManager::class.java),
         powerManager = getSystemService(PowerManager::class.java),
-        nightScheduler = AlarmWindowScheduler(
-            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), NIGHT_IDLE_ALARM_TAG,
-        ),
-        sleepCheckScheduler = AlarmWindowScheduler(
-            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), SLEEP_CHECK_ALARM_TAG,
-        ),
+        nightScheduler = alarmScheduler(NIGHT_IDLE_ALARM_TAG),
+        sleepCheckScheduler = alarmScheduler(SLEEP_CHECK_ALARM_TAG),
         sleepState = sleepState,
         sleepStateSink = sleepStateSink,
-        openSleepSessionStore = SharedPreferencesOpenSleepSessionStore(applicationContext),
+        openSleepSessionStore = sleepTracking,
         sleepWakeEvidence = listOf(
             OffBodyWakeEvidence(offBodyDetector, SLEEP_END_OFF_BODY, Clock.systemUTC()),
             WalkingWakeEvidence(sleepWalkingGate),
@@ -447,9 +519,7 @@ class SensorCollectionService : Service() {
                 applicationContext, SensorCollectionService::class.java, ACTION_START_AUTO_WORKOUT, ACTION_END_AUTO_WORKOUT,
             ),
             ledger = autoWorkoutStartLedger,
-            scheduler = AlarmWindowScheduler(
-                getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), AUTO_WORKOUT_ALARM_TAG,
-            ),
+            scheduler = alarmScheduler(AUTO_WORKOUT_ALARM_TAG),
             minWalk = MIN_AUTO_WALK,
             stopAfter = AUTO_WORKOUT_STOP_AFTER,
             checkInterval = AUTO_WORKOUT_CHECK_INTERVAL,
@@ -457,6 +527,10 @@ class SensorCollectionService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    private fun alarmScheduler(tag: String): WindowScheduler = AlarmWindowScheduler(
+        applicationContext, getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), tag,
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -468,8 +542,8 @@ class SensorCollectionService : Service() {
         val backgroundSources: List<SampleSource> =
             listOf(buildPassiveSampleSource(), buildVendorWindowSampleSource(), buildBoostedHeartRateSampleSource()) +
                 metricsProvider.sampleSources()
-        val samples = backgroundSources.map { source -> source.samples().onEach(::onCollected) } + snapshotFallback.samples()
-        serviceScope.launch { sensorSyncSender.sync(merge(*samples.toTypedArray())) }
+        val collected = merge(*backgroundSources.map { source -> source.samples().onEach(::onCollected) }.toTypedArray())
+        serviceScope.launch { sensorSyncSender.sync(merge(sleepHeartRateThinner.thin(collected), snapshotFallback.samples())) }
         serviceScope.launch { noStepsGate.track() }
         serviceScope.launch { sleepWalkingGate.track() }
         serviceScope.launch { autoWorkout.run() }
@@ -484,9 +558,7 @@ class SensorCollectionService : Service() {
 
     private fun buildVendorWindowSampleSource(): SampleSource = VendorWindowSampleSource(
         measurer = windowMeasurer,
-        scheduler = AlarmWindowScheduler(
-            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), VENDOR_WINDOW_ALARM_TAG,
-        ),
+        scheduler = alarmScheduler(VENDOR_WINDOW_ALARM_TAG),
         cadence = LiveWindowCadence(adaptiveScheduler, LiveSyncLease.processWide),
         groups = windowGroups,
         window = VENDOR_WINDOW,
@@ -501,17 +573,28 @@ class SensorCollectionService : Service() {
         liveSpacing = LIVE_HEART_RATE_SPACING,
     )
 
+    private val sleepHeartRateThinner by lazy {
+        SleepHeartRateThinner(SLEEP_HEART_RATE_PERIOD) {
+            sleepState.isAsleep() && noWorkoutGate.isOpen() && !LiveSyncLease.processWide.isActive()
+        }
+    }
+
+    /** One durable queue for everything the phone should receive: collected samples and local blood pressure estimates. */
+    private val sampleBuffer: SensorSampleBuffer by lazy { SqliteSensorSampleBuffer(applicationContext) }
+
     private val sensorSyncSender by lazy {
         SensorSyncSender(
             transport = transport,
-            pendingSamples = SqliteSensorSampleBuffer(applicationContext),
-            scheduler = AlarmWindowScheduler(
-                getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), SYNC_ALARM_TAG,
-            ),
+            pendingSamples = sampleBuffer,
+            scheduler = alarmScheduler(SYNC_ALARM_TAG),
             awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), SYNC_WAKE_LOCK_TAG),
             flushInterval = SYNC_FLUSH_INTERVAL,
             flushThreshold = SYNC_FLUSH_THRESHOLD,
-            companions = listOf(WatchBatteryReporter(StickyIntentBatteryStatusReader(applicationContext, Clock.systemUTC()), transport)),
+            flushesAtOnce = { it.type == SensorType.SLEEP },
+            companions = listOf(
+                WatchBatteryReporter(StickyIntentBatteryStatusReader(applicationContext, Clock.systemUTC()), transport),
+                NightStripSender(nightStrips, transport),
+            ),
             liveSync = LiveSyncLease.processWide,
             liveLink = liveLink,
         )
@@ -551,6 +634,7 @@ class SensorCollectionService : Service() {
             // Lets the phone record a GPS route for the workout while it runs, and records the watch's own.
             activityObservers = listOf(WorkoutStateNotifier(transport, serviceScope), buildWatchRouteRecorder(), noWorkoutGate) +
                 metricsProvider.activityObservers(),
+            worn = WindowGate { offBodyDetector.isWorn() },
         )
     }
 
@@ -559,19 +643,18 @@ class SensorCollectionService : Service() {
         transport = transport,
         scope = serviceScope,
         phoneTrack = LiveSyncLease.phoneRouteTrack,
-        scheduler = AlarmWindowScheduler(
-            getSystemService(AlarmManager::class.java), getSystemService(PowerManager::class.java), ROUTE_ALARM_TAG,
-        ),
+        scheduler = alarmScheduler(ROUTE_ALARM_TAG),
         phoneTrackCheckInterval = PHONE_ROUTE_TRACK_CHECK,
     )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START_AUTO_WORKOUT -> serviceScope.launch { autoWorkout.onStartRequested() }
-            ACTION_END_AUTO_WORKOUT -> serviceScope.launch { autoWorkout.onEndRequested() }
+            ACTION_START_AUTO_WORKOUT -> workoutCommandResponder.respond(intent.getStringExtra(EXTRA_REQUEST_ID)) { autoWorkout.onStartRequested() }
+            ACTION_END_AUTO_WORKOUT -> workoutCommandResponder.respond(intent.getStringExtra(EXTRA_REQUEST_ID)) { autoWorkout.onEndRequested() }
             ACTION_CAPTURE_SNAPSHOT -> snapshotController.request(intent.getStringExtra(EXTRA_REQUEST_ID))
             ACTION_SYNC_NOW -> immediateSync.request(intent.getStringExtra(EXTRA_REQUEST_ID))
             ACTION_CAPTURE_ECG -> ecgController.request(intent.getStringExtra(EXTRA_REQUEST_ID))
+            ACTION_PROMPT_ECG -> ecgController.prompt(intent.getStringExtra(EXTRA_REQUEST_ID))
         }
         addMicrophoneForegroundType()
         return START_STICKY
@@ -625,12 +708,13 @@ class SensorCollectionService : Service() {
         private const val ACTION_CAPTURE_SNAPSHOT = "org.sand.ticwatch.watch.action.CAPTURE_SNAPSHOT"
         private const val ACTION_SYNC_NOW = "org.sand.ticwatch.watch.action.SYNC_NOW"
         private const val ACTION_CAPTURE_ECG = "org.sand.ticwatch.watch.action.CAPTURE_ECG"
+        private const val ACTION_PROMPT_ECG = "org.sand.ticwatch.watch.action.PROMPT_ECG"
         private const val EXTRA_REQUEST_ID = "request_id"
 
         /** Adaptive polling: resting = no steps over this window and no workout. */
         private val ADAPTIVE_REST_WINDOW: Duration = Duration.ofMinutes(2)
-        private const val RESTING_HEART_RATE_LOW = 50.0
-        private const val RESTING_HEART_RATE_HIGH = 100.0
+        /** Until the phone sends its personal corridor. */
+        private val FIXED_RESTING_LIMITS = RestingHeartRateLimits(lowBpm = 50.0, highBpm = 100.0)
 
         /** HRV and SpO2 while resting heart rate is out of range. */
         private val ALERT_BODY_INTERVAL: Duration = Duration.ofMinutes(5)
@@ -658,6 +742,9 @@ class SensorCollectionService : Service() {
         private const val ECG_WAKE_LOCK_TAG = "TicWatchConnector:Ecg"
         private val ECG_WARM_UP: Duration = Duration.ofSeconds(20)
         private val ECG_RECORDING: Duration = Duration.ofSeconds(30)
+
+        /** Well inside the 10 min the phone accepts between a cuff reading and its strip; the phone's follow-up timeout includes it. */
+        private val ECG_PROMPT_TIMEOUT: Duration = Duration.ofMinutes(3)
         private val ECG_PROGRESS_INTERVAL: Duration = Duration.ofSeconds(2)
 
         /** Brisk walking for this long becomes a workout; same cadence as phone-app's AutoExerciseDeriver. */
@@ -670,8 +757,8 @@ class SensorCollectionService : Service() {
         private val MIN_CADENCE_SPAN: Duration = Duration.ofSeconds(20)
 
         /** A traffic light doesn't split a walk. */
-        private val MAX_WALK_GAP: Duration = Duration.ofMinutes(2)
-        private val AUTO_WORKOUT_STOP_AFTER: Duration = Duration.ofMinutes(3)
+        private val MAX_WALK_GAP: Duration = Duration.ofMinutes(5)
+        private val AUTO_WORKOUT_STOP_AFTER: Duration = Duration.ofMinutes(5)
         private val AUTO_WORKOUT_CHECK_INTERVAL: Duration = Duration.ofMinutes(1)
         private val AUTO_WORKOUT_MAX_BACKDATE: Duration = Duration.ofMinutes(30)
 
@@ -685,9 +772,20 @@ class SensorCollectionService : Service() {
 
         /** Automatic blood pressure: every 5 min while worn, no workout, few steps and a still wrist (gyroscope). */
         private val BLOOD_PRESSURE_INTERVAL: Duration = Duration.ofMinutes(5)
+        private val BLOOD_PRESSURE_SLEEP_INTERVAL: Duration = Duration.ofMinutes(20)
+        /** Denser in the 90 min before the usual wake-up and the 2 h after it: the morning surge. */
+        private val BLOOD_PRESSURE_BEFORE_WAKE: Duration = Duration.ofMinutes(90)
+        private val BLOOD_PRESSURE_BEFORE_WAKE_INTERVAL: Duration = Duration.ofMinutes(10)
+        private val BLOOD_PRESSURE_AFTER_WAKE: Duration = Duration.ofHours(2)
+        private val BLOOD_PRESSURE_AFTER_WAKE_INTERVAL: Duration = Duration.ofMinutes(10)
+        /** An arousal's pulse settles within minutes; no sleep estimate until this long after a wake stage. */
+        private val BLOOD_PRESSURE_WAKE_SETTLE: Duration = Duration.ofMinutes(5)
+        /** Naps don't shift the usual wake-up time. */
+        private val WAKE_TIME_MIN_NIGHT: Duration = Duration.ofHours(3)
         private val BLOOD_PRESSURE_REST_WINDOW: Duration = Duration.ofMinutes(5)
         private const val BLOOD_PRESSURE_REST_MAX_STEPS = 30L
         private val BLOOD_PRESSURE_STILLNESS_PROBE: Duration = Duration.ofSeconds(20)
+        private const val NIGHT_STRIP_DIRECTORY = "night_strips"
         private const val BLOOD_PRESSURE_ALARM_TAG = "TicWatchConnector:BloodPressureAlarm"
         private const val BLOOD_PRESSURE_WAKE_LOCK_TAG = "TicWatchConnector:BloodPressureProbe"
 
@@ -732,6 +830,9 @@ class SensorCollectionService : Service() {
         private val NIGHT_EPOCH: Duration = Duration.ofMinutes(5)
         private val NIGHT_SNORE_SLOT: Duration = Duration.ofMinutes(1)
 
+        /** One heart-rate median per this long while asleep: 60 rows per sync interval, so the night's flushes are the 30 min alarm's. */
+        private val SLEEP_HEART_RATE_PERIOD: Duration = Duration.ofSeconds(30)
+
         /** The "intermittent night monitor" setting's pause after each epoch: a third of the PPG time. */
         private val NIGHT_REST: Duration = Duration.ofMinutes(10)
 
@@ -760,8 +861,18 @@ class SensorCollectionService : Service() {
             SyncNowRequester { requestId -> deliverCommand(context, ACTION_SYNC_NOW, requestId) }
 
         /** The phone's rhythm-recording command, delivered the same way. */
-        fun ecgRequester(context: Context) =
-            EcgRequester { requestId -> deliverCommand(context, ACTION_CAPTURE_ECG, requestId) }
+        fun ecgRequester(context: Context) = object : EcgRequester {
+            override fun request(requestId: String?) = deliverCommand(context, ACTION_CAPTURE_ECG, requestId)
+
+            override fun prompt(requestId: String?) = deliverCommand(context, ACTION_PROMPT_ECG, requestId)
+        }
+
+        /** The phone's workout start/end commands, delivered the same way. */
+        fun workoutCommandRequester(context: Context) = object : WorkoutCommandRequester {
+            override fun requestStart(requestId: String?) = deliverCommand(context, ACTION_START_AUTO_WORKOUT, requestId)
+
+            override fun requestEnd(requestId: String?) = deliverCommand(context, ACTION_END_AUTO_WORKOUT, requestId)
+        }
 
         private fun deliverCommand(context: Context, action: String, requestId: String?) {
             val intent = Intent(context, SensorCollectionService::class.java)

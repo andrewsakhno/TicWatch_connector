@@ -119,6 +119,20 @@ fun interface RawHistoryHorizon {
     suspend fun oldestRecordedAt(types: Set<SensorType>): Instant?
 }
 
+/** Where rows stored after some row landed in time; [lastId] is the newest of them. */
+data class StoredRowsRange(val lastId: Long, val from: Instant, val to: Instant)
+
+/** Lets a background reader catch up on what was stored since its last visit, late batches included. */
+fun interface NewHistoryRows {
+    /** The rows of [types] stored after row [afterId], or null when there are none. */
+    suspend fun storedAfter(types: Set<SensorType>, afterId: Long): StoredRowsRange?
+
+    companion object {
+        /** Row ids start above this. */
+        const val BEFORE_FIRST_ROW = 0L
+    }
+}
+
 /** Read side of the transfer history, used by the MCP tools. Ranges are half-open: [from, to). */
 interface SensorHistoryQueries {
     /** Every sensor type with data, from the never-expiring [RollupResolution.DAY] tier. */

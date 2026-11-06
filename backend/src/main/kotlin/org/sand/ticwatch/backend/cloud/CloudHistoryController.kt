@@ -21,6 +21,7 @@ class CloudHistoryController(
     private val samples: SampleRepository,
     private val routePoints: RoutePointRepository,
     private val ecgRecordings: EcgRecordingRepository,
+    private val deviationEpisodes: DeviationEpisodeRepository,
 ) {
     @PostMapping(CloudApi.SAMPLES)
     fun uploadSamples(
@@ -65,6 +66,12 @@ class CloudHistoryController(
         @RequestHeader(CloudApi.DEVICE_HEADER) deviceId: String,
         @RequestBody upload: EcgRecordingUpload,
     ) = UploadResult(upload.recordings.size, ecgRecordings.upsert(deviceId, upload.recordings))
+
+    @PostMapping(CloudApi.DEVIATION_EPISODES)
+    fun uploadDeviationEpisodes(
+        @RequestHeader(CloudApi.DEVICE_HEADER) deviceId: String,
+        @RequestBody upload: DeviationEpisodeUpload,
+    ) = UploadResult(upload.episodes.size, deviationEpisodes.upsert(deviceId, upload.episodes))
 
     private fun pageSize(requested: Int): Int = requested.coerceIn(1, CloudApi.MAX_PAGE_SIZE)
 }

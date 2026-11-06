@@ -29,6 +29,12 @@ enum class VitalLevel(val code: Int) {
             FatigueLevel.EXHAUSTED -> HIGH
         }
 
+        fun of(tone: AutonomicTone): VitalLevel = when (tone) {
+            AutonomicTone.CALM -> GOOD
+            AutonomicTone.RECOVERING -> FAIR
+            AutonomicTone.STRAINED, AutonomicTone.POST_STRESS -> ELEVATED
+        }
+
         /** ESC office bands: optimal/normal, high-normal, grade 1, grade 2+; the worse of both halves wins. */
         fun of(pressure: BloodPressureReading): VitalLevel = maxOf(
             band(pressure.systolic, SYSTOLIC_BANDS),
@@ -59,8 +65,9 @@ enum class VitalLevel(val code: Int) {
 
 /**
  * JSON of [CardioReadiness] for the watch's readiness tile, page and face: the score, the load readiness and the latest pressure and pulse, each with
- * its [VitalLevel] so the watch only maps levels to colours, plus the state and advice labels. Mirrors watch-app's `readiness/CardioReadinessPayload.kt`
- * (no shared module, keep the keys in sync).
+ * its [VitalLevel] so the watch only maps levels to colours, plus the state and advice labels. The autonomic keys (balance, level,
+ * tone label, post-stress flag) are optional like the load ones, so either side may be older. Mirrors watch-app's
+ * `readiness/CardioReadinessPayload.kt` (no shared module, keep the keys in sync).
  */
 object CardioReadinessPayload {
     const val SCORE = "score"
@@ -75,6 +82,10 @@ object CardioReadinessPayload {
     const val LOAD_READINESS = "load_readiness"
     const val LOAD_LEVEL = "load_level"
     const val FATIGUE_LABEL = "fatigue_label"
+    const val AUTONOMIC_READINESS = "autonomic_readiness"
+    const val AUTONOMIC_LEVEL = "autonomic_level"
+    const val AUTONOMIC_LABEL = "autonomic_label"
+    const val POST_STRESS = "post_stress"
     const val AT = "at"
 
     /** The content of a payload apart from when it was computed, which differs on every read. */
@@ -101,6 +112,12 @@ object CardioReadinessPayload {
             json.put(LOAD_READINESS, it.loadReadinessPercent)
                 .put(LOAD_LEVEL, VitalLevel.of(it.level).code)
                 .put(FATIGUE_LABEL, text.resolve(uiText(it.level.label)))
+        }
+        readiness.autonomic?.let {
+            json.put(AUTONOMIC_READINESS, it.percent)
+                .put(AUTONOMIC_LEVEL, VitalLevel.of(it.tone).code)
+                .put(AUTONOMIC_LABEL, text.resolve(uiText(it.tone.label)))
+                .put(POST_STRESS, it.postStressActive)
         }
         return json.toString()
     }

@@ -48,8 +48,8 @@ class RestingHeartRateEstimator(
     }
 
     private companion object {
-        /** HR arrives about once a second; fewer readings than this means a gappy window. */
-        const val MIN_SAMPLES = 60
+        /** A 10 min window holds 20 readings during sleep (the watch sends one per 30 s); fewer than this means a gappy window. */
+        const val MIN_SAMPLES = 15
         const val MIN_COVERAGE_PERCENT = 80L
         const val PERCENT = 100L
     }

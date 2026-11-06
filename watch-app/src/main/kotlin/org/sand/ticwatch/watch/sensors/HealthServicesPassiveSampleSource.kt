@@ -26,12 +26,17 @@ import java.time.Instant
  *
  * Requested data types are narrowed to what the device reports as supported: one
  * unsupported type fails the whole registration.
+ *
+ * Health Services once kept delivering steps but no heart rate for 8.5 h while the watch was worn (2026-11-03,
+ * until the app restarted), so steps arriving [HEART_RATE_STALL] after the last heart rate while [worn] register the
+ * callback again.
  */
 class HealthServicesPassiveSampleSource(
     context: Context,
     private val bindings: List<PassiveBinding>,
     private val sessionTrackers: List<UserActivitySessionTracker>,
     private val activityObservers: List<UserActivityObserver> = emptyList(),
+    private val worn: WindowGate = WindowGate { true },
 ) : SampleSource {
 
     private val passiveClient = HealthServices.getClient(context).passiveMonitoringClient
@@ -42,13 +47,32 @@ class HealthServicesPassiveSampleSource(
             val (requested, unsupported) = bindings.partition { it.dataType in supported }
             Log.i(TAG, "Passive data types: ${requested.map { it.sensorType }}; unsupported: ${unsupported.map { it.sensorType }}")
 
+            val config = PassiveListenerConfig.Builder()
+                .setDataTypes(requested.map { it.dataType }.toSet())
+                .setShouldUserActivityInfoBeRequested(true)
+                .build()
+            val watchesHeartRate = requested.any { it.sensorType == SensorType.HEART_RATE }
+            var lastHeartRateAt = SystemClock.elapsedRealtime()
+            var lastReRegisterAt = 0L
             val callback = object : PassiveListenerCallback {
                 override fun onRegistrationFailed(throwable: Throwable) {
                     Log.w(TAG, "Passive listener registration failed", throwable)
                 }
 
                 override fun onNewDataPointsReceived(dataPoints: DataPointContainer) {
-                    toSamples(dataPoints, requested).forEach { trySend(it) }
+                    val samples = toSamples(dataPoints, requested)
+                    samples.forEach { trySend(it) }
+                    val now = SystemClock.elapsedRealtime()
+                    if (samples.any { it.type == SensorType.HEART_RATE }) {
+                        lastHeartRateAt = now
+                        return
+                    }
+                    val stalled = now - lastHeartRateAt > HEART_RATE_STALL_MS && now - lastReRegisterAt > HEART_RATE_STALL_MS
+                    if (watchesHeartRate && stalled && samples.any { it.type == SensorType.STEPS && it.value > 0 } && worn.isOpen()) {
+                        Log.w(TAG, "No passive heart rate for ${(now - lastHeartRateAt) / MILLIS_PER_MINUTE} min while worn and walking; registering again")
+                        lastReRegisterAt = now
+                        passiveClient.setPassiveListenerCallback(config, this)
+                    }
                 }
 
                 override fun onUserActivityInfoReceived(info: UserActivityInfo) {
@@ -56,10 +80,6 @@ class HealthServicesPassiveSampleSource(
                     activityObservers.forEach { it.onUserActivity(info) }
                 }
             }
-            val config = PassiveListenerConfig.Builder()
-                .setDataTypes(requested.map { it.dataType }.toSet())
-                .setShouldUserActivityInfoBeRequested(true)
-                .build()
             passiveClient.setPassiveListenerCallback(config, callback)
             awaitClose { passiveClient.clearPassiveListenerCallbackAsync() }
         }
@@ -71,6 +91,10 @@ class HealthServicesPassiveSampleSource(
 
     private companion object {
         const val TAG = "PassiveSampleSource"
+        const val MILLIS_PER_MINUTE = 60_000L
+
+        /** Passive heart rate arrives every 1-10 s while worn; 20 min without any while walking is a stalled registration. */
+        const val HEART_RATE_STALL_MS = 20 * MILLIS_PER_MINUTE
     }
 }
 

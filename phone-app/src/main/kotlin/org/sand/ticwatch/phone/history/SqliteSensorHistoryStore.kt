@@ -24,7 +24,7 @@ class SqliteSensorHistoryStore(
     private val projections: List<HistoryProjection>,
     private val zone: ZoneId,
 ) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries, SleepHistoryEraser,
-    SampleEraser, CloudOutbox<SensorHistoryRow>, RawHistoryHorizon {
+    SampleEraser, CloudOutbox<SensorHistoryRow>, RawHistoryHorizon, NewHistoryRows {
 
     override suspend fun recordPending(samples: List<SensorSample>, receivedAt: Instant): List<Long> =
         withContext(Dispatchers.IO) {
@@ -148,6 +148,23 @@ class SqliteSensorHistoryStore(
                 arrayOf(SensorTypeCodes.code(type).toString()),
             ).use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null }
         }.minOrNull()?.let(Instant::ofEpochMilli)
+    }
+
+    override suspend fun storedAfter(types: Set<SensorType>, afterId: Long): StoredRowsRange? = withContext(Dispatchers.IO) {
+        if (types.isEmpty()) return@withContext null
+        val db = database.readableDatabase
+        val newestId = DatabaseUtils.longForQuery(db, "SELECT COALESCE(MAX(${Table.ID}), 0) FROM ${Table.NAME}", null)
+        // Ids restart once the table has been emptied, so a position past the newest row means all rows are new.
+        val start = if (afterId > newestId) NewHistoryRows.BEFORE_FIRST_ROW else afterId
+        // NOT INDEXED: walk just the new rows by id, not every row of these types through the (type, recorded_at) index.
+        db.rawQuery(
+            "SELECT MAX(${Table.ID}), MIN(${Table.RECORDED_AT}), MAX(${Table.RECORDED_AT}) FROM ${Table.NAME} NOT INDEXED " +
+                "WHERE ${Table.ID} > ? AND ${Table.TYPE} IN (${types.joinToString(",") { "?" }})",
+            (listOf(start.toString()) + types.map { SensorTypeCodes.code(it).toString() }).toTypedArray(),
+        ).use { cursor ->
+            if (!cursor.moveToFirst() || cursor.isNull(0)) return@use null
+            StoredRowsRange(cursor.getLong(0), Instant.ofEpochMilli(cursor.getLong(1)), Instant.ofEpochMilli(cursor.getLong(2)))
+        }
     }
 
     override suspend fun purgeRollupsBefore(resolution: RollupResolution, cutoff: Instant): Int =

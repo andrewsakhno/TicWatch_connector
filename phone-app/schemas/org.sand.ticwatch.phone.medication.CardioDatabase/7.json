@@ -1,0 +1,394 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 7,
+    "identityHash": "9a8f269a73b55d66e8116234bdf11213",
+    "entities": [
+      {
+        "tableName": "medication_intake",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `dose` INTEGER NOT NULL, `taken_at` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "doseCode",
+            "columnName": "dose",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "takenAtMs",
+            "columnName": "taken_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medication_intake_taken_at",
+            "unique": false,
+            "columnNames": [
+              "taken_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medication_intake_taken_at` ON `${TABLE_NAME}` (`taken_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "ecg_recording",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `started_at` INTEGER NOT NULL, `finished_at` INTEGER NOT NULL, `beats` TEXT NOT NULL, `wave` TEXT NOT NULL DEFAULT '', `cloud_synced` INTEGER NOT NULL DEFAULT 0)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtMs",
+            "columnName": "started_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAtMs",
+            "columnName": "finished_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "beatsJson",
+            "columnName": "beats",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "waveJson",
+            "columnName": "wave",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "cloudSynced",
+            "columnName": "cloud_synced",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_ecg_recording_started_at",
+            "unique": false,
+            "columnNames": [
+              "started_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_ecg_recording_started_at` ON `${TABLE_NAME}` (`started_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "pulse_bp_pair",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `cuff_at` INTEGER NOT NULL, `systolic` REAL NOT NULL, `diastolic` REAL NOT NULL, `recorded_at` INTEGER NOT NULL, `heart_rate` REAL NOT NULL, `rise_time_ms` REAL NOT NULL, `half_width_ms` REAL NOT NULL, `perfusion_index` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cuffAtMs",
+            "columnName": "cuff_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "systolic",
+            "columnName": "systolic",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diastolic",
+            "columnName": "diastolic",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordedAtMs",
+            "columnName": "recorded_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heartRate",
+            "columnName": "heart_rate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "riseTimeMs",
+            "columnName": "rise_time_ms",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "halfWidthMs",
+            "columnName": "half_width_ms",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perfusionIndex",
+            "columnName": "perfusion_index",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_pulse_bp_pair_cuff_at",
+            "unique": true,
+            "columnNames": [
+              "cuff_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_pulse_bp_pair_cuff_at` ON `${TABLE_NAME}` (`cuff_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "deviation_episode",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `uid` TEXT NOT NULL, `direction` INTEGER NOT NULL, `state` INTEGER NOT NULL, `started_at` INTEGER NOT NULL, `ended_at` INTEGER NOT NULL, `peak_bpm` REAL NOT NULL, `detected_at` INTEGER NOT NULL, `asked_at` INTEGER, `answered_at` INTEGER, `discarded_at` INTEGER, `revision` INTEGER NOT NULL, `synced_revision` INTEGER NOT NULL, `minor` INTEGER NOT NULL DEFAULT 0, `intensity` INTEGER, `threshold_bpm` REAL, `baseline_bpm` REAL, `excess_bpm_minutes` REAL, `worn_since` INTEGER, `steps_before` REAL, `rmssd_before` REAL, `sleep_score` REAL, `fatigue_percent` REAL, `last_medication_at` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uid",
+            "columnName": "uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "directionCode",
+            "columnName": "direction",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stateCode",
+            "columnName": "state",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtMs",
+            "columnName": "started_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtMs",
+            "columnName": "ended_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakBpm",
+            "columnName": "peak_bpm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detectedAtMs",
+            "columnName": "detected_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "askedAtMs",
+            "columnName": "asked_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "answeredAtMs",
+            "columnName": "answered_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "discardedAtMs",
+            "columnName": "discarded_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedRevision",
+            "columnName": "synced_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "minor",
+            "columnName": "minor",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "intensityCode",
+            "columnName": "intensity",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "thresholdBpm",
+            "columnName": "threshold_bpm",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "baselineBpm",
+            "columnName": "baseline_bpm",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "excessBpmMinutes",
+            "columnName": "excess_bpm_minutes",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "wornSinceMs",
+            "columnName": "worn_since",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "stepsBefore",
+            "columnName": "steps_before",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "rmssdBefore",
+            "columnName": "rmssd_before",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "sleepScore",
+            "columnName": "sleep_score",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "fatiguePercent",
+            "columnName": "fatigue_percent",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "lastMedicationAtMs",
+            "columnName": "last_medication_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_deviation_episode_started_at",
+            "unique": false,
+            "columnNames": [
+              "started_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_deviation_episode_started_at` ON `${TABLE_NAME}` (`started_at`)"
+          },
+          {
+            "name": "index_deviation_episode_ended_at",
+            "unique": false,
+            "columnNames": [
+              "ended_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_deviation_episode_ended_at` ON `${TABLE_NAME}` (`ended_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "deviation_episode_reason",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episode_id` INTEGER NOT NULL, `reason` INTEGER NOT NULL, PRIMARY KEY(`episode_id`, `reason`), FOREIGN KEY(`episode_id`) REFERENCES `deviation_episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episode_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reasonCode",
+            "columnName": "reason",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episode_id",
+            "reason"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "deviation_episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episode_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '9a8f269a73b55d66e8116234bdf11213')"
+    ]
+  }
+}

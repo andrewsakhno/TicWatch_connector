@@ -47,3 +47,31 @@ data class RoutePointUpload(val points: List<RoutePointDto>)
 data class EcgRecordingDto(val startedAt: Long, val payload: JsonNode)
 
 data class EcgRecordingUpload(val recordings: List<EcgRecordingDto>)
+
+/** One heart rate deviation and its answer; a re-sent [uid] replaces the stored row. Fields after [discardedAt] are optional (V3). */
+data class DeviationEpisodeDto(
+    val uid: String,
+    val direction: Int,
+    val state: Int,
+    val startedAt: Long,
+    val endedAt: Long,
+    val peakBpm: Double,
+    val reasons: List<Int>,
+    val detectedAt: Long,
+    val askedAt: Long?,
+    val answeredAt: Long?,
+    val discardedAt: Long?,
+    val minor: Boolean = false,
+    val intensity: Int? = null,
+    val thresholdBpm: Double? = null,
+    val baselineBpm: Double? = null,
+    val excessBpmMinutes: Double? = null,
+    val wornSince: Long? = null,
+    val stepsBefore: Double? = null,
+    val rmssdBefore: Double? = null,
+    val sleepScore: Double? = null,
+    val fatiguePercent: Double? = null,
+    val lastMedicationAt: Long? = null,
+)
+
+data class DeviationEpisodeUpload(val episodes: List<DeviationEpisodeDto>)

@@ -11,6 +11,7 @@ import com.google.android.gms.wearable.Wearable
 import java.io.File
 import java.time.Duration
 import java.util.Locale
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,9 @@ import org.sand.ticwatch.phone.advisor.CardioReadinessSource
 import org.sand.ticwatch.phone.advisor.DiastolicPressureRule
 import org.sand.ticwatch.phone.advisor.FatigueRule
 import org.sand.ticwatch.phone.advisor.GeomagneticStormRule
+import org.sand.ticwatch.phone.advisor.AutonomicBalanceCalculator
+import org.sand.ticwatch.phone.advisor.HeartRateDropDetector
+import org.sand.ticwatch.phone.advisor.HistoryAutonomicBalanceSource
 import org.sand.ticwatch.phone.advisor.HistoryCardioReadinessSource
 import org.sand.ticwatch.phone.advisor.MedicationEffectCurve
 import org.sand.ticwatch.phone.advisor.MedicationProtectionRule
@@ -46,6 +50,8 @@ import org.sand.ticwatch.phone.datalayer.FileWatchScreenshotSink
 import org.sand.ticwatch.phone.datalayer.HealthScoresPublisher
 import org.sand.ticwatch.phone.datalayer.TransportWatchAppManager
 import org.sand.ticwatch.phone.datalayer.TransportWatchSyncRequester
+import org.sand.ticwatch.phone.datalayer.TransportWatchWorkoutCommands
+import org.sand.ticwatch.phone.datalayer.WatchWorkoutCommands
 import org.sand.ticwatch.phone.datalayer.LiveWatchSync
 import org.sand.ticwatch.phone.datalayer.WatchAppManager
 import org.sand.ticwatch.phone.datalayer.WatchBloodPressurePublisher
@@ -56,6 +62,12 @@ import org.sand.ticwatch.phone.datalayer.WatchReplies
 import org.sand.ticwatch.phone.datalayer.WatchScreenshotSink
 import org.sand.ticwatch.phone.datalayer.WatchStatePublisher
 import org.sand.ticwatch.phone.datalayer.WatchSyncRequester
+import org.sand.ticwatch.phone.deviation.DeviationAnswers
+import org.sand.ticwatch.phone.deviation.DeviationEpisodeLog
+import org.sand.ticwatch.phone.deviation.DeviationModule
+import org.sand.ticwatch.phone.datalayer.WatchHeartRateCorridorPublisher
+import org.sand.ticwatch.phone.datalayer.WatchBloodPressureCalibrationPublisher
+import org.sand.ticwatch.phone.deviation.DeviationScanWorker
 import org.sand.ticwatch.phone.ecg.CardiogramAnalyzer
 import org.sand.ticwatch.phone.ecg.CuffReadingSource
 import org.sand.ticwatch.phone.ecg.EcgAnalyzer
@@ -75,6 +87,7 @@ import org.sand.ticwatch.phone.ecg.RawPulseWaveAnalyzer
 import org.sand.ticwatch.phone.ecg.RidgePulseBloodPressureEstimator
 import org.sand.ticwatch.phone.ecg.RoomEcgRecordingLog
 import org.sand.ticwatch.phone.ecg.StoringEcgMessageReceiver
+import org.sand.ticwatch.phone.ecg.NightPulseBloodPressureRecorder
 import org.sand.ticwatch.phone.ecg.TransportEcgRequester
 import org.sand.ticwatch.phone.health.ActivityIntensityDeriver
 import org.sand.ticwatch.phone.health.AutoExerciseDeriver
@@ -122,6 +135,9 @@ import org.sand.ticwatch.phone.health.StepsCadenceDeriver
 import org.sand.ticwatch.phone.health.UserProfileStore
 import org.sand.ticwatch.phone.health.Vo2MaxEstimator
 import org.sand.ticwatch.phone.health.WristSignalsReader
+import org.sand.ticwatch.phone.health.WristCalibrationRestCheck
+import org.sand.ticwatch.phone.health.RestingHeartRateFloor
+import org.sand.ticwatch.phone.health.SystolicOffsetSource
 import org.sand.ticwatch.phone.history.AcknowledgingHealthRecordWriter
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfill
 import org.sand.ticwatch.phone.history.HistoryRetentionStore
@@ -197,6 +213,8 @@ import org.sand.ticwatch.phone.mcp.history.RollupResolutionSelector
 import org.sand.ticwatch.phone.mcp.history.SensorMetricCatalog
 import org.sand.ticwatch.phone.mcp.spaceweather.GetSpaceWeatherTool
 import org.sand.ticwatch.phone.mcp.watch.GetWatchLogsTool
+import org.sand.ticwatch.phone.mcp.watch.EndWorkoutTool
+import org.sand.ticwatch.phone.mcp.watch.StartWorkoutTool
 import org.sand.ticwatch.phone.mcp.watch.TriggerHealthSnapshotTool
 import org.sand.ticwatch.phone.medication.CardioAdvisor
 import org.sand.ticwatch.phone.medication.CardioDatabase
@@ -208,6 +226,7 @@ import org.sand.ticwatch.phone.medication.MedicationProtectionTracker
 import org.sand.ticwatch.phone.medication.RoomMedicationIntakeLog
 import org.sand.ticwatch.phone.report.AmbulatoryPressureCalculator
 import org.sand.ticwatch.phone.report.CalibrationAccuracyCalculator
+import org.sand.ticwatch.phone.report.CuffBiasSystolicOffset
 import org.sand.ticwatch.phone.report.CardioReportCalculators
 import org.sand.ticwatch.phone.report.CardioReportComposer
 import org.sand.ticwatch.phone.report.CardioReportFormatter
@@ -219,6 +238,9 @@ import org.sand.ticwatch.phone.report.MarkdownCardioReportRenderer
 import org.sand.ticwatch.phone.report.SleepReportCalculator
 import org.sand.ticwatch.phone.route.ExerciseRouteLog
 import org.sand.ticwatch.phone.route.ServiceWorkoutRouteRecorder
+import org.sand.ticwatch.phone.route.SharedPreferencesWatchWorkoutActivityStore
+import org.sand.ticwatch.phone.route.StateTrackingWorkoutRouteRecorder
+import org.sand.ticwatch.phone.route.WatchWorkoutActivityStore
 import org.sand.ticwatch.phone.route.WorkoutRouteRecorder
 import org.sand.ticwatch.phone.sleep.ApneaRiskClassifier
 import org.sand.ticwatch.phone.sleep.EveningVasodilationDetector
@@ -311,7 +333,11 @@ class AppContainer(context: Context) {
 
     private val sessionRoutePoints = SessionRoutePoints(exerciseRouteStore)
 
-    val workoutRouteRecorder: WorkoutRouteRecorder = ServiceWorkoutRouteRecorder(context)
+    /** The watch's workout state as last reported; the Metrics card shows it. */
+    val watchWorkoutActivity: WatchWorkoutActivityStore by lazy { SharedPreferencesWatchWorkoutActivityStore.get(context) }
+    val workoutRouteRecorder: WorkoutRouteRecorder by lazy {
+        StateTrackingWorkoutRouteRecorder(ServiceWorkoutRouteRecorder(context), watchWorkoutActivity)
+    }
 
     private val restingHeartRateState =
         context.getSharedPreferences(SharedPreferencesDailyMinimumStore.PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -413,6 +439,11 @@ class AppContainer(context: Context) {
 
     val fatigueHistory: FatigueHistory = RollupFatigueHistory(historyQueries, SensorHistoryModule.clock, SensorHistoryModule.zone)
 
+    /** Deviations screen: episodes and the user's explanations of them, which decide what may feed calibration. */
+    val deviationEpisodeLog: DeviationEpisodeLog = DeviationModule.log(context)
+
+    val deviationAnswers = DeviationAnswers(deviationEpisodeLog, DeviationModule.asker(context), SensorHistoryModule.clock) { cloudSyncTrigger.publish() }
+
     val sensorDataSyncWorker: SensorDataSyncWorker = SensorDataSyncWorker(
         healthRecordWriter = acknowledgingHealthRecordWriter,
         derivers = listOf(
@@ -481,25 +512,40 @@ class AppContainer(context: Context) {
     /** Fired after a blood pressure reading was saved or deleted (dashboard, watch, cuff). */
     val bloodPressureChanges = DataChangeSignal()
 
+    private val bloodPressureLog = BloodPressureLog(
+        writer = acknowledgingHealthRecordWriter,
+        samples = sampleWindowReader,
+        historyEraser = sensorHistoryStore,
+        recordEraser = HealthConnectBloodPressureEraser(HealthConnectClient.getOrCreate(context)),
+        // Resolved on call: the publisher reads back through this monitor.
+        listener = {
+            bloodPressurePublisher.onLogChanged()
+            advisorWidgetRefresher.publish()
+            cloudSyncTrigger.publish()
+            cardioReadinessPublisher.publish()
+            bloodPressureChanges.notifyChanged()
+        },
+    )
+
     /** Dashboard "Blood Pressure" tab and the get_blood_pressure MCP tool. */
+    private val wristSignals = WristSignalsReader(sampleWindowReader)
+
+    private val bloodPressureSystolicOffset: SystolicOffsetSource =
+        CuffBiasSystolicOffset(bloodPressureLog, CalibrationAccuracyCalculator(), profileStore)
+
+    /** The lower edge of both personal resting corridors: a pulse at or above it is ordinary rest. */
+    private val restingHeartRateFloor = RestingHeartRateFloor { at ->
+        DeviationModule.corridors(context).corridors(at).let { minOf(it.awakeRest.lowBpm, it.sleep.lowBpm) }
+    }
+
     val bloodPressureMonitor = BloodPressureMonitor(
         calibrations = profileStore,
-        signals = WristSignalsReader(sampleWindowReader),
+        signals = wristSignals,
         estimator = BloodPressureEstimator(),
-        log = BloodPressureLog(
-            writer = acknowledgingHealthRecordWriter,
-            samples = sampleWindowReader,
-            historyEraser = sensorHistoryStore,
-            recordEraser = HealthConnectBloodPressureEraser(HealthConnectClient.getOrCreate(context)),
-            // Resolved on call: the publisher reads back through this monitor.
-            listener = {
-                bloodPressurePublisher.onLogChanged()
-                advisorWidgetRefresher.publish()
-                cloudSyncTrigger.publish()
-                cardioReadinessPublisher.publish()
-                bloodPressureChanges.notifyChanged()
-            },
-        ),
+        systolicOffset = bloodPressureSystolicOffset,
+        restCheck = WristCalibrationRestCheck(wristSignals),
+        restingFloor = restingHeartRateFloor,
+        log = bloodPressureLog,
         clock = SensorHistoryModule.clock,
     )
 
@@ -528,8 +574,8 @@ class AppContainer(context: Context) {
                 bloodPressureMonitor,
                 cuffStatusStore,
                 watchSyncRequester,
-                // A strip right after each live cuff reading pairs it for the pulse-wave blood pressure model.
-                followUp = { ecgSessions.start(ecgRequester, EcgStore.RECORDING_TIMEOUT) },
+                // A strip right after each live cuff reading pairs it for the pulse-wave blood pressure model; the watch asks first.
+                followUp = { ecgSessions.start(promptedEcgRequester, EcgStore.PROMPTED_RECORDING_TIMEOUT) },
                 scope,
                 SensorHistoryModule.clock,
                 SensorHistoryModule.zone,
@@ -665,10 +711,25 @@ class AppContainer(context: Context) {
     val watchSnapshotRequester: WatchSnapshotRequester = TransportWatchSnapshotRequester(deviceLinkTransport, WatchReplies)
     val snapshotResults: SnapshotResultLog = ProcessSnapshotResults
 
+    /** Starts/ends the watch's workout: the Metrics tab's card and the MCP tools. */
+    val watchWorkoutCommands: WatchWorkoutCommands = TransportWatchWorkoutCommands(
+        deviceLinkTransport, WatchReplies, CoroutineScope(SupervisorJob() + Dispatchers.IO), WATCH_WORKOUT_REPLY_TIMEOUT,
+    )
+
     val ecgRequester: EcgRequester = TransportEcgRequester(deviceLinkTransport, WatchReplies)
+    private val promptedEcgRequester: EcgRequester = TransportEcgRequester(deviceLinkTransport, WatchReplies, DataLayerPaths.MESSAGE_ECG_PROMPT)
     val ecgSessions: EcgSessionLog = ProcessEcgSessions
     val ecgMessageReceiver: EcgMessageReceiver by lazy {
-        StoringEcgMessageReceiver(ecgRecordingLog, ecgSessions, WatchReplies, listOf(pulseBloodPressureCalibrator, EcgRecordingStoredListener { cloudSyncTrigger.publish() }))
+        StoringEcgMessageReceiver(
+            ecgRecordingLog,
+            ecgSessions,
+            WatchReplies,
+            listOf(
+                pulseBloodPressureCalibrator,
+                NightPulseBloodPressureRecorder(cardiogramAnalyzer, pulseBloodPressureEstimator, acknowledgingHealthRecordWriter),
+                EcgRecordingStoredListener { cloudSyncTrigger.publish() },
+            ),
+        )
     }
 
     /** Rhythm refined by the raw pulse wave: perfusion, breathing, pulse shape, premature beats checked by their pulse. */
@@ -741,6 +802,10 @@ class AppContainer(context: Context) {
             forecaster = ReadinessForecaster(engine, MedicationEffectCurve(), SensorHistoryModule.zone),
             protection = medicationProtectionTracker,
             recovery = sleepAdvancedInsights,
+            autonomic = HistoryAutonomicBalanceSource(
+                historyQueries, circadianNorm, DeviationModule.log(appContext), HeartRateDropDetector(), AutonomicBalanceCalculator(),
+                SensorHistoryModule.zone,
+            ),
         )
     }
 
@@ -765,6 +830,7 @@ class AppContainer(context: Context) {
         listOf(
             WatchStatePublisher(historyChanges::notifyChanged),
             cloudSyncTrigger,
+            WatchStatePublisher { DeviationScanWorker.requestSoon(context) },
             advisorWidgetRefresher,
             CoalescingWatchStatePublisher(
                 publishers = listOf(
@@ -773,6 +839,14 @@ class AppContainer(context: Context) {
                     cardioReadinessPublisher,
                     bloodPressurePublisher,
                     SpaceWeatherModule.publisher(spaceWeatherStore, deviceLinkTransport, appTextResolver),
+                    WatchHeartRateCorridorPublisher(
+                        DeviationModule.corridors(context), SensorHistoryModule.clock, deviceLinkTransport,
+                        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                    ),
+                    WatchBloodPressureCalibrationPublisher(
+                        profileStore, bloodPressureSystolicOffset, SensorHistoryModule.clock, deviceLinkTransport,
+                        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                    ),
                 ),
                 linkHold = TransportFactory.linkHold,
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
@@ -814,10 +888,12 @@ class AppContainer(context: Context) {
             GetSleepScoreTool(historyQueries, sleepScores, arguments, format),
             GetHrvStatusTool(hrvStatusHistory, arguments, format, SensorHistoryModule.zone),
             GetTrainingLoadTool(trainingLoadHistory, arguments, format, SensorHistoryModule.zone),
-            GetBloodPressureTool(bloodPressureMonitor, arguments, format),
+            GetBloodPressureTool(bloodPressureMonitor, sensorHistoryStore, CalibrationAccuracyCalculator(), arguments, format),
             GetDeliveryStatusTool(sensorHistoryStore, arguments, format),
             GetWatchLogsTool(deviceLinkTransport, WatchReplies, arguments),
             TriggerHealthSnapshotTool(watchSnapshotRequester, format),
+            StartWorkoutTool(watchWorkoutCommands),
+            EndWorkoutTool(watchWorkoutCommands),
             GetSpaceWeatherTool(spaceWeatherStore, SensorHistoryModule.zone, mcpTextResolver),
             GetCardioReadinessTool(cardioReadiness, format),
         )
@@ -831,6 +907,7 @@ class AppContainer(context: Context) {
         const val FATIGUE_INDEX_STATE_PREFS = "fatigue_index_state"
         const val MAX_ORPHAN_CHECK_SESSIONS = 64
         const val CARDIO_READINESS_PUBLISHER_TAG = "ReadinessPublisher"
+        val WATCH_WORKOUT_REPLY_TIMEOUT = 1.minutes
 
         /** Unchanged readiness is re-sent this often: inside the tile's 30 min freshness, and the watch flushes every 30 min. */
         val CARDIO_READINESS_REFRESH: Duration = Duration.ofMinutes(25)

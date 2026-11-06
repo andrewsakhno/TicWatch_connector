@@ -1,6 +1,10 @@
 package org.sand.ticwatch.phone
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -50,6 +54,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.ZoneId
@@ -59,6 +64,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import org.sand.ticwatch.phone.advisor.Advice
 import org.sand.ticwatch.phone.advisor.AdvisorIntent
+import org.sand.ticwatch.phone.advisor.AutonomicBalance
+import org.sand.ticwatch.phone.advisor.AutonomicComponent
+import org.sand.ticwatch.phone.advisor.AutonomicTone
 import org.sand.ticwatch.phone.advisor.CardioAdvisorStore
 import org.sand.ticwatch.phone.advisor.CardioReadinessSource
 import org.sand.ticwatch.phone.advisor.ReadinessAssessment
@@ -82,9 +90,13 @@ private const val MAX_SCORE = ReadinessGaugeArc.MAX_SCORE
 private const val GAUGE_ANIMATION_MS = 900
 private const val ADVICE_TINT_ALPHA = 0.18f
 private const val MISSING_VALUE = "--"
-private val GAUGE_SIZE = 200.dp
-private val GAUGE_STROKE = 14.dp
-private val GAUGE_RING_GAP = 5.dp
+private const val PULSE_MS = 800
+private const val PULSE_MIN_ALPHA = 0.35f
+private val GAUGE_SIZE = 220.dp
+private val GAUGE_STROKE = 12.dp
+private val GAUGE_RING_GAP = 4.dp
+private val OUTER_SCORE_SIZE = 32.sp
+private val INNER_SCORE_SIZE = 22.sp
 /** Material's default is 80 dp; the pull is damped by half, so this takes about 280 dp of finger travel. */
 private val PULL_REFRESH_THRESHOLD = 140.dp
 private val HOUR_CELL_WIDTH = 44.dp
@@ -114,8 +126,9 @@ internal fun CardioAdvisorScreen(source: CardioReadinessSource, changes: Flow<*>
             if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             state.error?.let { Text(text = stringResource(R.string.could_not_load, it), color = MaterialTheme.colorScheme.error) }
             state.readiness?.let { readiness ->
-                ReadinessGaugeCard(readiness.assessment, readiness.fatigue)
+                ReadinessGaugeCard(readiness.assessment, readiness.fatigue, readiness.autonomic)
                 AdviceCard(readiness.assessment.advice, readiness.assessment.state)
+                AutonomicToneCard(readiness.autonomic)
                 ProtectionCard(readiness.medication, readiness.recovery)
                 VitalsCard(readiness.vitals)
                 FactorsCard(readiness.assessment, state.factorsExpanded) { store.dispatch(AdvisorIntent.ToggleFactors) }
@@ -165,17 +178,32 @@ private fun SwipeDownToRefresh(refresh: suspend () -> Unit, content: @Composable
     }
 }
 
-/** One gauge with two rings: cardio readiness outside, load readiness (the inverse of the fatigue index, itemised below) inside. */
+/**
+ * One gauge with three rings: cardio readiness outside, load readiness (the inverse of the fatigue index, itemised below) in
+ * the middle, nervous tone inside - pulsing amber while a post-stress window is active.
+ */
 @Composable
-private fun ReadinessGaugeCard(assessment: ReadinessAssessment, fatigue: FatigueIndex?) = SectionCard(stringResource(R.string.card_readiness_gauge)) {
+private fun ReadinessGaugeCard(assessment: ReadinessAssessment, fatigue: FatigueIndex?, autonomic: AutonomicBalance?) = SectionCard(stringResource(R.string.card_readiness_gauge)) {
     val cardioColor = assessment.state.color()
     val loadColor = fatigue?.level.gaugeColor()
-    DualRingGauge(GaugeRing(assessment.score, cardioColor), GaugeRing(fatigue?.loadReadinessPercent, loadColor))
+    val autonomicColor = autonomic?.tone.gaugeColor()
+    RingGauge(
+        listOf(
+            GaugeRing(assessment.score, cardioColor),
+            GaugeRing(fatigue?.loadReadinessPercent, loadColor),
+            GaugeRing(autonomic?.percent, autonomicColor, pulsing = autonomic?.postStressActive == true),
+        ),
+    )
     RingCaption(stringResource(R.string.ring_cardio_value, assessment.score, stringResource(assessment.state.label)), cardioColor)
     RingCaption(
         fatigue?.let { stringResource(R.string.ring_load_value, it.loadReadinessPercent, stringResource(it.level.label)) }
             ?: stringResource(R.string.ring_load_no_data),
         loadColor,
+    )
+    RingCaption(
+        autonomic?.let { stringResource(R.string.ring_autonomic_value, it.percent, stringResource(it.tone.label)) }
+            ?: stringResource(R.string.ring_autonomic_no_data),
+        autonomicColor,
     )
     fatigue?.let { index ->
         FatigueComponent.entries.forEach { component ->
@@ -186,27 +214,43 @@ private fun ReadinessGaugeCard(assessment: ReadinessAssessment, fatigue: Fatigue
 
 private fun FatigueLevel?.gaugeColor(): Color = this?.let { Color(ReadinessPalette.argb(it)) } ?: Color.LightGray
 
-/** A 0..100 ring of the gauge; a null [score] leaves it empty. */
-private data class GaugeRing(val score: Int?, val color: Color)
+private fun AutonomicTone?.gaugeColor(): Color = this?.let { Color(ReadinessPalette.argb(it)) } ?: Color.LightGray
 
-/** Two concentric 0..100 arcs with their scores in the middle, [outer]'s on top. */
+/** A 0..100 ring of the gauge; a null [score] leaves it empty, [pulsing] makes it breathe to draw attention. */
+private data class GaugeRing(val score: Int?, val color: Color, val pulsing: Boolean = false)
+
+/** Concentric 0..100 arcs, outermost first, with their scores in the middle, the outer one's on top and largest. */
 @Composable
-private fun DualRingGauge(outer: GaugeRing, inner: GaugeRing) {
-    val outerProgress = animatedProgress(outer.score)
-    val innerProgress = animatedProgress(inner.score)
+private fun RingGauge(rings: List<GaugeRing>) {
+    val progress = rings.map { animatedProgress(it.score) }
+    val pulse = pulseAlpha()
     val track = MaterialTheme.colorScheme.surfaceVariant
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(GAUGE_SIZE)) {
             val strokeWidth = GAUGE_STROKE.toPx()
-            val outerInset = strokeWidth / 2
-            drawRing(outer.color, track, outerProgress, outerInset, strokeWidth)
-            drawRing(inner.color, track, innerProgress, outerInset + strokeWidth + GAUGE_RING_GAP.toPx(), strokeWidth)
+            val step = strokeWidth + GAUGE_RING_GAP.toPx()
+            rings.forEachIndexed { index, ring ->
+                val color = if (ring.pulsing) ring.color.copy(alpha = pulse) else ring.color
+                drawRing(color, track, progress[index], strokeWidth / 2 + index * step, strokeWidth)
+            }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            RingScore(outer, outerProgress)
-            RingScore(inner, innerProgress)
+            rings.forEachIndexed { index, ring ->
+                RingScore(ring, progress[index], if (index == 0) OUTER_SCORE_SIZE else INNER_SCORE_SIZE)
+            }
         }
     }
+}
+
+@Composable
+private fun pulseAlpha(): Float {
+    val alpha by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 1f,
+        targetValue = PULSE_MIN_ALPHA,
+        animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse),
+        label = "pulseAlpha",
+    )
+    return alpha
 }
 
 @Composable
@@ -228,11 +272,11 @@ private fun DrawScope.drawRing(color: Color, track: Color, progress: Float, inse
 }
 
 @Composable
-private fun RingScore(ring: GaugeRing, progress: Float) {
+private fun RingScore(ring: GaugeRing, progress: Float, fontSize: TextUnit) {
     Text(
         text = if (ring.score == null) MISSING_VALUE else stringResource(R.string.percent_value, (progress * MAX_SCORE).roundToInt()),
         color = ring.color,
-        fontSize = 32.sp,
+        fontSize = fontSize,
         fontWeight = FontWeight.Bold,
     )
 }
@@ -263,6 +307,54 @@ private fun AdviceCard(advice: Advice, state: ReadinessState) {
             }
         }
     }
+}
+
+/**
+ * The post-stress phase spelled out: tone, what opened the window and until when it lasts, the components, and - while the
+ * tail is active - the breathing pause and the advice to hold off conversations and load.
+ */
+@Composable
+private fun AutonomicToneCard(autonomic: AutonomicBalance?) {
+    autonomic ?: return
+    val tone = autonomic.tone
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = tone.gaugeColor().copy(alpha = ADVICE_TINT_ALPHA)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = stringResource(R.string.detail_line, stringResource(R.string.card_autonomic), stringResource(tone.label)),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            tone.explanation()?.let { Text(text = stringResource(it), style = MaterialTheme.typography.bodyMedium) }
+            if (autonomic.postStressActive) {
+                POST_STRESS_ADVICE.forEach {
+                    Text(text = stringResource(R.string.bullet, stringResource(it)), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            Text(
+                text = autonomic.window?.let {
+                    stringResource(R.string.autonomic_window, stringResource(it.trigger.label), formatTime(it.triggerEndedAt), formatTime(it.endsAt))
+                } ?: stringResource(R.string.autonomic_no_window),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (autonomic.window != null && autonomic.vulnerability > 1.0) {
+                Text(text = stringResource(R.string.autonomic_vulnerability, autonomic.vulnerability), style = MaterialTheme.typography.bodySmall)
+            }
+            AutonomicComponent.entries.forEach { component ->
+                Detail(stringResource(component.label), autonomic.components[component]?.let(::formatShare))
+            }
+        }
+    }
+}
+
+private val POST_STRESS_ADVICE = listOf(R.string.advice_breathing_pause, R.string.advice_pause_before_talks, R.string.advice_pause_before_load)
+
+private fun AutonomicTone.explanation(): Int? = when (this) {
+    AutonomicTone.POST_STRESS -> R.string.autonomic_post_stress_explanation
+    AutonomicTone.RECOVERING -> R.string.autonomic_recovering_explanation
+    AutonomicTone.STRAINED -> R.string.autonomic_strained_explanation
+    AutonomicTone.CALM -> null
 }
 
 @Composable

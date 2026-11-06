@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * awake for their delivery anyway) or every [flushInterval] on [scheduler] - an alarm, since a
  * coroutine `delay` never elapses while the watch is suspended. Each flush drains the whole
  * backlog under [awakeRunner], so the device can't suspend between connect and acknowledgement.
+ * A sample [flushesAtOnce] accepts (a finished sleep session: the phone's night derivers wait for it) goes out right away.
  * [companions] (small status messages, e.g. the battery level) go out at the end of every flush.
  *
  * While [liveSync] is active (the phone app is on screen) it flushes every [LIVE_FLUSH_INTERVAL] instead, on a coroutine
@@ -52,6 +53,7 @@ class SensorSyncSender(
     private val awakeRunner: AwakeRunner,
     private val flushInterval: Duration,
     private val flushThreshold: Int,
+    private val flushesAtOnce: (SensorSample) -> Boolean,
     private val companions: List<FlushCompanion> = emptyList(),
     private val liveSync: LiveSyncSignal,
     private val liveLink: LinkHold,
@@ -65,7 +67,7 @@ class SensorSyncSender(
             launch {
                 samples.buffer(capacity = 64).collect { sample ->
                     pendingSamples.enqueue(sample)
-                    if (enqueuedSinceFlush.incrementAndGet() >= flushThreshold) flushPending()
+                    if (enqueuedSinceFlush.incrementAndGet() >= flushThreshold || flushesAtOnce(sample)) flushPending()
                 }
             }
             while (true) {

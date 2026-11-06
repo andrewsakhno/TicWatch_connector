@@ -57,6 +57,7 @@ import kotlinx.coroutines.delay
 import org.sand.ticwatch.phone.dashboard.GaugeColors
 import org.sand.ticwatch.phone.dashboard.TrendChart
 import org.sand.ticwatch.phone.dashboard.TrendSeries
+import org.sand.ticwatch.phone.ecg.EcgRecordingKind
 import org.sand.ticwatch.phone.ecg.CardiogramAnalyzer
 import org.sand.ticwatch.phone.ecg.EcgAnalysis
 import org.sand.ticwatch.phone.ecg.EcgBeat
@@ -98,7 +99,8 @@ internal fun EcgCard(dependencies: EcgDependencies) {
     val state by store.state.collectAsState()
     var isListOpen by remember { mutableStateOf(false) }
     val live = state.live
-    val latest = state.recordings?.firstOrNull()
+    // Night pulse strips come every 20 min in sleep; the card keeps showing the last requested strip.
+    val latest = state.recordings?.firstOrNull { it.recording.kind == EcgRecordingKind.REQUESTED }
     val recording = live?.takeIf { it.phase == EcgSessionPhase.RECORDING }
     val isRecording = recording != null
 
@@ -382,7 +384,7 @@ private fun EcgRecordingsDialog(recordings: List<AnalyzedEcg>, trends: EcgTrends
                     LazyColumn {
                         items(recordings, key = { it.recording.id }) { item ->
                             Column(modifier = Modifier.fillMaxWidth().clickable { selectedId = item.recording.id }.padding(vertical = 12.dp)) {
-                                Text(text = formatTime(item.recording.startedAt), style = MaterialTheme.typography.titleSmall)
+                                Text(text = stripTitle(item.recording), style = MaterialTheme.typography.titleSmall)
                                 Text(
                                     text = listOfNotNull(
                                         item.analysis.meanHeartRate?.let { stringResource(R.string.bpm_int, it.roundToInt()) },
@@ -402,7 +404,7 @@ private fun EcgRecordingsDialog(recordings: List<AnalyzedEcg>, trends: EcgTrends
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = formatTime(selected.recording.startedAt), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        Text(text = stripTitle(selected.recording), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                         TextButton(onClick = { selectedId = null }) { Text(text = stringResource(R.string.back)) }
                     }
                     RecordedEcgPaper(selected.recording, selected.analysis)
@@ -499,3 +501,10 @@ private val TREND_COLORS = mapOf(
     EcgTrendMetric.SDNN to Color(0xFFFF7043),
     EcgTrendMetric.PNN50 to Color(0xFF26A69A),
 )
+
+/** The strip's time, marked when the watch recorded it in sleep for the pulse-wave blood pressure. */
+@Composable
+private fun stripTitle(recording: EcgRecording): String = when (recording.kind) {
+    EcgRecordingKind.REQUESTED -> formatTime(recording.startedAt)
+    EcgRecordingKind.NIGHT_PULSE -> stringResource(R.string.ecg_night_pulse_title, formatTime(recording.startedAt))
+}

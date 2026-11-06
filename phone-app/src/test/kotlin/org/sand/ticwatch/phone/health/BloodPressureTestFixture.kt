@@ -89,6 +89,9 @@ class BloodPressureTestFixture(start: Instant) {
         calibrations = calibrations,
         signals = WristSignalsReader(SampleWindowReader(history)),
         estimator = BloodPressureEstimator(),
+        systolicOffset = { 0.0 },
+        restCheck = { _, _ -> null },
+        restingFloor = { null },
         log = BloodPressureLog(history, SampleWindowReader(history), history, {}, {}),
         clock = clock,
     )

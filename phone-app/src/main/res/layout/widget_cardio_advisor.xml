@@ -36,7 +36,7 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/advisor_widget_text"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -46,7 +46,17 @@
                     android:includeFontPadding="false"
                     android:maxLines="1"
                     android:textColor="@color/advisor_widget_text"
-                    android:textSize="13sp"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/advisor_widget_autonomic_score"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@color/advisor_widget_text"
+                    android:textSize="10sp"
                     android:textStyle="bold" />
             </LinearLayout>
         </FrameLayout>

@@ -7,11 +7,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.StringRes
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -22,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -38,9 +42,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import androidx.wear.compose.material.Button
+import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
@@ -61,23 +68,78 @@ class EcgCaptureActivity : ComponentActivity() {
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContent { MaterialTheme { EcgCaptureContent() } }
+        setContent { MaterialTheme { EcgCaptureContent(onPromptShown = ::buzz) } }
         lifecycleScope.launch {
-            EcgCaptureState.current.first { it == null || it.phase == EcgCapturePhase.FINISHED }
-            delay(OUTCOME_SHOWN_MS)
+            val ended = EcgCaptureState.current.first { it == null || it.phase == EcgCapturePhase.FINISHED }
+            if (ended != null) delay(OUTCOME_SHOWN_MS)
             finish()
         }
     }
 
+    override fun onDestroy() {
+        // Swiping the prompt away means "later"; the controller shouldn't wait for an answer from a closed screen.
+        if (isFinishing) EcgCaptureState.answerPrompt(accepted = false)
+        super.onDestroy()
+    }
+
+    private fun buzz() {
+        getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(PROMPT_BUZZ_MS, NO_REPEAT))
+    }
+
     private companion object {
         const val OUTCOME_SHOWN_MS = 3_000L
+        const val NO_REPEAT = -1
+        val PROMPT_BUZZ_MS = longArrayOf(0, 300, 150, 300)
+    }
+}
+
+/** Asks the wearer to sit down before a recording they didn't start themselves. */
+@Composable
+private fun EcgPrompt(onShown: () -> Unit) {
+    LaunchedEffect(Unit) { onShown() }
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            BeatingHeart(bpm = null, sizeDp = PROMPT_HEART_DP)
+            Text(
+                text = stringResource(R.string.ecg_prompt_title),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.display3,
+                fontWeight = FontWeight.Bold,
+                color = HEART,
+            )
+            Text(
+                text = stringResource(R.string.ecg_prompt_text),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.title3,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { EcgCaptureState.answerPrompt(accepted = false) },
+                    modifier = Modifier.size(PROMPT_BUTTON_DP.dp),
+                    colors = ButtonDefaults.secondaryButtonColors(),
+                ) {
+                    Text(text = stringResource(R.string.ecg_prompt_later), style = MaterialTheme.typography.caption1)
+                }
+                Button(
+                    onClick = { EcgCaptureState.answerPrompt(accepted = true) },
+                    modifier = Modifier.size(PROMPT_BUTTON_DP.dp),
+                    colors = ButtonDefaults.primaryButtonColors(backgroundColor = CONFIRM, contentColor = Color.Black),
+                ) {
+                    Text(text = stringResource(R.string.ecg_prompt_ok), style = MaterialTheme.typography.title2, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun EcgCaptureContent() {
+private fun EcgCaptureContent(onPromptShown: () -> Unit) {
     val progress by EcgCaptureState.current.collectAsState()
     val current = progress ?: return
+    if (current.phase == EcgCapturePhase.AWAITING_CONFIRMATION) {
+        EcgPrompt(onPromptShown)
+        return
+    }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -109,6 +171,7 @@ private fun EcgCaptureContent() {
 
 @Composable
 private fun statusLine(progress: EcgCaptureProgress, elapsedMs: Long): String = when (progress.phase) {
+    EcgCapturePhase.AWAITING_CONFIRMATION -> stringResource(R.string.ecg_prompt_title)
     EcgCapturePhase.FINDING_PULSE -> stringResource(R.string.finding_pulse)
     EcgCapturePhase.RECORDING -> {
         val left = (progress.recordingMs - elapsedMs) / MS_PER_SECOND
@@ -120,7 +183,7 @@ private fun statusLine(progress: EcgCaptureProgress, elapsedMs: Long): String = 
 
 /** Lub-dub at [bpm] (a resting pace until measured); still once [bpm] is null after the recording. */
 @Composable
-private fun BeatingHeart(bpm: Int?) {
+private fun BeatingHeart(bpm: Int?, sizeDp: Int = HEART_DP) {
     val periodMs = (MS_PER_MINUTE / (bpm ?: RESTING_BPM)).toInt()
     val transition = rememberInfiniteTransition(label = "heart")
     val phase by transition.animateFloat(
@@ -129,7 +192,7 @@ private fun BeatingHeart(bpm: Int?) {
         animationSpec = infiniteRepeatable(tween(durationMillis = periodMs, easing = LinearEasing)),
         label = "beat",
     )
-    Canvas(modifier = Modifier.size(HEART_DP.dp)) {
+    Canvas(modifier = Modifier.size(sizeDp.dp)) {
         drawHeart(center, size.minDimension * HEART_FILL * heartScale(phase))
     }
 }
@@ -156,24 +219,28 @@ private fun DrawScope.drawHeart(center: Offset, size: Float) {
  */
 class ActivityEcgCaptureScreen(private val context: Context) : EcgCaptureScreen {
 
-    override fun show() {
+    override fun show() = open(R.string.ecg_notification_title, R.string.ecg_notification_text)
+
+    override fun showPrompt() = open(R.string.ecg_prompt_title, R.string.ecg_prompt_text)
+
+    private fun open(@StringRes title: Int, @StringRes text: Int) {
         val intent = Intent(context, EcgCaptureActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }.onFailure { Log.w(TAG, "Direct start of the recording screen failed", it) }
         if (Settings.canDrawOverlays(context)) return
-        runCatching { postFullScreen(intent) }.onFailure { Log.w(TAG, "Recording screen notification failed", it) }
+        runCatching { postFullScreen(intent, title, text) }.onFailure { Log.w(TAG, "Recording screen notification failed", it) }
     }
 
     override fun hide() {
         context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 
-    private fun postFullScreen(intent: Intent) {
+    private fun postFullScreen(intent: Intent, @StringRes title: Int, @StringRes text: Int) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, context.getString(R.string.ecg_channel), NotificationManager.IMPORTANCE_HIGH))
         val pendingIntent = PendingIntent.getActivity(context, NOTIFICATION_ID, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = Notification.Builder(context, CHANNEL_ID)
-            .setContentTitle(context.getString(R.string.ecg_notification_title))
-            .setContentText(context.getString(R.string.ecg_notification_text))
+            .setContentTitle(context.getString(title))
+            .setContentText(context.getString(text))
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setCategory(Notification.CATEGORY_PROGRESS)
             .setContentIntent(pendingIntent)
@@ -196,6 +263,8 @@ private const val MS_PER_MINUTE = 60_000.0
 private const val RESTING_BPM = 70
 private const val RING_WIDTH = 6
 private const val HEART_DP = 72
+private const val PROMPT_HEART_DP = 44
+private const val PROMPT_BUTTON_DP = 60
 private const val HEART_FILL = 0.4f
 private const val HEART_LOBE = 0.75f
 private const val HEART_NOTCH = 0.4f
@@ -205,3 +274,4 @@ private const val SWELL_WIDTH = 0.1f
 private const val LUB_SWELL = 0.25f
 private const val DUB_SWELL = 0.12f
 private val HEART = Color(0xFFE53935)
+private val CONFIRM = Color(0xFF66BB6A)

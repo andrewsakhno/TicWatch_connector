@@ -3,6 +3,7 @@ package ticwatch
 import (
 	"context"
 	"embed"
+	"html/template"
 	"io/fs"
 	"net/http"
 	"time"
@@ -51,17 +52,26 @@ type EcgRecordingStore interface {
 	Upsert(ctx context.Context, deviceID string, recordings []EcgRecording) (int, error)
 }
 
+// DeviationEpisodeStore keeps heart rate deviation episodes and their answers.
+type DeviationEpisodeStore interface {
+	Upsert(ctx context.Context, deviceID string, episodes []DeviationEpisode) (int, error)
+}
+
 // App is the TicWatch app of the platform.
 type App struct {
-	samples       SampleStore
-	routePoints   RoutePointStore
-	ecgRecordings EcgRecordingStore
-	now           func() time.Time
+	samples           SampleStore
+	routePoints       RoutePointStore
+	ecgRecordings     EcgRecordingStore
+	deviationEpisodes DeviationEpisodeStore
+	stats             HistoryStatsStore
+	statsTemplate     *template.Template
+	now               func() time.Time
 }
 
 // New wires the app to its stores.
-func New(samples SampleStore, routePoints RoutePointStore, ecgRecordings EcgRecordingStore, now func() time.Time) *App {
-	return &App{samples: samples, routePoints: routePoints, ecgRecordings: ecgRecordings, now: now}
+func New(samples SampleStore, routePoints RoutePointStore, ecgRecordings EcgRecordingStore, deviationEpisodes DeviationEpisodeStore, stats HistoryStatsStore, now func() time.Time) *App {
+	return &App{samples: samples, routePoints: routePoints, ecgRecordings: ecgRecordings, deviationEpisodes: deviationEpisodes,
+		stats: stats, statsTemplate: newStatsPage(), now: now}
 }
 
 // Name implements app.App.
@@ -77,17 +87,20 @@ func (a *App) Migrations() migrate.Source {
 }
 
 // PublicPaths implements app.App.
-func (a *App) PublicPaths() []string { return []string{PingPath} }
+// The stats page needs no key either: the server is only reachable on the home LAN.
+func (a *App) PublicPaths() []string { return []string{PingPath, StatsPath} }
 
 // RegisterRoutes implements app.App.
 func (a *App) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(get(PingPath), httpx.Handle(a.ping))
+	mux.HandleFunc(get(StatsPath), httpx.Handle(a.statsPage))
 	mux.HandleFunc(post(SamplesPath), httpx.Handle(handleUpload(a.storeSamples)))
 	mux.HandleFunc(get(SamplesPath), httpx.Handle(a.findSamples))
 	mux.HandleFunc(get(RollupsPath), httpx.Handle(a.rollups))
 	mux.HandleFunc(post(RoutePointsPath), httpx.Handle(handleUpload(a.storeRoutePoints)))
 	mux.HandleFunc(get(RoutePointsPath), httpx.Handle(a.findRoutePoints))
 	mux.HandleFunc(post(EcgRecordingsPath), httpx.Handle(handleUpload(a.storeEcgRecordings)))
+	mux.HandleFunc(post(DeviationEpisodesPath), httpx.Handle(handleUpload(a.storeDeviationEpisodes)))
 }
 
 func get(path string) string  { return http.MethodGet + " " + path }

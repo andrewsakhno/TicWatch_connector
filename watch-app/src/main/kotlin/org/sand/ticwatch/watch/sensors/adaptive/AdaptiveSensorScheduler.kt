@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.merge
 import org.sand.ticwatch.watch.sensors.SensorSample
 import java.time.Clock
 import java.time.Duration
@@ -40,13 +41,13 @@ class AdaptiveTiming(
  * Adaptive polling: every collected sample goes through the [triggers]; an abnormal verdict puts that trigger in
  * ALERT with its [CadenceBoost]s, a normal one moves it to RECOVERY, and [AdaptiveTiming.stableNormal] of normal
  * readings later back to IDLE (an abnormal one in between re-arms ALERT). A group's profile is the most severe of
- * the triggers boosting it, its interval the shortest boost (IDLE: [baseIntervals]). Decay is evaluated lazily on
+ * the triggers boosting it, its interval the shortest boost (IDLE: [base]). Decay is evaluated lazily on
  * every sample and every read, so no timer of its own keeps the watch awake. Thread-safe: samples arrive from
  * several collectors at once.
  */
 class AdaptiveSensorScheduler(
     private val triggers: List<AdaptiveTrigger>,
-    private val baseIntervals: Map<MeasurementGroup, Duration>,
+    private val base: BaseCadence,
     private val timing: AdaptiveTiming,
     private val clock: Clock,
 ) : WindowCadence, MonitoringProfiles {
@@ -62,7 +63,7 @@ class AdaptiveSensorScheduler(
     private val profiles = MeasurementGroup.entries.associateWith { MutableStateFlow(MonitoringProfile.IDLE) }
     private val changeSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
-    override val changes: Flow<Unit> = changeSignal.asSharedFlow()
+    override val changes: Flow<Unit> = merge(changeSignal.asSharedFlow(), base.changes)
 
     override fun profile(group: MeasurementGroup): StateFlow<MonitoringProfile> {
         refresh()
@@ -71,14 +72,14 @@ class AdaptiveSensorScheduler(
 
     override fun intervalFor(group: MeasurementGroup): Duration = synchronized(this) {
         decay(clock.instant())
-        val base = baseIntervals.getValue(group)
+        val idle = base.intervalFor(group)
         val active = states.values.filter { it.profile != MonitoringProfile.IDLE }
         val intervals = active.flatMap { state ->
             state.boosts.filter { it.group == group }.map { boost ->
                 if (state.profile == MonitoringProfile.ALERT) boost.interval else boost.interval.multipliedBy(timing.recoverySlowdown)
             }
         }
-        (intervals + base).min()
+        (intervals + idle).min()
     }
 
     /** Feeds one collected sample to every trigger. */

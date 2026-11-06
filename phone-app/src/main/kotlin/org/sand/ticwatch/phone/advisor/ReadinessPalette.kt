@@ -25,4 +25,13 @@ object ReadinessPalette {
             FatigueLevel.EXHAUSTED -> ReadinessState.UNLOAD
         },
     )
+
+    /** Nervous tone in the same palette; the post-stress window is amber like a limited readiness. */
+    fun argb(tone: AutonomicTone): Long = argb(
+        when (tone) {
+            AutonomicTone.CALM -> ReadinessState.OPTIMAL
+            AutonomicTone.RECOVERING -> ReadinessState.MODERATE
+            AutonomicTone.STRAINED, AutonomicTone.POST_STRESS -> ReadinessState.LIMITED
+        },
+    )
 }

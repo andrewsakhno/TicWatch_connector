@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TicWatch cloud history</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #222; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+  th, td { text-align: left; padding: .4rem .75rem; border-bottom: 1px solid #ddd; }
+  th { font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: #666; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>TicWatch cloud history</h1>
+<p>Database size: <strong>{{bytes .DatabaseBytes}}</strong> <span class="muted">(as of {{time .GeneratedAt}})</span></p>
+
+<h2>Tables</h2>
+<table>
+  <thead>
+    <tr><th>Table</th><th class="num">Rows</th><th class="num">Size</th><th>First</th><th>Last</th><th>Last received</th></tr>
+  </thead>
+  <tbody>
+  {{range .Tables}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="num">{{count .Rows}}</td>
+      <td class="num">{{bytes .SizeBytes}}</td>
+      <td>{{epochPtr .FirstAt}}</td>
+      <td>{{epochPtr .LastAt}}</td>
+      <td>{{timePtr .LastReceived}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+
+<h2>Samples by type</h2>
+{{if .SampleTypes}}
+<table>
+  <thead>
+    <tr><th>Type</th><th class="num">Code</th><th class="num">Rows</th><th>First</th><th>Last</th><th>Last received</th></tr>
+  </thead>
+  <tbody>
+  {{range .SampleTypes}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="num">{{.Code}}</td>
+      <td class="num">{{count .Rows}}</td>
+      <td>{{epoch .FirstAt}}</td>
+      <td>{{epoch .LastAt}}</td>
+      <td>{{time .LastReceived}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No samples stored yet.</p>
+{{end}}
+</body>
+</html>

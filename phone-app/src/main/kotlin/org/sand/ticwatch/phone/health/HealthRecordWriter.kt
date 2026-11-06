@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone.health
 
 import androidx.annotation.StringRes
+import java.time.Duration
 import java.time.Instant
 import org.sand.ticwatch.phone.R
 
@@ -18,6 +19,14 @@ data class SensorSample(
     val source: SampleSource = SampleSource.WATCH,
     val snapshot: Boolean = false,
 )
+
+/** The share of this sample inside [from]..[to]: of its length for an interval, all or nothing for an instant. */
+fun SensorSample.overlapFraction(from: Instant, to: Instant): Double {
+    val length = endedAt?.let { Duration.between(recordedAt, it).toMillis() } ?: 0
+    if (endedAt == null || length <= 0) return if (recordedAt.isBefore(from) || recordedAt.isAfter(to)) 0.0 else 1.0
+    val overlap = Duration.between(maxOf(recordedAt, from), minOf(endedAt, to)).toMillis()
+    return overlap.coerceAtLeast(0).toDouble() / length
+}
 
 /**
  * Measuring device of a sample; [code] is its persisted history value (explicit, never `ordinal`). WATCH also covers
@@ -53,7 +62,7 @@ enum class SampleSource(val code: Int, @StringRes val label: Int) {
  * and HEIGHT (cm) from the profile, AUTO_EXERCISE (detected walk/run, value = Health Services exercise
  * type id like EXERCISE) and VO2_MAX_EXERCISE (ml/kg/min from a run's pace vs heart rate).
  * Phone-derived, history only: SLEEP_SCORE (session interval, 0..100), TRAINING_LOAD (workout interval,
- * Banister TRIMP) and HEART_RATE_ZONE_1..5 (workout interval, minutes in that Karvonen zone).
+ * Banister TRIMP) and HEART_RATE_ZONE_0..5 (workout interval, minutes in that Karvonen zone; 0 = below zone 1).
  * HEART_RATE_ALERT: a `mobvoi_hr_alert` event from the watch (value = its undecoded values[0]) - history only,
  * Health Connect has no record type for a heart-rate threshold alert.
  * BLOOD_PRESSURE_SYSTOLIC / BLOOD_PRESSURE_DIASTOLIC (mmHg): a calibrated cuffless estimate
@@ -75,6 +84,12 @@ enum class SensorType {
 
     // Phone-derived, history only: current fatigue, 0..100 percent (FatigueIndexDeriver).
     FATIGUE_INDEX,
+
+    // Phone-derived, history only: blood pressure (mmHg) from a night pulse strip's wave shape (personal ridge model).
+    PULSE_WAVE_SYSTOLIC, PULSE_WAVE_DIASTOLIC,
+
+    // Phone-derived, history only: workout minutes below Karvonen zone 1 (< 50% HR reserve), see HEART_RATE_ZONE_1..5.
+    HEART_RATE_ZONE_0,
 }
 
 /**

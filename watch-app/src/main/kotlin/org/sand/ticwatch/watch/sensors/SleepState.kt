@@ -1,5 +1,7 @@
 package org.sand.ticwatch.watch.sensors
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.time.Duration
 import java.time.Instant
 
@@ -23,19 +25,21 @@ class TrackedSleepState(
     private val clock: () -> Instant = Instant::now,
 ) : SleepState, SleepStateSink {
 
-    @Volatile
-    private var inSession = false
+    private val session = MutableStateFlow(false)
+
+    /** Whether the sensor reports a session open (emits on transitions, unlike the silence limit of [isAsleep]). */
+    val sessionChanges: StateFlow<Boolean> = session
 
     @Volatile
     private var lastEventAt: Instant? = null
 
     override fun update(inSession: Boolean, at: Instant) {
-        this.inSession = inSession
+        session.value = inSession
         lastEventAt = at
     }
 
     override fun isAsleep(): Boolean {
         val last = lastEventAt ?: return false
-        return inSession && Duration.between(last, clock()) <= maxSilence
+        return session.value && Duration.between(last, clock()) <= maxSilence
     }
 }

@@ -104,5 +104,8 @@ class EcgStore(
 
         /** Watch warm-up (up to 20 s) + 30 s strip + delivery. */
         val RECORDING_TIMEOUT = 75.seconds
+
+        /** The same plus the 3 min the watch keeps its prompt open. */
+        val PROMPTED_RECORDING_TIMEOUT = RECORDING_TIMEOUT + 180.seconds
     }
 }

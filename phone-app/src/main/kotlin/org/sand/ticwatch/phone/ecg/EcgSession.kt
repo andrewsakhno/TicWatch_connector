@@ -98,6 +98,9 @@ interface EcgMessageReceiver {
 
     /** False when a completed strip couldn't be stored. */
     suspend fun onResult(payload: ByteArray): Boolean
+
+    /** A queued night pulse strip: stored like a result, without a session or a waiter; false when it couldn't be stored. */
+    suspend fun onNightStrip(payload: ByteArray): Boolean
 }
 
 /** Stores completed strips in [log] (then runs [storedListeners]), keeps the [sessions] screen state current and answers the request's waiter. */
@@ -129,12 +132,26 @@ class StoringEcgMessageReceiver(
         Log.i(TAG, "Rhythm strip ${result.status}: ${result.recording.beats.size} beat(s), stored as $recordingId")
         sessions.onResult(result, recordingId)
         result.requestId?.let { replies.deliver(it, text) }
-        recordingId?.let { id ->
-            storedListeners.forEach { listener ->
-                runCatching { listener.onStored(result.recording.copy(id = id)) }.onFailure { Log.w(TAG, "Post-store step failed", it) }
-            }
-        }
+        recordingId?.let { notifyStored(result.recording.copy(id = it)) }
         return true
+    }
+
+    override suspend fun onNightStrip(payload: ByteArray): Boolean {
+        val text = String(payload, Charsets.UTF_8)
+        // A malformed or incomplete strip is acknowledged anyway: re-sending it would never help.
+        val result = runCatching { EcgPayloads.decodeResult(text) }
+            .onFailure { Log.w(TAG, "Malformed night strip", it) }
+            .getOrNull()?.takeIf { it.status == EcgCaptureStatus.COMPLETED } ?: return true
+        val recording = result.recording.copy(kind = EcgRecordingKind.NIGHT_PULSE)
+        val id = runCatching { log.save(recording) }.onFailure { Log.w(TAG, "Failed to store the night strip", it) }.getOrNull()
+            ?: return false
+        Log.i(TAG, "Night pulse strip at ${recording.startedAt}: ${recording.beats.size} beat(s), stored as $id")
+        notifyStored(recording.copy(id = id))
+        return true
+    }
+
+    private suspend fun notifyStored(recording: EcgRecording) = storedListeners.forEach { listener ->
+        runCatching { listener.onStored(recording) }.onFailure { Log.w(TAG, "Post-store step failed", it) }
     }
 
     private companion object {
@@ -148,13 +165,14 @@ fun interface EcgRequester {
     suspend fun requestAndAwait(requestId: String, timeout: Duration): Result<Boolean>
 }
 
-/** Sends [DataLayerPaths.MESSAGE_ECG_CAPTURE] over the watch link and waits for the reply by request id. */
+/** Sends the command on [path] over the watch link and waits for the reply by request id. */
 class TransportEcgRequester(
     private val transport: DeviceLinkTransport,
     private val replies: WatchReplyAwaiter,
+    private val path: String = DataLayerPaths.MESSAGE_ECG_CAPTURE,
 ) : EcgRequester {
     override suspend fun requestAndAwait(requestId: String, timeout: Duration): Result<Boolean> =
-        replies.await(requestId, timeout) { transport.sendMessage(DataLayerPaths.MESSAGE_ECG_CAPTURE, EcgPayloads.encodeRequest(requestId)) }
+        replies.await(requestId, timeout) { transport.sendMessage(path, EcgPayloads.encodeRequest(requestId)) }
             .map { it != null }
 }
 

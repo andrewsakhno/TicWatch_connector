@@ -23,6 +23,15 @@ object DataLayerPaths {
     /** Phone -> watch: the phone gets good GPS fixes for the running workout (`{"active": true}`, renewed every 2 min). */
     const val MESSAGE_PHONE_ROUTE_TRACK = "/workout/phone-track"
 
+    /** Phone -> watch: start the walk workout now (`{"request_id"}`; a running workout is left alone). */
+    const val MESSAGE_START_WORKOUT = "/command/start_workout"
+
+    /** Phone -> watch: end this app's running workout (`{"request_id"}`). */
+    const val MESSAGE_END_WORKOUT = "/command/end_workout"
+
+    /** Watch -> phone: what a workout command did (`{"request_id", "status"}`). */
+    const val MESSAGE_WORKOUT_COMMAND_RESULT = "/command/workout/result"
+
     /** Watch -> phone: a sleep session opened/closed and the phone's microphone should listen for snoring (`{"active": bool}`). */
     const val MESSAGE_SNORE_MONITOR = "/sleep/snore-monitor"
 
@@ -41,7 +50,10 @@ object DataLayerPaths {
     /** Phone -> watch: cardio readiness score + latest blood pressure and pulse with their colour levels, as JSON. */
     const val MESSAGE_CARDIO_READINESS = "/insights/readiness"
 
-    /** Both ways: battery-relevant watch features (`{"auto_blood_pressure", "log_capture", "changed_at"}`), newest change wins. */
+    /** Phone -> watch: the personal resting heart rate corridors (`{"awake_low", "awake_high", "sleep_low", "sleep_high"}`). */
+    const val MESSAGE_HEART_RATE_CORRIDOR = "/insights/hr-corridor"
+
+    /** Both ways: battery-relevant watch features (`{"auto_blood_pressure", "night_blood_pressure", "log_capture", ..., "changed_at"}`), newest change wins. */
     const val MESSAGE_WATCH_SETTINGS = "/settings/watch"
 
     /** Watch -> phone: estimate and save blood pressure now (`{"heart_rate": bpm, "heart_rate_at": epochMs}`, optional). */
@@ -52,6 +64,9 @@ object DataLayerPaths {
 
     /** Phone -> watch: the latest saved readings, cuff and wrist estimates, newest first (JSON). */
     const val MESSAGE_BLOOD_PRESSURE_HISTORY = "/blood-pressure/history"
+
+    /** Phone -> watch: the active calibration and systolic offset, for estimates while the phone is unreachable (JSON). */
+    const val MESSAGE_BLOOD_PRESSURE_CALIBRATION = "/blood-pressure/calibration"
 
     /** Phone -> watch: take a Baseline Snapshot now (`{"request_id": id}`, optional; echoed in the result). */
     const val MESSAGE_CAPTURE_SNAPSHOT = "/command/capture_snapshot"
@@ -74,11 +89,17 @@ object DataLayerPaths {
     /** Phone -> watch: record a 30 s rhythm strip (`{"request_id": id}`, optional; echoed in progress and result). */
     const val MESSAGE_ECG_CAPTURE = "/command/ecg_capture"
 
+    /** Phone -> watch: same payload and replies, but the wearer accepts on the watch first (status DECLINED if not). */
+    const val MESSAGE_ECG_PROMPT = "/command/ecg_prompt"
+
     /** Watch -> phone: beats recorded since the last progress (`{"beats": [{"t", "rr", "ok"}], "request_id"?}`). */
     const val MESSAGE_ECG_PROGRESS = "/ecg/progress"
 
     /** Watch -> phone: the finished strip (`{"status", "message", "started_at", "finished_at", "beats", "request_id"?}`). */
     const val MESSAGE_ECG_RESULT = "/ecg/result"
+
+    /** Watch -> phone: a pulse strip recorded at a sleep blood pressure measurement, queued and sent with a sync flush (same JSON as [MESSAGE_ECG_RESULT], no request id). */
+    const val MESSAGE_ECG_NIGHT_STRIP = "/ecg/night-strip"
 
     /** Debug bridge: phone asks for a one-shot sensor reading, watch replies with one.
      *  Goes over the same Wear Data Layer session as everything else, so it works

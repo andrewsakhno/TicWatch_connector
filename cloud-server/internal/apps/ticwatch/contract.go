@@ -11,11 +11,14 @@ const (
 	// BasePath prefixes every route.
 	BasePath = "/api/v1"
 	// PingPath is the discovery probe; phones scanning the subnet accept a host only when ServiceName answers.
-	PingPath          = BasePath + "/ping"
-	SamplesPath       = BasePath + "/samples"
-	RollupsPath       = BasePath + "/rollups"
-	RoutePointsPath   = BasePath + "/route-points"
-	EcgRecordingsPath = BasePath + "/ecg-recordings"
+	PingPath              = BasePath + "/ping"
+	SamplesPath           = BasePath + "/samples"
+	RollupsPath           = BasePath + "/rollups"
+	RoutePointsPath       = BasePath + "/route-points"
+	EcgRecordingsPath     = BasePath + "/ecg-recordings"
+	DeviationEpisodesPath = BasePath + "/deviation-episodes"
+	// StatsPath is the HTML overview of the stored history (sizes, rows per table and per sensor type).
+	StatsPath = "/" + appName
 
 	// DeviceHeader identifies the uploading phone install; stored with every row, never used to filter reads.
 	DeviceHeader = "X-Device-Id"

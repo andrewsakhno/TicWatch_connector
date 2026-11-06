@@ -3,8 +3,12 @@ package org.sand.ticwatch.watch.autoworkout
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.health.services.client.ExerciseClient
+import androidx.health.services.client.ExerciseUpdateCallback
+import androidx.health.services.client.data.Availability
 import androidx.health.services.client.data.DataType
 import androidx.health.services.client.data.ExerciseConfig
+import androidx.health.services.client.data.ExerciseLapSummary
+import androidx.health.services.client.data.ExerciseUpdate
 import androidx.health.services.client.data.ExerciseTrackedStatus
 import androidx.health.services.client.data.ExerciseType
 import androidx.health.services.client.data.UserActivityInfo
@@ -26,6 +30,9 @@ interface WorkoutSession {
     /** Starts a walk; false when the watch can't track one. */
     suspend fun startWalk(): Boolean
 
+    /** Keeps this app's already running workout alive, e.g. after a service restart. */
+    fun attach()
+
     /** Ends the workout this app started. */
     suspend fun end()
 }
@@ -34,8 +41,29 @@ interface WorkoutSession {
  * [WorkoutSession] over Health Services' [ExerciseClient] - the same workout other Wear apps run, so
  * the passive user-activity state turns EXERCISE and the existing session/route pipeline records it.
  * GPS is left to [org.sand.ticwatch.watch.route.WatchRouteRecorder], which follows that state anyway.
+ * Health Services ends an exercise nobody listens to (AUTO_END_MISSING_LISTENER, a few minutes in),
+ * so an update callback stays registered while this app's workout runs.
  */
 class HealthServicesWorkoutSession(private val exerciseClient: ExerciseClient) : WorkoutSession {
+
+    private val updates = object : ExerciseUpdateCallback {
+        override fun onRegistered() = Unit
+
+        override fun onRegistrationFailed(throwable: Throwable) {
+            Log.w(TAG, "Exercise update callback refused; the workout may be ended by Health Services", throwable)
+        }
+
+        override fun onExerciseUpdateReceived(update: ExerciseUpdate) {
+            val stateInfo = update.exerciseStateInfo
+            if (!stateInfo.state.isEnded) return
+            Log.i(TAG, "Walk workout ended (reason ${stateInfo.endReason})")
+            exerciseClient.clearUpdateCallbackAsync(this)
+        }
+
+        override fun onLapSummaryReceived(lapSummary: ExerciseLapSummary) = Unit
+
+        override fun onAvailabilityChanged(dataType: DataType<*, *>, availability: Availability) = Unit
+    }
 
     override suspend fun owner(): WorkoutOwner = when (exerciseClient.getCurrentExerciseInfo().exerciseTrackedStatus) {
         ExerciseTrackedStatus.OWNED_EXERCISE_IN_PROGRESS -> WorkoutOwner.THIS_APP
@@ -55,8 +83,13 @@ class HealthServicesWorkoutSession(private val exerciseClient: ExerciseClient) :
             .setIsAutoPauseAndResumeEnabled(false)
             .setIsGpsEnabled(false)
             .build()
+        attach()
         exerciseClient.startExercise(config)
         return true
+    }
+
+    override fun attach() {
+        exerciseClient.setUpdateCallback(updates)
     }
 
     override suspend fun end() {

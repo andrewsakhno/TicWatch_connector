@@ -52,6 +52,18 @@ func (f *fakeEcg) Upsert(_ context.Context, _ string, recordings []EcgRecording)
 	return len(recordings), nil
 }
 
+type fakeDeviations struct{}
+
+func (f *fakeDeviations) Upsert(_ context.Context, _ string, episodes []DeviationEpisode) (int, error) {
+	return len(episodes), nil
+}
+
+type fakeStats struct{}
+
+func (f *fakeStats) Overview(_ context.Context) (HistoryOverview, error) {
+	return HistoryOverview{}, nil
+}
+
 type harness struct {
 	samples *fakeSamples
 	routes  *fakeRoutePoints
@@ -62,7 +74,7 @@ type harness struct {
 func newHarness() *harness {
 	h := &harness{samples: &fakeSamples{}, routes: &fakeRoutePoints{}, ecg: &fakeEcg{}, mux: http.NewServeMux()}
 	now := func() time.Time { return time.UnixMilli(1234) }
-	New(h.samples, h.routes, h.ecg, now).RegisterRoutes(h.mux)
+	New(h.samples, h.routes, h.ecg, &fakeDeviations{}, &fakeStats{}, now).RegisterRoutes(h.mux)
 	return h
 }
 

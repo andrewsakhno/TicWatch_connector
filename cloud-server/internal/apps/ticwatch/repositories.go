@@ -2,15 +2,17 @@ package ticwatch
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
-	tableSensorSample = Schema + ".sensor_sample"
-	tableRoutePoint   = Schema + ".route_point"
-	tableEcgRecording = Schema + ".ecg_recording"
+	tableSensorSample     = Schema + ".sensor_sample"
+	tableRoutePoint       = Schema + ".route_point"
+	tableEcgRecording     = Schema + ".ecg_recording"
+	tableDeviationEpisode = Schema + ".deviation_episode"
 
 	insertSampleSQL = `INSERT INTO ` + tableSensorSample + ` (type, value, recorded_at, ended_at, source, snapshot, device_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -39,6 +41,15 @@ const (
 
 	upsertEcgRecordingSQL = `INSERT INTO ` + tableEcgRecording + ` (started_at, payload, device_id) VALUES ($1, CAST($2 AS JSONB), $3)
 		ON CONFLICT (started_at) DO UPDATE SET payload = EXCLUDED.payload, received_at = now()`
+
+	upsertDeviationEpisodeSQL = `INSERT INTO ` + tableDeviationEpisode + ` (uid, direction, state, started_at, ended_at, peak_bpm, reasons,
+			detected_at, asked_at, answered_at, discarded_at, device_id, minor, intensity, threshold_bpm, baseline_bpm, excess_bpm_minutes, worn_since, steps_before, rmssd_before, sleep_score, fatigue_percent, last_medication_at)
+		VALUES ($1, $2, $3, $4, $5, $6, CAST($7 AS JSONB), $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+		ON CONFLICT (uid) DO UPDATE SET direction = EXCLUDED.direction, state = EXCLUDED.state,
+			started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at, peak_bpm = EXCLUDED.peak_bpm,
+			reasons = EXCLUDED.reasons, detected_at = EXCLUDED.detected_at, asked_at = EXCLUDED.asked_at,
+			answered_at = EXCLUDED.answered_at, discarded_at = EXCLUDED.discarded_at, minor = EXCLUDED.minor, intensity = EXCLUDED.intensity, threshold_bpm = EXCLUDED.threshold_bpm, baseline_bpm = EXCLUDED.baseline_bpm, excess_bpm_minutes = EXCLUDED.excess_bpm_minutes, worn_since = EXCLUDED.worn_since, steps_before = EXCLUDED.steps_before, rmssd_before = EXCLUDED.rmssd_before, sleep_score = EXCLUDED.sleep_score, fatigue_percent = EXCLUDED.fatigue_percent, last_medication_at = EXCLUDED.last_medication_at,
+			received_at = now()`
 )
 
 // SampleRepository is the PostgreSQL SampleStore.
@@ -156,6 +167,34 @@ func (r *EcgRecordingRepository) Upsert(ctx context.Context, deviceID string, re
 		rows[i] = []any{recording.StartedAt, string(recording.Payload), deviceID}
 	}
 	return execBatch(ctx, r.pool, upsertEcgRecordingSQL, rows)
+}
+
+// DeviationEpisodeRepository is the PostgreSQL DeviationEpisodeStore, keyed by the phone's uid.
+type DeviationEpisodeRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewDeviationEpisodeRepository wires the repository to its pool.
+func NewDeviationEpisodeRepository(pool *pgxpool.Pool) *DeviationEpisodeRepository {
+	return &DeviationEpisodeRepository{pool: pool}
+}
+
+// Upsert stores episodes and returns the affected row count.
+func (r *DeviationEpisodeRepository) Upsert(ctx context.Context, deviceID string, episodes []DeviationEpisode) (int, error) {
+	rows := make([][]any, len(episodes))
+	for i, episode := range episodes {
+		reasons, err := json.Marshal(episode.Reasons)
+		if err != nil {
+			return 0, err
+		}
+		rows[i] = []any{
+			episode.UID, episode.Direction, episode.State, episode.StartedAt, episode.EndedAt, episode.PeakBpm, string(reasons),
+			episode.DetectedAt, episode.AskedAt, episode.AnsweredAt, episode.DiscardedAt, deviceID,
+			episode.Minor, episode.Intensity, episode.ThresholdBpm, episode.BaselineBpm, episode.ExcessBpmMinutes, episode.WornSince,
+			episode.StepsBefore, episode.RmssdBefore, episode.SleepScore, episode.FatiguePercent, episode.LastMedicationAt,
+		}
+	}
+	return execBatch(ctx, r.pool, upsertDeviationEpisodeSQL, rows)
 }
 
 // execBatch runs sql once per row in one transaction and sums the affected rows.

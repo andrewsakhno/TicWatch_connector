@@ -26,6 +26,7 @@ enum class ZoneChartSize(val barsHeight: Dp, val stripHeight: Dp) {
 }
 
 private val ZONE_COLORS = mapOf(
+    HeartRateZone.ZONE_0 to Color(0xFF9E9E9E),
     HeartRateZone.ZONE_1 to Color(0xFF03A9F4),
     HeartRateZone.ZONE_2 to Color(0xFF00C853),
     HeartRateZone.ZONE_3 to Color(0xFFFFB300),
@@ -36,7 +37,7 @@ private val HATCH_LINE = 2.dp
 private val HATCH_STEP = 4.dp
 
 /**
- * Garmin-style zone view: a strip of the five zone colors with a hatched bar above each zone, as tall as its share
+ * Garmin-style zone view: a strip of the zone colors (grey = below zone 1) with a hatched bar above each zone, as tall as its share
  * of the busiest zone's [minutes], and the minutes under it.
  */
 @Composable

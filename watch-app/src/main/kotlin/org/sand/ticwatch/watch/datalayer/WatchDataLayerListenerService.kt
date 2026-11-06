@@ -34,6 +34,7 @@ class WatchDataLayerListenerService : WearableListenerService() {
             snapshotRequester = SensorCollectionService.snapshotRequester(applicationContext),
             syncNowRequester = SensorCollectionService.syncNowRequester(applicationContext),
             ecgRequester = SensorCollectionService.ecgRequester(applicationContext),
+            workoutCommands = SensorCollectionService.workoutCommandRequester(applicationContext),
             scope = scope,
         )
     }

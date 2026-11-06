@@ -75,6 +75,6 @@ class TrainingLoadBalanceCalculator(
     }
 
     private companion object {
-        val EASY_ZONES = setOf(HeartRateZone.ZONE_1, HeartRateZone.ZONE_2)
+        val EASY_ZONES = setOf(HeartRateZone.ZONE_0, HeartRateZone.ZONE_1, HeartRateZone.ZONE_2)
     }
 }

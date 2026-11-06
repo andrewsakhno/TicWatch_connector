@@ -11,10 +11,10 @@ import org.sand.ticwatch.phone.advisor.ReadinessGaugeArc
 /** A 0..100 ring of the widget's gauge; a null [score] leaves it empty. */
 data class WidgetGaugeRing(val score: Int?, val argb: Int)
 
-/** Paints the Advisor's two-ring gauge into a bitmap, since [android.widget.RemoteViews] can't host a custom drawing. */
+/** Paints the Advisor's three-ring gauge (outermost first) into a bitmap, since [android.widget.RemoteViews] can't host a custom drawing. */
 class ReadinessGaugeBitmap(private val context: Context) {
 
-    fun draw(outer: WidgetGaugeRing, inner: WidgetGaugeRing): Bitmap {
+    fun draw(rings: List<WidgetGaugeRing>): Bitmap {
         val resources = context.resources
         val size = resources.getDimensionPixelSize(R.dimen.advisor_widget_gauge_size)
         val stroke = resources.getDimension(R.dimen.advisor_widget_gauge_stroke)
@@ -25,12 +25,12 @@ class ReadinessGaugeBitmap(private val context: Context) {
             strokeWidth = stroke
         }
         val track = context.getColor(R.color.advisor_widget_gauge_track)
-        val outerInset = stroke / 2
         return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { bitmap ->
             val canvas = Canvas(bitmap)
-            canvas.drawRing(outer, track, paint, RectF(outerInset, outerInset, size - outerInset, size - outerInset))
-            val innerInset = outerInset + stroke + gap
-            canvas.drawRing(inner, track, paint, RectF(innerInset, innerInset, size - innerInset, size - innerInset))
+            rings.forEachIndexed { index, ring ->
+                val inset = stroke / 2 + index * (stroke + gap)
+                canvas.drawRing(ring, track, paint, RectF(inset, inset, size - inset, size - inset))
+            }
         }
     }
 

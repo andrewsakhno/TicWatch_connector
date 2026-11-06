@@ -27,7 +27,8 @@ class CardioAdvisorWidgetRenderer(
         val vitals = readiness.vitals
         val cardio = WidgetGaugeRing(assessment.score, ReadinessPalette.argb(assessment.state).toInt())
         val load = readiness.fatigue?.let { WidgetGaugeRing(it.loadReadinessPercent, ReadinessPalette.argb(it.level).toInt()) } ?: emptyRing()
-        renderGauge(cardio, load)
+        val autonomic = readiness.autonomic?.let { WidgetGaugeRing(it.percent, ReadinessPalette.argb(it.tone).toInt()) } ?: emptyRing()
+        renderGauge(cardio, load, autonomic)
         setTextViewText(R.id.advisor_widget_state, context.getString(assessment.state.label))
         setTextViewText(R.id.advisor_widget_icon, assessment.advice.action.icon)
         setTextViewText(R.id.advisor_widget_advice, context.getString(assessment.advice.action.title))
@@ -54,11 +55,15 @@ class CardioAdvisorWidgetRenderer(
         renderBattery(battery, now)
     }
 
-    /** The Advisor's gauge: cardio readiness on the outer ring, load readiness on the inner one, their scores in the middle. */
-    private fun RemoteViews.renderGauge(outer: WidgetGaugeRing, inner: WidgetGaugeRing) {
-        setImageViewBitmap(R.id.advisor_widget_gauge, gauge.draw(outer, inner))
-        renderRingScore(R.id.advisor_widget_score, outer)
-        renderRingScore(R.id.advisor_widget_load_score, inner)
+    /**
+     * The Advisor's gauge: cardio readiness outside, load readiness in the middle, nervous tone inside (amber while
+     * post-stress, not pulsing - a widget can't animate it), their scores in the middle.
+     */
+    private fun RemoteViews.renderGauge(cardio: WidgetGaugeRing, load: WidgetGaugeRing, autonomic: WidgetGaugeRing) {
+        setImageViewBitmap(R.id.advisor_widget_gauge, gauge.draw(listOf(cardio, load, autonomic)))
+        renderRingScore(R.id.advisor_widget_score, cardio)
+        renderRingScore(R.id.advisor_widget_load_score, load)
+        renderRingScore(R.id.advisor_widget_autonomic_score, autonomic)
     }
 
     private fun RemoteViews.renderRingScore(viewId: Int, ring: WidgetGaugeRing) {
@@ -77,7 +82,7 @@ class CardioAdvisorWidgetRenderer(
     }
 
     fun unavailable(): RemoteViews = views().apply {
-        renderGauge(emptyRing(), emptyRing())
+        renderGauge(emptyRing(), emptyRing(), emptyRing())
         setTextViewText(R.id.advisor_widget_state, context.getString(R.string.widget_no_data))
     }
 

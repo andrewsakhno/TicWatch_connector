@@ -1,6 +1,7 @@
 #!/bin/sh
 # Run every minute by /etc/cron.d/battery-guard: stops the server containers cleanly when the battery
 # drops below MIN_BATTERY_PERCENT without mains power. The netbook itself stays on.
+# With --check it only answers: exit 0 when the power supply is fine, 1 when it is low (used by cloud-autostart).
 set -eu
 
 MIN_BATTERY_PERCENT=10
@@ -19,6 +20,10 @@ capacity=$(cat "$BATTERY_CAPACITY_PATH" 2>/dev/null || echo "$MIN_BATTERY_PERCEN
 
 if [ "$ac_online" = "$MAINS_ONLINE" ] || [ "$capacity" -ge "$MIN_BATTERY_PERCENT" ]; then
     exit 0
+fi
+
+if [ "${1:-}" = "--check" ]; then
+    exit 1
 fi
 
 if [ -z "$($DOCKER ps -q --filter "name=^$DB_CONTAINER\$")" ]; then

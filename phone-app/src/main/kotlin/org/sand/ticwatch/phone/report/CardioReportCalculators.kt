@@ -1,8 +1,12 @@
 package org.sand.ticwatch.phone.report
 
+import org.sand.ticwatch.phone.health.BloodPressureLog
 import org.sand.ticwatch.phone.health.BloodPressureReading
 import org.sand.ticwatch.phone.health.SampleSource
 import org.sand.ticwatch.phone.health.SensorSample
+import org.sand.ticwatch.phone.health.SystolicOffset
+import org.sand.ticwatch.phone.health.SystolicOffsetSource
+import org.sand.ticwatch.phone.health.SystolicOffsetStore
 import org.sand.ticwatch.phone.health.medianOrNull
 import org.sand.ticwatch.phone.history.SleepSession
 import org.sand.ticwatch.phone.medication.MedicationEffect
@@ -156,17 +160,61 @@ class CalibrationAccuracyCalculator {
 
     fun compare(readings: List<BloodPressureReading>): CalibrationAccuracy {
         val (cuff, wrist) = readings.partition { it.source == SampleSource.BLOOD_PRESSURE_CUFF }
+        return CalibrationAccuracy(cuff, paired(cuff, wrist.filter { it.source == SampleSource.WATCH }))
+    }
+
+    /**
+     * Pairs every cuff reading with the nearest wrist estimate made before it: an estimate made after it may be
+     * calibrated from that very reading, and then matches it by construction.
+     */
+    fun comparisonsBeforeCuff(readings: List<BloodPressureReading>): List<CuffComparison> {
+        val (cuff, wrist) = readings.partition { it.source == SampleSource.BLOOD_PRESSURE_CUFF }
         val estimates = wrist.filter { it.source == SampleSource.WATCH }
-        val comparisons = cuff.mapNotNull { reference ->
+        return cuff.flatMap { reference -> paired(listOf(reference), estimates.filter { it.measuredAt.isBefore(reference.measuredAt) }) }
+    }
+
+    private fun paired(cuff: List<BloodPressureReading>, estimates: List<BloodPressureReading>): List<CuffComparison> =
+        cuff.mapNotNull { reference ->
             estimates.filter { Duration.between(reference.measuredAt, it.measuredAt).abs() <= MAX_GAP }
                 .minByOrNull { Duration.between(reference.measuredAt, it.measuredAt).abs() }
                 ?.let { CuffComparison(reference, it) }
         }
-        return CalibrationAccuracy(cuff, comparisons)
-    }
 
     companion object {
         val MAX_GAP: Duration = Duration.ofMinutes(30)
+    }
+}
+
+/**
+ * Corrects a systematic systolic under-estimate from the last [COMPARISON_WINDOW] cuff comparisons.
+ *
+ * Saved estimates already include the offset of their time, so their delta is what remains to correct: the offset
+ * moves by the mean delta and only comparisons made under the current offset count, otherwise a removed bias would
+ * read as no bias and the correction would switch itself off again. The first call starts the count, which also
+ * leaves out estimates from before this correction existed. Never below 0, so it can only raise an estimate.
+ */
+class CuffBiasSystolicOffset(
+    private val log: BloodPressureLog,
+    private val calculator: CalibrationAccuracyCalculator,
+    private val store: SystolicOffsetStore,
+) : SystolicOffsetSource {
+
+    override suspend fun offsetAt(now: Instant): Double {
+        val current = store.systolicOffset() ?: SystolicOffset(NO_OFFSET, now).also { store.setSystolicOffset(it) }
+        val readings = log.readings(maxOf(current.since, now.minus(LOOKBACK)), now.plusMillis(1))
+        val comparisons = calculator.comparisonsBeforeCuff(readings)
+        if (comparisons.size < COMPARISON_WINDOW) return current.mmHg
+        val bias = comparisons.takeLast(COMPARISON_WINDOW).map { it.systolicDelta }.average()
+        val updated = SystolicOffset((current.mmHg - bias).coerceIn(NO_OFFSET, MAX_OFFSET), now)
+        store.setSystolicOffset(updated)
+        return updated.mmHg
+    }
+
+    companion object {
+        const val COMPARISON_WINDOW = 5
+        const val MAX_OFFSET = 15.0
+        private const val NO_OFFSET = 0.0
+        private val LOOKBACK = Duration.ofDays(30)
     }
 }
 

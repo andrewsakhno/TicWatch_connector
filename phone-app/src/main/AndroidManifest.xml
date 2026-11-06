@@ -175,6 +175,11 @@
                 android:resource="@xml/cardio_advisor_widget_info" />
         </receiver>
 
+        <!-- One-tap answers on the deviation question's notification (deviation/). -->
+        <receiver
+            android:name=".deviation.DeviationAnswerReceiver"
+            android:exported="false" />
+
         <!-- Restarts the long-running services after reboot / app update. -->
         <receiver
             android:name=".transport.AutoStartReceiver"

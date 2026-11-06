@@ -151,6 +151,7 @@ fun HealthInsightsScreen(appContainer: AppContainer) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         WatchSnapshotCard(appContainer.watchSnapshotRequester, appContainer.snapshotResults)
+        WatchWorkoutCard(appContainer.watchWorkoutCommands, appContainer.watchWorkoutActivity)
         val loaded = insights
         if (loaded == null) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

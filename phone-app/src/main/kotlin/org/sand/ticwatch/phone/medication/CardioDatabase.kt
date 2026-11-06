@@ -12,6 +12,9 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import org.sand.ticwatch.phone.deviation.DeviationEpisodeDao
+import org.sand.ticwatch.phone.deviation.DeviationEpisodeEntity
+import org.sand.ticwatch.phone.deviation.DeviationEpisodeReasonEntity
 import org.sand.ticwatch.phone.ecg.EcgRecordingDao
 import org.sand.ticwatch.phone.ecg.EcgRecordingEntity
 import org.sand.ticwatch.phone.ecg.PulseBloodPressurePairDao
@@ -39,17 +42,24 @@ interface MedicationIntakeDao {
  * `sensor_history.db`. Schemas are exported to `phone-app/schemas/` - bump [VERSION] with a `Migration` per change.
  */
 @Database(
-    entities = [MedicationIntakeEntity::class, EcgRecordingEntity::class, PulseBloodPressurePairEntity::class],
+    entities = [
+        MedicationIntakeEntity::class, EcgRecordingEntity::class, PulseBloodPressurePairEntity::class,
+        DeviationEpisodeEntity::class, DeviationEpisodeReasonEntity::class,
+    ],
     version = CardioDatabase.VERSION,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5)],
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5),
+        AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7), AutoMigration(from = 7, to = 8),
+    ],
 )
 abstract class CardioDatabase : RoomDatabase() {
     abstract fun medicationIntakes(): MedicationIntakeDao
     abstract fun ecgRecordings(): EcgRecordingDao
     abstract fun pulseBloodPressurePairs(): PulseBloodPressurePairDao
+    abstract fun deviationEpisodes(): DeviationEpisodeDao
 
     companion object {
-        const val VERSION = 5
+        const val VERSION = 8
         private const val NAME = "cardio.db"
 
         @Volatile

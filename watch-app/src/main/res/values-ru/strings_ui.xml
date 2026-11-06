@@ -9,6 +9,8 @@
     <string name="readiness_percent">%1$d%%</string>
     <string name="gauge_cardio">Кардио</string>
     <string name="gauge_load">Нагрузка</string>
+    <string name="gauge_autonomic">Нервный тонус</string>
+    <string name="advice_breathing_pause">Сделайте дыхательную паузу</string>
     <string name="gauge_with_label">%1$s: %2$s</string>
     <string name="heart_rate">Пульс</string>
     <string name="readiness_hrv">Готовность / ВСР</string>
@@ -32,7 +34,7 @@
     <string name="pattern_celsius" formatted="false">%.1f °C</string>
     <string name="last_6h">за 6 ч</string>
     <string name="settings">Настройки</string>
-    <string name="auto_walk_workout">Автотренировка при ходьбе</string>
+    <string name="auto_walk_workout">Автоактивность при ходьбе</string>
     <string name="log_capture">Запись логов</string>
     <string name="log_capture_hint">Отладка, расходует батарею</string>
     <string name="snore_analysis">Анализ храпа</string>
@@ -85,6 +87,7 @@
     <string name="tap_chart">Нажмите на график для измерения</string>
     <string name="no_readings_today">Сегодня измерений нет</string>
     <string name="phone_unreachable">Телефон недоступен</string>
+    <string name="bp_estimated_on_watch">Оценка на часах: %1$d/%2$d, синхронизируется позже</string>
     <string name="snapshot">Снимок</string>
     <string name="take_snapshot">Снять показатели</string>
     <string name="keep_wrist_still">Держите запястье неподвижно</string>
@@ -110,13 +113,18 @@
     <string name="ecg_notification_title">Запись сердечного ритма</string>
     <string name="ecg_notification_text">Не двигайтесь 30 с</string>
     <string name="ecg_channel">Запись сердечного ритма</string>
+    <string name="ecg_declined">Запись отложена</string>
+    <string name="ecg_prompt_title">ТЕПЕРЬ ЭКГ</string>
+    <string name="ecg_prompt_text">Сядьте и нажмите OK</string>
+    <string name="ecg_prompt_later">Позже</string>
+    <string name="ecg_prompt_ok">OK</string>
     <string name="walk_detected">Обнаружена ходьба</string>
-    <string name="walk_record_question">Записать как тренировку?</string>
+    <string name="walk_record_question">Записать как активность?</string>
     <string name="start">Начать</string>
-    <string name="walk_workout">Тренировка: ходьба</string>
+    <string name="walk_workout">Активность: ходьба</string>
     <string name="walk_recording">Запись - завершится, когда вы перестанете идти</string>
     <string name="end">Завершить</string>
-    <string name="auto_workout_channel">Автоматические тренировки при ходьбе</string>
+    <string name="auto_workout_channel">Автоматическая активность при ходьбе</string>
     <string name="install_channel">Подтверждение обновления</string>
     <string name="install_title">Обновление TicWatch Connector</string>
     <string name="install_text">Нажмите, чтобы подтвердить установку новой версии</string>

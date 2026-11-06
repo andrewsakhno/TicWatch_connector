@@ -148,6 +148,14 @@ class SensorMetricCatalog {
                 "heuristic fatigue, at most every 30 min: 24 h load, RMSSD vs baseline, resting HR vs the hour's norm, " +
                     "last night's recovery (0-30 fresh, 31-60 moderate, 61-80 pronounced, 81-100 exhausted)",
             ),
+            SensorType.PULSE_WAVE_SYSTOLIC to MetricDescriptor(
+                "mmHg", MetricKind.INSTANTANEOUS,
+                "systolic from the pulse shape (rise time, half-width, perfusion, HR) of a 30 s pulse strip recorded at each " +
+                    "sleep measurement, personal ridge model on cuff-paired strips (needs >= 5 pairs); experimental, independent of the HR estimate",
+            ),
+            SensorType.PULSE_WAVE_DIASTOLIC to MetricDescriptor(
+                "mmHg", MetricKind.INSTANTANEOUS, "diastolic of the same pulse-shape model, paired with PULSE_WAVE_SYSTOLIC",
+            ),
         ) + HeartRateZone.entries.associate { zone ->
             zone.sensorType to MetricDescriptor(
                 "min", MetricKind.CUMULATIVE,

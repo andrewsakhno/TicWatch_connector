@@ -29,6 +29,7 @@ enum class EcgCaptureStatus(@StringRes val message: Int) {
     NOT_WORN(R.string.put_watch_on),
     NO_BEATS(R.string.ecg_no_beats),
     BUSY(R.string.ecg_busy),
+    DECLINED(R.string.ecg_declined),
 }
 
 /** One heartbeat: [offsetMs] from the recording start (running sum of intervals), the interval before it, its quality. */

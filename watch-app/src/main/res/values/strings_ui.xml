@@ -9,6 +9,8 @@
     <string name="readiness_percent">%1$d%%</string>
     <string name="gauge_cardio">Cardio</string>
     <string name="gauge_load">Load</string>
+    <string name="gauge_autonomic">Nervous tone</string>
+    <string name="advice_breathing_pause">Take a breathing pause</string>
     <string name="gauge_with_label">%1$s: %2$s</string>
     <string name="heart_rate">Heart rate</string>
     <string name="readiness_hrv">Readiness / HRV</string>
@@ -32,7 +34,7 @@
     <string name="pattern_celsius" formatted="false">%.1f °C</string>
     <string name="last_6h">last 6 h</string>
     <string name="settings">Settings</string>
-    <string name="auto_walk_workout">Auto walk workout</string>
+    <string name="auto_walk_workout">Auto walk activity</string>
     <string name="log_capture">Log capture</string>
     <string name="log_capture_hint">Debug, uses battery</string>
     <string name="snore_analysis">Snore analysis</string>
@@ -85,6 +87,7 @@
     <string name="tap_chart">Tap the chart for a reading</string>
     <string name="no_readings_today">No readings today</string>
     <string name="phone_unreachable">Phone unreachable</string>
+    <string name="bp_estimated_on_watch">Estimated on the watch: %1$d/%2$d, syncs later</string>
     <string name="snapshot">Snapshot</string>
     <string name="take_snapshot">Take snapshot</string>
     <string name="keep_wrist_still">Keep the wrist still</string>
@@ -110,13 +113,18 @@
     <string name="ecg_notification_title">Recording heart rhythm</string>
     <string name="ecg_notification_text">Keep still for 30 s</string>
     <string name="ecg_channel">Heart rhythm recording</string>
+    <string name="ecg_declined">Recording postponed</string>
+    <string name="ecg_prompt_title">ECG TIME</string>
+    <string name="ecg_prompt_text">Sit down and press OK</string>
+    <string name="ecg_prompt_later">Later</string>
+    <string name="ecg_prompt_ok">OK</string>
     <string name="walk_detected">Walking detected</string>
-    <string name="walk_record_question">Record it as a workout?</string>
+    <string name="walk_record_question">Record it as an activity?</string>
     <string name="start">Start</string>
-    <string name="walk_workout">Walk workout</string>
+    <string name="walk_workout">Walk activity</string>
     <string name="walk_recording">Recording - ends when you stop walking</string>
     <string name="end">End</string>
-    <string name="auto_workout_channel">Automatic walk workouts</string>
+    <string name="auto_workout_channel">Automatic walk activity</string>
     <string name="install_channel">App update confirmation</string>
     <string name="install_title">TicWatch Connector update</string>
     <string name="install_text">Tap to confirm installing the new version</string>

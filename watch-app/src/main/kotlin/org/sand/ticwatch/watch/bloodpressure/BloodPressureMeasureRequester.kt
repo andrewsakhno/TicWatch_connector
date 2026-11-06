@@ -4,11 +4,13 @@ import android.util.Log
 import java.time.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import org.sand.ticwatch.watch.R
 import org.sand.ticwatch.watch.datalayer.DataLayerPaths
 import org.sand.ticwatch.watch.phonedata.PhonePayloadSink
 import org.sand.ticwatch.watch.sensors.ReadingHistory
 import org.sand.ticwatch.watch.sensors.SensorType
+import org.sand.ticwatch.watch.sensors.TimedReading
 import org.sand.ticwatch.watch.text.Strings
 import org.sand.ticwatch.watch.transport.DeviceLinkTransport
 import org.sand.ticwatch.watch.transport.sendMessage
@@ -31,14 +33,16 @@ fun interface PendingSampleFlusher {
 /**
  * Flushes the buffered samples, then sends [DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST] with the latest
  * on-screen heart rate (live Measure API readings aren't buffered for the phone). The phone answers on
- * [DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_RESULT]; when the request can't be sent, [results] gets a local
- * failure instead so the screen doesn't wait for an answer that won't come.
+ * [DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_RESULT]. When the request can't be sent, the [offline] estimator
+ * estimates from the cached calibration and queues the reading for the next sync; [results] gets that local outcome
+ * (or a failure) so the screen doesn't wait for an answer that won't come.
  */
 class PhoneBloodPressureMeasureRequester(
     private val flusher: PendingSampleFlusher,
     private val readings: ReadingHistory,
     private val transport: DeviceLinkTransport,
     private val results: PhonePayloadSink,
+    private val offline: OfflineBloodPressureEstimator,
     private val clock: Clock,
     private val scope: CoroutineScope,
     private val strings: Strings,
@@ -55,9 +59,19 @@ class PhoneBloodPressureMeasureRequester(
         transport.sendMessage(DataLayerPaths.MESSAGE_BLOOD_PRESSURE_MEASURE_REQUEST, payload.toByteArray(Charsets.UTF_8))
             .onSuccess { Log.i(TAG, "Blood pressure requested (HR $heartRate)") }
             .onFailure { error ->
-                Log.w(TAG, "Blood pressure request not delivered", error)
-                results.accept(BloodPressurePayloads.encodeResult(BloodPressureMeasureResult(false, strings.get(R.string.phone_unreachable), clock.instant())))
+                Log.w(TAG, "Blood pressure request not delivered, estimating on the watch", error)
+                results.accept(BloodPressurePayloads.encodeResult(estimateOffline(heartRate)))
             }
+    }
+
+    private suspend fun estimateOffline(heartRate: TimedReading?): BloodPressureMeasureResult {
+        val estimate = runCatching { offline.estimateAndQueue(heartRate) }
+            .onFailure { Log.w(TAG, "Local blood pressure estimate failed", it) }
+            .getOrNull()
+            ?: return BloodPressureMeasureResult(false, strings.get(R.string.phone_unreachable), clock.instant())
+        Log.i(TAG, "Blood pressure estimated on the watch: $estimate")
+        val status = strings.get(R.string.bp_estimated_on_watch, estimate.systolic.roundToInt(), estimate.diastolic.roundToInt())
+        return BloodPressureMeasureResult(true, status, clock.instant())
     }
 
     private companion object {
