@@ -50,7 +50,6 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -62,6 +61,7 @@ import org.sand.ticwatch.phone.health.BloodPressureReading
 import org.sand.ticwatch.phone.health.SampleSource
 import org.sand.ticwatch.phone.text.UiText
 import org.sand.ticwatch.phone.text.asString
+import org.sand.ticwatch.phone.text.inCurrentLocale
 import org.sand.ticwatch.phone.text.uiText
 
 private val LINE_WIDTH = 1.5.dp
@@ -112,9 +112,9 @@ private const val DAY_SEPARATOR_ALPHA = 0.6f
 private const val GUIDE_DASH = 8f
 private const val NO_VALUE = "--"
 private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
-private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE dd", Locale.getDefault())
+private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE dd")
 private val READING_TIME_FORMAT: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("EEE dd HH:mm", Locale.getDefault()).withZone(ZoneId.systemDefault())
+    DateTimeFormatter.ofPattern("EEE dd HH:mm").withZone(ZoneId.systemDefault())
 
 /** Chart colors, taken from the app theme so the chart matches the other cards. */
 private class BloodPressureChartColors(
@@ -205,7 +205,7 @@ fun BloodPressureDayChart(
                 )
                 Column(modifier = Modifier.weight(2f)) {
                     Text(
-                        text = stringResource(R.string.reading_time_category, READING_TIME_FORMAT.format(reading.measuredAt), stringResource(reading.category.label)),
+                        text = stringResource(R.string.reading_time_category, READING_TIME_FORMAT.inCurrentLocale().format(reading.measuredAt), stringResource(reading.category.label)),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(text = readingSourceText(reading).asString(), style = MaterialTheme.typography.bodySmall)
@@ -386,11 +386,11 @@ private fun DrawScope.drawTimeAxis(
     val dateRowTop = hourRowTop + textMeasurer.measure(TIME_FORMAT.format(start), style).size.height
     val dateStyle = style.copy(fontWeight = FontWeight.Bold)
     fun drawDate(day: ZonedDateTime, left: Float) {
-        val label = textMeasurer.measure(DAY_FORMAT.format(day), dateStyle)
+        val label = textMeasurer.measure(DAY_FORMAT.inCurrentLocale().format(day), dateStyle)
         drawText(label, topLeft = Offset(left.coerceIn(0f, max(0f, plotWidth - label.size.width)), dateRowTop))
     }
     val first = start.atZone(ZoneId.systemDefault())
-    val firstDateWidth = textMeasurer.measure(DAY_FORMAT.format(first), dateStyle).size.width
+    val firstDateWidth = textMeasurer.measure(DAY_FORMAT.inCurrentLocale().format(first), dateStyle).size.width
     if (x(first.truncatedTo(ChronoUnit.DAYS).plusDays(1).toInstant()) > firstDateWidth + 2 * gap) drawDate(first, 0f)
 
     var hour = first.truncatedTo(ChronoUnit.HOURS).plusHours(1)

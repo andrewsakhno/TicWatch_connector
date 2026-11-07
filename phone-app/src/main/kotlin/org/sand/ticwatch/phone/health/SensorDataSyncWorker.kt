@@ -2,24 +2,27 @@ package org.sand.ticwatch.phone.health
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Clock
 import java.time.Instant
 
 /**
  * Handles a single sensor-data push received from the watch: parses the wire payload,
  * runs [derivers] over it in order (each sees what earlier ones derived, e.g. VO2 max
  * builds on resting heart rate), and writes everything into Health Connect via
- * [healthRecordWriter].
+ * [healthRecordWriter]. Timestamps ahead of the phone's clock are pulled back first ([futureTimestamps]).
  */
 class SensorDataSyncWorker(
     private val healthRecordWriter: HealthRecordWriter,
     private val derivers: List<SampleDeriver>,
+    private val futureTimestamps: FutureTimestampClamp = FutureTimestampClamp(Clock.systemUTC()),
 ) {
     suspend fun onSensorDataPush(payload: ByteArray): Result<Int> =
         runCatching { parse(payload) }.fold(onSuccess = { ingest(it) }, onFailure = { Result.failure(it) })
 
     /** Derives from and writes already-decoded watch samples (e.g. a snapshot's); returns how many came in. */
     suspend fun ingest(samples: List<SensorSample>): Result<Int> = runCatching {
-        val allSamples = derivers.fold(samples) { accumulated, deriver -> accumulated + deriver.derive(accumulated) }
+        val received = futureTimestamps.clamp(samples)
+        val allSamples = derivers.fold(received) { accumulated, deriver -> accumulated + deriver.derive(accumulated) }
 
         healthRecordWriter.write(allSamples).getOrThrow()
         samples.size

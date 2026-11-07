@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.sin
+import org.sand.ticwatch.watch.text.inCurrentLocale
 
 /**
  * Draws the face: a dial of minute ticks with a gradient seconds arc, the time and date in the
@@ -139,7 +140,7 @@ class TicWatchFaceRenderer(
 
         datePaint.color = palette.date
         datePaint.textSize = radius * DATE_SIZE
-        canvas.drawText(time.format(DATE).uppercase(Locale.getDefault()), cx, cy - radius * DATE_RAISE, datePaint)
+        canvas.drawText(time.format(DATE.inCurrentLocale()).uppercase(Locale.getDefault()), cx, cy - radius * DATE_RAISE, datePaint)
     }
 
     private fun drawReadings(

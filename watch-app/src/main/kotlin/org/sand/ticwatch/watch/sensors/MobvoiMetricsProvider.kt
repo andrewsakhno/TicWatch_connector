@@ -28,7 +28,8 @@ class MobvoiMetricsTiming(
     val sleepWakeMerge: WakeMergePolicy,
     val sleepCheckInterval: Duration,
     val nightEpoch: Duration,
-    val nightSnoreSlot: Duration,
+    val nightSnore: NightSnoreCadence,
+    val nightBatchCheckInterval: Duration,
     val nightIdleCheckInterval: () -> Duration,
     val nightRest: Duration,
 )
@@ -169,7 +170,8 @@ class MobvoiMetricsProvider(
         },
         snoreMeter = snoreMeter,
         epoch = timing.nightEpoch,
-        snoreSlot = timing.nightSnoreSlot,
+        snore = timing.nightSnore,
+        batchCheckInterval = timing.nightBatchCheckInterval,
         idleCheckInterval = timing.nightIdleCheckInterval,
         rest = { timing.nightRest.takeIf { nightIntermittent() } },
     )

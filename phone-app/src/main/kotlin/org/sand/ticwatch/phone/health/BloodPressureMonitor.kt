@@ -171,6 +171,9 @@ sealed interface CalibrationResult {
 
     /** The wrist signals at the cuff reading don't describe rest (stress, just after walking). */
     data class NotAtRest(val violation: CalibrationRestViolation) : CalibrationResult
+
+    /** A hypertensive cuff reading was logged but didn't replace the normotensive calibration in use. */
+    data object BaselineKept : CalibrationResult
 }
 
 /** Saved readings read back from the history. */
@@ -200,6 +203,8 @@ class BloodPressureMonitor(
     private val systolicOffset: SystolicOffsetSource,
     private val restCheck: CalibrationRestCheck,
     private val restingFloor: RestingHeartRateFloor,
+    private val pulseWave: RecentPulseWaveBloodPressure,
+    private val blender: PulseWaveBlender,
     val log: BloodPressureLog,
     private val clock: Clock,
 ) : RecentBloodPressureReadings, BloodPressureMeasurer {
@@ -222,6 +227,8 @@ class BloodPressureMonitor(
      * [CUFF_SIGNAL_MAX_GAP] of it (no resting-HR fallback: the pair must describe the same moment) and the reading is
      * newer than the current calibration. Watch data arrives in batches, so NoHeartRate may just mean "not yet".
      * [liveHeartRate] (the watch's on-screen reading) is preferred when it is fresh, see [WristSignalsReader.current].
+     * A hypertensive reading doesn't replace a fresh normotensive calibration ([CalibrationResult.BaselineKept]): one
+     * spike would otherwise shift every later estimate. It stays in the log and still pairs with a pulse strip.
      */
     suspend fun calibrateFromCuff(
         systolic: Double,
@@ -230,7 +237,9 @@ class BloodPressureMonitor(
         liveHeartRate: HeartRateReading? = null,
     ): CalibrationResult {
         if (!BloodPressureLimits.isPlausible(systolic, diastolic)) return CalibrationResult.Implausible
-        if (calibration()?.calibratedAt?.isBefore(measuredAt) == false) return CalibrationResult.Outdated
+        val existing = calibration()
+        if (existing?.calibratedAt?.isBefore(measuredAt) == false) return CalibrationResult.Outdated
+        if (existing != null && keepsBaseline(existing, systolic, diastolic)) return CalibrationResult.BaselineKept
         val signalsAt = minOf(clock.instant(), measuredAt.plus(CUFF_SIGNAL_MAX_GAP))
         val current = signals.current(signalsAt, liveHeartRate)
             ?.takeIf { Duration.between(measuredAt, it.heartRateAt).abs() <= CUFF_SIGNAL_MAX_GAP }
@@ -238,6 +247,12 @@ class BloodPressureMonitor(
         restCheck.violation(current.heartRate, current.heartRateAt)?.let { return CalibrationResult.NotAtRest(it) }
         return store(systolic, diastolic, current.heartRate, current, measuredAt)
     }
+
+    private fun keepsBaseline(existing: BloodPressureCalibration, systolic: Double, diastolic: Double): Boolean =
+        isHypertensive(systolic, diastolic) && !isHypertensive(existing.systolic, existing.diastolic) && !isStale(existing)
+
+    private fun isHypertensive(systolic: Double, diastolic: Double): Boolean =
+        BloodPressureCategory.of(systolic, diastolic) >= HYPERTENSIVE_FROM
 
     private suspend fun store(
         systolic: Double,
@@ -258,14 +273,18 @@ class BloodPressureMonitor(
         return CalibrationResult.Saved(calibration)
     }
 
-    /** Estimates from the stored wrist signals, preferring [liveHeartRate] (see [WristSignalsReader.current]). */
+    /**
+     * Estimates from the stored wrist signals, preferring [liveHeartRate] (see [WristSignalsReader.current]), blended
+     * with the pulse-wave estimate of a strip recorded shortly before when the personal model has one.
+     */
     suspend fun measure(liveHeartRate: HeartRateReading? = null): BloodPressureMeasurement {
         val calibration = calibration() ?: return BloodPressureMeasurement.NotCalibrated
         val now = clock.instant()
         val stepRate = signals.recentStepRate(now)
         if (stepRate > REST_MAX_STEPS_PER_MINUTE) return BloodPressureMeasurement.NotAtRest(stepRate)
         val current = signals.current(now, liveHeartRate) ?: return BloodPressureMeasurement.NoHeartRate
-        val reading = estimator.estimate(calibration, current, now, systolicOffset.offsetAt(now), restingFloor.lowBpm(now))
+        val wrist = estimator.estimate(calibration, current, now, systolicOffset.offsetAt(now), restingFloor.lowBpm(now))
+        val reading = pulseWave.near(now)?.let { blender.blend(wrist, it) } ?: wrist
         return BloodPressureMeasurement.Estimated(reading, current)
     }
 
@@ -299,6 +318,7 @@ class BloodPressureMonitor(
         val CALIBRATION_MAX_AGE: Duration = Duration.ofDays(30)
         val CUFF_SIGNAL_MAX_GAP: Duration = Duration.ofMinutes(5)
         const val REST_MAX_STEPS_PER_MINUTE = 40.0
+        private val HYPERTENSIVE_FROM = BloodPressureCategory.HYPERTENSION_GRADE_1
         private val RECENT_LOOKBACK = Duration.ofDays(400)
     }
 }

@@ -11,11 +11,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.State
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -72,21 +73,25 @@ fun CloudSyncIndicator(appContainer: AppContainer) {
     val state by store.state.collectAsState()
     val kind = state.indicator
     val icon = CloudIcon.of(kind)
-    val pulse by rememberInfiniteTransition(label = "cloud").animateFloat(
-        initialValue = 1f,
-        targetValue = PULSE_MIN_ALPHA,
-        animationSpec = infiniteRepeatable(tween(PULSE_MILLIS), RepeatMode.Reverse),
-        label = "cloudPulse",
-    )
+    // Runs only while syncing and is read in the layer phase: a per-frame recomposition of the top bar janks every tab.
+    val pulse = if (kind == CloudSyncIndicatorKind.SYNCING) cloudPulse() else null
     IconButton(onClick = store::syncNow) {
         Icon(
             painter = painterResource(icon.icon),
             contentDescription = stringResource(icon.description),
             tint = tintOf(kind),
-            modifier = Modifier.size(22.dp).alpha(if (kind == CloudSyncIndicatorKind.SYNCING) pulse else 1f),
+            modifier = Modifier.size(22.dp).graphicsLayer { alpha = pulse?.value ?: 1f },
         )
     }
 }
+
+@Composable
+private fun cloudPulse(): State<Float> = rememberInfiniteTransition(label = "cloud").animateFloat(
+    initialValue = 1f,
+    targetValue = PULSE_MIN_ALPHA,
+    animationSpec = infiniteRepeatable(tween(PULSE_MILLIS), RepeatMode.Reverse),
+    label = "cloudPulse",
+)
 
 @Composable
 private fun tintOf(kind: CloudSyncIndicatorKind): Color = when (kind) {

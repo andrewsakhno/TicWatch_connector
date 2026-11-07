@@ -1,0 +1,13 @@
+build/
+**/build/
+.gradle/
+.idea/
+webapp/node_modules/
+webapp/dist/
+out/
+*.apk
+*.png
+*.jpg
+*.jpeg
+*.dmp
+*.part

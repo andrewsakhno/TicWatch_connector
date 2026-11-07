@@ -2,11 +2,9 @@ package org.sand.ticwatch.phone
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -24,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.sand.ticwatch.phone.ui.ConnectedChoiceRow
 import org.sand.ticwatch.phone.watchsettings.DaytimeHrvInterval
 import org.sand.ticwatch.phone.watchsettings.SnoreMicrophone
 import org.sand.ticwatch.phone.watchsettings.WatchSettings
@@ -100,37 +99,30 @@ private fun DaytimeHrvIntervalChoice(selected: DaytimeHrvInterval?, onSelect: (D
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(text = stringResource(R.string.setting_daytime_hrv_interval))
         Text(text = stringResource(R.string.setting_daytime_hrv_interval_hint), style = MaterialTheme.typography.bodySmall)
-        FlowRow {
-            DaytimeHrvInterval.entries.forEach { interval ->
-                FilterChip(
-                    selected = interval == selected,
-                    onClick = { onSelect(interval) },
-                    enabled = selected != null,
-                    label = { Text(stringResource(R.string.setting_daytime_hrv_interval_minutes, interval.minutes)) },
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-            }
-        }
+        ConnectedChoiceRow(
+            options = DaytimeHrvInterval.entries,
+            selected = selected,
+            onSelect = onSelect,
+            enabled = selected != null,
+            label = { stringResource(R.string.setting_daytime_hrv_interval_minutes, it.minutes) },
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 
 /** Watch microphone costs the watch battery; the phone's must lie next to the bed. */
 @Composable
 private fun SnoreMicrophoneChoice(selected: SnoreMicrophone?, onSelect: (SnoreMicrophone) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text = stringResource(R.string.setting_snore_microphone), modifier = Modifier.weight(1f))
-        SnoreMicrophone.entries.forEach { microphone ->
-            FilterChip(
-                selected = microphone == selected,
-                onClick = { onSelect(microphone) },
-                enabled = selected != null,
-                label = { Text(stringResource(microphoneLabel(microphone))) },
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        }
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(text = stringResource(R.string.setting_snore_microphone))
+        ConnectedChoiceRow(
+            options = SnoreMicrophone.entries,
+            selected = selected,
+            onSelect = onSelect,
+            enabled = selected != null,
+            label = { stringResource(microphoneLabel(it)) },
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 

@@ -9,10 +9,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.Text
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,15 +49,15 @@ internal fun SnapshotPage(page: SnapshotPageState) {
     val running = state == SnapshotState.Running
     ScalingLazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
-            Text(stringResource(R.string.snapshot), style = MaterialTheme.typography.caption1, color = MaterialTheme.colors.onSurfaceVariant)
+            Text(stringResource(R.string.snapshot), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
-            Chip(
+            Button(
                 onClick = { page.onCapture?.invoke() },
                 enabled = page.onCapture != null && !running,
                 label = { Text(stringResource(if (running) R.string.measuring else R.string.take_snapshot)) },
                 secondaryLabel = { Text(stringResource(if (running) R.string.keep_wrist_still else R.string.all_metrics)) },
-                colors = ChipDefaults.primaryChipColors(),
+                colors = ButtonDefaults.buttonColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -67,13 +67,13 @@ internal fun SnapshotPage(page: SnapshotPageState) {
                 Text(
                     "${stringResource(result.status.message)} · ${TIME_FORMAT.format(result.finishedAt.atZone(ZoneId.systemDefault()))}" +
                         if (done.delivered) "" else stringResource(R.string.snapshot_not_delivered),
-                    style = MaterialTheme.typography.caption2,
+                    style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                 )
             }
             SNAPSHOT_UNITS.forEach { (type, pattern) ->
                 result.samples.firstOrNull { it.type == type }?.let { sample ->
-                    item { Text(stringResource(pattern).format(sample.value), style = MaterialTheme.typography.body1) }
+                    item { Text(stringResource(pattern).format(sample.value), style = MaterialTheme.typography.bodyLarge) }
                 }
             }
         }

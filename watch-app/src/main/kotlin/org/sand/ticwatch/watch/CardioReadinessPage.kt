@@ -28,8 +28,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.Text
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.sand.ticwatch.watch.readiness.CardioReadinessSnapshot
@@ -74,7 +74,7 @@ internal fun CardioReadinessPage(readiness: StateFlow<CardioReadinessSnapshot?>?
         (if (postStress) stringResource(R.string.advice_breathing_pause) else current?.advice)?.let {
             Text(
                 it,
-                style = MaterialTheme.typography.caption3,
+                style = MaterialTheme.typography.bodyExtraSmall,
                 textAlign = TextAlign.Center,
                 maxLines = ADVICE_MAX_LINES,
                 overflow = TextOverflow.Ellipsis,
@@ -95,7 +95,7 @@ private data class GaugeRing(val percent: Int?, val color: Color, val pulsing: B
 private fun RingGauge(rings: List<GaugeRing>) {
     val progress = rings.map { animatedProgress(it.percent) }
     val pulse = pulseAlpha()
-    val track = MaterialTheme.colors.surface
+    val track = MaterialTheme.colorScheme.surfaceContainer
     Box(modifier = Modifier.size(GAUGE_SIZE), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(GAUGE_SIZE)) {
             val strokeWidth = GAUGE_STROKE.toPx()
@@ -107,7 +107,7 @@ private fun RingGauge(rings: List<GaugeRing>) {
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             rings.forEachIndexed { index, ring ->
-                RingPercent(ring, if (index == 0) MaterialTheme.typography.title3 else MaterialTheme.typography.caption1)
+                RingPercent(ring, if (index == 0) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -155,7 +155,7 @@ private fun RingPercent(ring: GaugeRing, style: TextStyle) {
 private fun RingLabel(title: String, label: String?, color: Color) {
     Text(
         stringResource(R.string.gauge_with_label, title, label ?: ReadingText.NO_VALUE),
-        style = MaterialTheme.typography.caption2,
+        style = MaterialTheme.typography.bodySmall,
         color = color,
         textAlign = TextAlign.Center,
         maxLines = RING_LABEL_MAX_LINES,
@@ -165,7 +165,7 @@ private fun RingLabel(title: String, label: String?, color: Color) {
 
 @Composable
 private fun VitalText(value: LeveledValue?, stale: Boolean) {
-    Text(value?.text ?: ReadingText.NO_VALUE, style = MaterialTheme.typography.caption1, color = valueColor(value, stale))
+    Text(value?.text ?: ReadingText.NO_VALUE, style = MaterialTheme.typography.bodyMedium, color = valueColor(value, stale))
 }
 
 /** The phone's level colour, amber whatever the level while a post-stress window is open. */

@@ -14,7 +14,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -84,7 +84,7 @@ internal fun SleepJournalSheet(journal: SleepJournal, changes: Flow<*>, onDismis
                 items(entries, key = { it.session.start.toEpochMilli() }) { SleepEntryCard(it) }
             }
             when {
-                state.loading -> item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                state.loading -> item { LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth()) }
                 state.entries.isEmpty() -> item { Text(text = stringResource(R.string.no_data), style = MaterialTheme.typography.bodyMedium) }
             }
         }

@@ -11,6 +11,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import org.sand.ticwatch.phone.health.BloodPressureReading
 import org.sand.ticwatch.phone.health.HealthRecordWriter
+import org.sand.ticwatch.phone.health.PulseWaveBloodPressure
+import org.sand.ticwatch.phone.health.RecentPulseWaveBloodPressure
 import org.sand.ticwatch.phone.health.SensorSample
 import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.health.SampleSource
@@ -199,11 +201,36 @@ class RidgePulseBloodPressureEstimator(private val pairs: PulseBloodPressurePair
         }
     }
 
-    private companion object {
-        const val MIN_PAIRS = 5
+    companion object {
+        /** Cuff + strip pairs needed before the model estimates at all. */
+        const val MIN_PAIRS = 4
         const val MAX_PAIRS = 60
-        const val RIDGE_LAMBDA = 1.0
-        const val EXTRAPOLATION_MMHG = 15.0
+
+        /** Strong enough that a few pairs can't fit rise-time noise. */
+        private const val RIDGE_LAMBDA = 2.0
+        private const val EXTRAPOLATION_MMHG = 15.0
+    }
+}
+
+/**
+ * The personal pulse-wave estimate of the newest strip started within [STRIP_MAX_AGE] before a moment; null without
+ * such a strip, a usable pulse wave or a trained model.
+ */
+class RecentStripPulseBloodPressure(
+    private val log: EcgRecordingLog,
+    private val analyzer: CardiogramAnalyzer,
+    private val estimator: PulseBloodPressureEstimator,
+) : RecentPulseWaveBloodPressure {
+
+    override suspend fun near(at: Instant): PulseWaveBloodPressure? {
+        val strip = log.startedBetween(at.minus(STRIP_MAX_AGE), at.plusMillis(1)).firstOrNull() ?: return null
+        val features = PulseFeatures.of(analyzer.analyze(strip.beats, strip.wave)) ?: return null
+        val estimate = estimator.estimate(features) as? PulseBloodPressure.Estimate ?: return null
+        return PulseWaveBloodPressure(estimate.systolic, estimate.diastolic, estimate.systolicErrorMmHg)
+    }
+
+    companion object {
+        val STRIP_MAX_AGE: Duration = Duration.ofMinutes(15)
     }
 }
 

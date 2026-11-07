@@ -30,7 +30,7 @@ import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
@@ -38,6 +38,7 @@ import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -112,6 +113,7 @@ private fun ReadinessState.color(): Color = Color(ReadinessPalette.argb(this))
 internal fun CardioAdvisorScreen(source: CardioReadinessSource, changes: Flow<*>) {
     val store = rememberStore(source) { scope, io -> CardioAdvisorStore(source, changes, scope, io) }
     val state by store.state.collectAsState()
+    var calibrationSheetOpen by remember { mutableStateOf(false) }
 
     SwipeDownToRefresh(
         refresh = {
@@ -123,11 +125,15 @@ internal fun CardioAdvisorScreen(source: CardioReadinessSource, changes: Flow<*>
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (state.loading && state.readiness == null) LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
             state.error?.let { Text(text = stringResource(R.string.could_not_load, it), color = MaterialTheme.colorScheme.error) }
             state.readiness?.let { readiness ->
                 ReadinessGaugeCard(readiness.assessment, readiness.fatigue, readiness.autonomic)
                 AdviceCard(readiness.assessment.advice, readiness.assessment.state)
+                readiness.calibration?.let { advice ->
+                    CalibrationAdvisorCard(advice) { calibrationSheetOpen = true }
+                    if (calibrationSheetOpen) CalibrationAdvisorSheet(advice) { calibrationSheetOpen = false }
+                }
                 AutonomicToneCard(readiness.autonomic)
                 ProtectionCard(readiness.medication, readiness.recovery)
                 VitalsCard(readiness.vitals)
@@ -169,10 +175,10 @@ private fun SwipeDownToRefresh(refresh: suspend () -> Unit, content: @Composable
             ),
     ) {
         content()
-        PullToRefreshDefaults.Indicator(
+        PullToRefreshDefaults.LoadingIndicator(
             state = pullState,
             isRefreshing = refreshing,
-            threshold = PULL_REFRESH_THRESHOLD,
+            maxDistance = PULL_REFRESH_THRESHOLD,
             modifier = Modifier.align(Alignment.TopCenter),
         )
     }
@@ -223,14 +229,14 @@ private data class GaugeRing(val score: Int?, val color: Color, val pulsing: Boo
 @Composable
 private fun RingGauge(rings: List<GaugeRing>) {
     val progress = rings.map { animatedProgress(it.score) }
-    val pulse = pulseAlpha()
+    val pulse = if (rings.any { it.pulsing }) pulseAlpha() else null
     val track = MaterialTheme.colorScheme.surfaceVariant
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(GAUGE_SIZE)) {
             val strokeWidth = GAUGE_STROKE.toPx()
             val step = strokeWidth + GAUGE_RING_GAP.toPx()
             rings.forEachIndexed { index, ring ->
-                val color = if (ring.pulsing) ring.color.copy(alpha = pulse) else ring.color
+                val color = if (ring.pulsing && pulse != null) ring.color.copy(alpha = pulse.value) else ring.color
                 drawRing(color, track, progress[index], strokeWidth / 2 + index * step, strokeWidth)
             }
         }
@@ -242,16 +248,15 @@ private fun RingGauge(rings: List<GaugeRing>) {
     }
 }
 
+/** Returned as [State] so only the Canvas draw phase reads it: a per-frame recomposition here janks the scroll. */
 @Composable
-private fun pulseAlpha(): Float {
-    val alpha by rememberInfiniteTransition(label = "pulse").animateFloat(
+private fun pulseAlpha(): State<Float> =
+    rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 1f,
         targetValue = PULSE_MIN_ALPHA,
         animationSpec = infiniteRepeatable(tween(PULSE_MS), RepeatMode.Reverse),
         label = "pulseAlpha",
     )
-    return alpha
-}
 
 @Composable
 private fun animatedProgress(score: Int?): Float {

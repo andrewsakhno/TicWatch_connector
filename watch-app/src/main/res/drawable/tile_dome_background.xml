@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Domed-glass tile backdrop; mirrors ui/DomedDial.kt (glow lit from above, flat top highlight, dark rim). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <path android:pathData="M0,0h100v100h-100z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="50"
+                android:centerY="38"
+                android:gradientRadius="75"
+                android:startColor="#FF1B2340"
+                android:endColor="#FF000000" />
+        </aapt:attr>
+    </path>
+
+    <group
+        android:pivotX="50"
+        android:pivotY="16"
+        android:scaleY="0.4">
+        <path android:pathData="M8,16a42,42 0,1 1,84 0a42,42 0,1 1,-84 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="50"
+                    android:centerY="16"
+                    android:gradientRadius="42"
+                    android:startColor="#17FFFFFF"
+                    android:endColor="#00FFFFFF" />
+            </aapt:attr>
+        </path>
+    </group>
+
+    <path android:pathData="M0,0h100v100h-100z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="50"
+                android:centerY="50"
+                android:gradientRadius="50">
+                <item android:offset="0" android:color="#00000000" />
+                <item android:offset="0.8" android:color="#00000000" />
+                <item android:offset="1" android:color="#A6000000" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

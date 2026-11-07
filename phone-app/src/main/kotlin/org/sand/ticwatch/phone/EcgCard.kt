@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -87,17 +88,20 @@ class EcgDependencies(
     val requester: EcgRequester,
 )
 
+/** The ECG card's store, held by the screen: a lazy list disposes off-screen cards, which must not cancel a recording. */
+@Composable
+internal fun rememberEcgStore(dependencies: EcgDependencies): EcgStore = rememberStore(dependencies) { scope, io ->
+    with(dependencies) { EcgStore(log, analyzer, bloodPressure, sessions, requester, scope, io) }
+}
+
 /**
  * Blood Pressure tab's ECG card: a strip of ECG paper, drawn live while the watch records 30 s of beats and analyzed
  * right after; tapping the paper opens the cardiograms stored on the phone.
  */
 @Composable
-internal fun EcgCard(dependencies: EcgDependencies) {
-    val store = rememberStore(dependencies) { scope, io ->
-        with(dependencies) { EcgStore(log, analyzer, bloodPressure, sessions, requester, scope, io) }
-    }
+internal fun EcgCard(store: EcgStore) {
     val state by store.state.collectAsState()
-    var isListOpen by remember { mutableStateOf(false) }
+    var isListOpen by rememberSaveable { mutableStateOf(false) }
     val live = state.live
     // Night pulse strips come every 20 min in sleep; the card keeps showing the last requested strip.
     val latest = state.recordings?.firstOrNull { it.recording.kind == EcgRecordingKind.REQUESTED }
@@ -364,8 +368,8 @@ private fun severityColor(severity: EcgSeverity): Color = when (severity) {
 /** Full-screen list of stored cardiograms, newest first; a tap opens one with its paper and full analysis. */
 @Composable
 private fun EcgRecordingsDialog(recordings: List<AnalyzedEcg>, trends: EcgTrends?, onDelete: (EcgRecording) -> Unit, onDismiss: () -> Unit) {
-    var selectedId by remember { mutableStateOf<Long?>(null) }
-    var isTrendsOpen by remember { mutableStateOf(false) }
+    var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var isTrendsOpen by rememberSaveable { mutableStateOf(false) }
     val selected = recordings.firstOrNull { it.recording.id == selectedId }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize()) {

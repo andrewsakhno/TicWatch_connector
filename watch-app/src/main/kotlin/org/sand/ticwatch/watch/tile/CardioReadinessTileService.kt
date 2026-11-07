@@ -27,7 +27,7 @@ class CardioReadinessTileService : SuspendingTileService() {
     }
 
     override suspend fun resourcesRequest(requestParams: RequestBuilders.ResourcesRequest): ResourceBuilders.Resources =
-        ResourceBuilders.Resources.Builder().setVersion(RESOURCES_VERSION).build()
+        DomedTileBackdrop.addTo(ResourceBuilders.Resources.Builder()).setVersion(RESOURCES_VERSION).build()
 
     private fun openApp(): ModifiersBuilders.Clickable = ModifiersBuilders.Clickable.Builder()
         .setId(CLICK_OPEN_APP)
@@ -44,7 +44,7 @@ class CardioReadinessTileService : SuspendingTileService() {
         .build()
 
     private companion object {
-        const val RESOURCES_VERSION = "1"
+        const val RESOURCES_VERSION = "2"
         const val CLICK_OPEN_APP = "open_app"
 
         /** Re-render now and then so the values grey out once stale even without new payloads. */

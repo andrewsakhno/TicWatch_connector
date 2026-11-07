@@ -59,24 +59,34 @@ data class LocalBloodPressure(val systolic: Double, val diastolic: Double)
  * Same model and coefficients as phone-app's `health/BloodPressureEstimator` (keep in sync): the calibration cuff
  * reading shifted by how heart rate, RMSSD and skin temperature moved since, each shift clamped, plus the offset. While
  * the pulse is at or above [restingHeartRateLow] (inside the personal resting corridor) the systolic fall is capped at
- * [MAX_RESTING_SYSTOLIC_DROP].
+ * [MAX_RESTING_SYSTOLIC_DROP] below the calibration, or below [NORMOTENSIVE_SYSTOLIC_REFERENCE] for a hypertensive one.
  */
 class LocalBloodPressureEstimator {
 
     fun estimate(calibration: WatchBloodPressureCalibration, current: LocalWristSignals, restingHeartRateLow: Double?): LocalBloodPressure {
         val heartRateShift = current.heartRate - calibration.heartRate
         val skinShift = shift(calibration.skinTemperatureCelsius, current.skinTemperatureCelsius)
-        val minSystolicShift = if (restingHeartRateLow != null && current.heartRate >= restingHeartRateLow) -MAX_RESTING_SYSTOLIC_DROP else -MAX_SYSTOLIC_SHIFT
+        val autonomicShift = autonomicShift(calibration.rmssdMs, current.rmssdMs)
         val systolicShift = (
             SYSTOLIC_PER_BPM * heartRateShift +
-                SYSTOLIC_PER_AUTONOMIC_SHIFT * autonomicShift(calibration.rmssdMs, current.rmssdMs) -
+                SYSTOLIC_PER_AUTONOMIC_SHIFT * autonomicShift -
                 SYSTOLIC_PER_SKIN_DEGREE * skinShift
-            ).coerceIn(minSystolicShift, MAX_SYSTOLIC_SHIFT)
-        val diastolicShift = (DIASTOLIC_PER_BPM * heartRateShift - DIASTOLIC_PER_SKIN_DEGREE * skinShift)
+            ).coerceIn(minSystolicShift(calibration.systolic, current.heartRate, restingHeartRateLow), MAX_SYSTOLIC_SHIFT)
+        val diastolicShift = (
+            DIASTOLIC_PER_BPM * heartRateShift +
+                DIASTOLIC_PER_AUTONOMIC_SHIFT * autonomicShift -
+                DIASTOLIC_PER_SKIN_DEGREE * skinShift
+            )
             .coerceIn(-MAX_DIASTOLIC_SHIFT, MAX_DIASTOLIC_SHIFT)
         val systolic = calibration.systolic + systolicShift + calibration.systolicOffset
         val diastolic = (calibration.diastolic + diastolicShift).coerceAtMost(systolic - MIN_PULSE_PRESSURE)
         return LocalBloodPressure(systolic, diastolic)
+    }
+
+    private fun minSystolicShift(calibrationSystolic: Double, heartRate: Double, restingHeartRateLow: Double?): Double {
+        if (restingHeartRateLow == null || heartRate < restingHeartRateLow) return -MAX_SYSTOLIC_SHIFT
+        val excess = (calibrationSystolic - NORMOTENSIVE_SYSTOLIC_REFERENCE).coerceAtLeast(0.0)
+        return -(MAX_RESTING_SYSTOLIC_DROP + excess).coerceAtMost(MAX_SYSTOLIC_SHIFT)
     }
 
     private fun autonomicShift(baseline: Double?, current: Double?): Double =
@@ -91,11 +101,13 @@ class LocalBloodPressureEstimator {
         const val SYSTOLIC_PER_AUTONOMIC_SHIFT = 14.0
         const val SYSTOLIC_PER_SKIN_DEGREE = 1.2
         const val DIASTOLIC_PER_BPM = 0.3
+        const val DIASTOLIC_PER_AUTONOMIC_SHIFT = 5.0
         const val DIASTOLIC_PER_SKIN_DEGREE = 1.5
         const val MAX_SYSTOLIC_SHIFT = 35.0
         const val MAX_DIASTOLIC_SHIFT = 15.0
         const val MIN_PULSE_PRESSURE = 20.0
         const val MAX_RESTING_SYSTOLIC_DROP = 15.0
+        const val NORMOTENSIVE_SYSTOLIC_REFERENCE = 135.0
         const val MAX_AUTONOMIC_SHIFT = 1.0
     }
 }

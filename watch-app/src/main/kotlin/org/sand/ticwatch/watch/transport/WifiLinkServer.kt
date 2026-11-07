@@ -75,7 +75,7 @@ class WifiLinkServer(
             .build()
         return try {
             connectivity.requestNetwork(request, callback)
-            val host = withTimeoutOrNull(WIFI_TIMEOUT_MS) { address.await() }
+            val host = awaitAwake { withTimeoutOrNull(WIFI_TIMEOUT_MS) { address.await() } }
             if (host == null || lost.isCompleted) {
                 Log.i(TAG, "Wi-Fi did not come up within $WIFI_TIMEOUT_MS ms")
                 connectivity.unregisterNetworkCallback(callback)
@@ -100,6 +100,20 @@ class WifiLinkServer(
         } catch (e: SecurityException) {
             Log.w(TAG, "Failed to request the Wi-Fi network", e)
             null
+        }
+    }
+
+    /**
+     * Keeps the CPU up while [block] waits for Wi-Fi: a suspended watch doesn't advance coroutine timers, so without it
+     * the [WIFI_TIMEOUT_MS] wait stretched to minutes while the phone sat blocked on the offer reply.
+     */
+    private suspend fun <T> awaitAwake(block: suspend () -> T): T {
+        val wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, BRING_UP_WAKE_LOCK_TAG)
+        wakeLock.acquire(WIFI_TIMEOUT_MS + BRING_UP_WAKE_LOCK_MARGIN_MS)
+        try {
+            return block()
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
         }
     }
 
@@ -165,6 +179,8 @@ class WifiLinkServer(
     private companion object {
         const val TAG = "WifiLinkServer"
         const val WAKE_LOCK_TAG = "ticwatch:wifi-link"
+        const val BRING_UP_WAKE_LOCK_TAG = "ticwatch:wifi-bring-up"
+        const val BRING_UP_WAKE_LOCK_MARGIN_MS = 5_000L
         const val ANY_FREE_PORT = 0
 
         // Associating with an access point after the radio was off takes seconds, not milliseconds.

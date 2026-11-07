@@ -25,8 +25,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.Text
 import java.time.Duration
 import java.time.Instant
 import kotlin.math.abs
@@ -85,12 +85,12 @@ fun BloodPressureChart(
 ) {
     if (readings.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.no_readings_today), style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+            Text(stringResource(R.string.no_readings_today), style = MaterialTheme.typography.bodyExtraSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
-    val background = MaterialTheme.colors.background
-    val axisColor = MaterialTheme.colors.onSurfaceVariant
+    val background = MaterialTheme.colorScheme.background
+    val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
     val textMeasurer = rememberTextMeasurer()
     val axisStyle = TextStyle(color = axisColor, fontSize = AXIS_TEXT_SIZE)
     val spanMillis = Duration.between(start, end).toMillis().coerceAtLeast(1).toFloat()

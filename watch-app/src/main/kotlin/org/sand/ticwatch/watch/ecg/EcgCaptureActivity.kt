@@ -21,7 +21,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,16 +45,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
-import androidx.wear.compose.material.Button
-import androidx.wear.compose.material.ButtonDefaults
-import androidx.wear.compose.material.CircularProgressIndicator
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.CircularProgressIndicator
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ProgressIndicatorDefaults
+import androidx.wear.compose.material3.Text
 import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.sand.ticwatch.watch.R
+import org.sand.ticwatch.watch.ui.DomedDialSurface
+import org.sand.ticwatch.watch.ui.TicWatchTheme
 
 /**
  * Full-screen recording screen: turns the display on and keeps it on while the strip is recorded, with a heart beating
@@ -68,7 +70,7 @@ class EcgCaptureActivity : ComponentActivity() {
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContent { MaterialTheme { EcgCaptureContent(onPromptShown = ::buzz) } }
+        setContent { TicWatchTheme { EcgCaptureContent(onPromptShown = ::buzz) } }
         lifecycleScope.launch {
             val ended = EcgCaptureState.current.first { it == null || it.phase == EcgCapturePhase.FINISHED }
             if (ended != null) delay(OUTCOME_SHOWN_MS)
@@ -97,35 +99,35 @@ class EcgCaptureActivity : ComponentActivity() {
 @Composable
 private fun EcgPrompt(onShown: () -> Unit) {
     LaunchedEffect(Unit) { onShown() }
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+    DomedDialSurface(contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             BeatingHeart(bpm = null, sizeDp = PROMPT_HEART_DP)
             Text(
                 text = stringResource(R.string.ecg_prompt_title),
                 textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.display3,
+                style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.Bold,
                 color = HEART,
             )
             Text(
                 text = stringResource(R.string.ecg_prompt_text),
                 textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.title3,
+                style = MaterialTheme.typography.titleMedium,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { EcgCaptureState.answerPrompt(accepted = false) },
                     modifier = Modifier.size(PROMPT_BUTTON_DP.dp),
-                    colors = ButtonDefaults.secondaryButtonColors(),
+                    colors = ButtonDefaults.filledTonalButtonColors(),
                 ) {
-                    Text(text = stringResource(R.string.ecg_prompt_later), style = MaterialTheme.typography.caption1)
+                    Text(text = stringResource(R.string.ecg_prompt_later), style = MaterialTheme.typography.bodyMedium)
                 }
                 Button(
                     onClick = { EcgCaptureState.answerPrompt(accepted = true) },
                     modifier = Modifier.size(PROMPT_BUTTON_DP.dp),
-                    colors = ButtonDefaults.primaryButtonColors(backgroundColor = CONFIRM, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = CONFIRM, contentColor = Color.Black),
                 ) {
-                    Text(text = stringResource(R.string.ecg_prompt_ok), style = MaterialTheme.typography.title2, fontWeight = FontWeight.Bold)
+                    Text(text = stringResource(R.string.ecg_prompt_ok), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -148,21 +150,21 @@ private fun EcgCaptureContent(onPromptShown: () -> Unit) {
         }
     }
     val elapsedMs = current.recordingStartedAtMs?.let { (now - it).coerceIn(0, current.recordingMs) } ?: 0L
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+    DomedDialSurface(contentAlignment = Alignment.Center) {
         if (current.phase == EcgCapturePhase.RECORDING) {
             CircularProgressIndicator(
-                progress = elapsedMs.toFloat() / current.recordingMs,
+                progress = { elapsedMs.toFloat() / current.recordingMs },
                 modifier = Modifier.fillMaxSize(),
-                indicatorColor = HEART,
+                colors = ProgressIndicatorDefaults.colors(indicatorColor = HEART),
                 strokeWidth = RING_WIDTH.dp,
             )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             BeatingHeart(current.heartRateBpm.takeIf { current.phase != EcgCapturePhase.FINISHED })
-            Text(text = statusLine(current, elapsedMs), textAlign = TextAlign.Center, style = MaterialTheme.typography.title3)
+            Text(text = statusLine(current, elapsedMs), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
             Text(
                 text = stringResource(if (current.phase == EcgCapturePhase.FINISHED) R.string.ecg_sent else R.string.keep_still),
-                style = MaterialTheme.typography.caption2,
+                style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
             )
         }

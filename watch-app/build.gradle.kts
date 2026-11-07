@@ -1,14 +1,14 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("com.android.application") version "8.7.0"
+    id("com.android.application") version "8.11.1"
     kotlin("android") version "2.3.21"
     kotlin("plugin.compose") version "2.3.21"
 }
 
 android {
     namespace = "org.sand.ticwatch.watch"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.sand.ticwatch.watch"
@@ -46,6 +46,8 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+        // Wear Material 3 Expressive components that are still experimental.
+        optIn.add("androidx.wear.compose.material3.ExperimentalWearMaterial3Api")
     }
 }
 
@@ -54,9 +56,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     // play-services-base pulls fragment 1.1.0, which the release lint rejects for the ActivityResult APIs.
     implementation("androidx.fragment:fragment:1.8.3")
-    implementation(platform("androidx.compose:compose-bom:2024.09.02"))
-    implementation("androidx.wear.compose:compose-material:1.4.0")
-    implementation("androidx.wear.compose:compose-foundation:1.4.0")
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation("androidx.wear.compose:compose-material3:1.6.2")
+    implementation("androidx.wear.compose:compose-foundation:1.6.2")
     implementation("androidx.wear:wear-tooling-preview:1.0.0")
 
     // TicWatchFaceService: digital face with live heart rate and ambient temperature.

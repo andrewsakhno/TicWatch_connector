@@ -19,7 +19,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -209,6 +209,7 @@ private fun AppScaffold(appContainer: AppContainer, initialScreen: Screen, openC
             topBar = {
                 TopAppBar(
                     title = { Text(text = stringResource(R.string.app_name)) },
+                    subtitle = { Text(text = stringResource(currentScreen.label)) },
                     navigationIcon = {
                         IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
                             Icon(imageVector = Icons.Default.Menu, contentDescription = stringResource(R.string.menu))
@@ -324,13 +325,13 @@ private fun SyncProgressIndicator(status: SyncTransfer) {
         val total = status.totalBytes
         val fraction = status.fraction
         if (total != null && fraction != null) {
-            LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            LinearWavyProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             Text(
                 text = "${formatBytes(status.bytesTransferred)} / ${formatBytes(total)} (${(fraction * 100).roundToInt()}%)",
                 style = MaterialTheme.typography.bodySmall,
             )
         } else {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
         }
     }
 }

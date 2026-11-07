@@ -88,7 +88,7 @@ class TicWatchTileService : SuspendingTileService() {
         .build()
 
     private companion object {
-        const val RESOURCES_VERSION = "1"
+        const val RESOURCES_VERSION = "2"
         const val CLICK_OPEN_APP = "open_app"
         const val BIND_TIMEOUT_MS = 1_500L
         const val FRESHNESS_MS = 5 * 60 * 1_000L

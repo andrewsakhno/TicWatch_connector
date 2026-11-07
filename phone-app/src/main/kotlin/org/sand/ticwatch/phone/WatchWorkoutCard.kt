@@ -26,8 +26,12 @@ import org.sand.ticwatch.phone.ui.rememberStore
 
 /** Starts and ends the watch's walk workout from the phone. */
 @Composable
-internal fun WatchWorkoutCard(commands: WatchWorkoutCommands, activityStore: WatchWorkoutActivityStore) {
-    val store = rememberStore(commands, activityStore) { scope, io -> WatchWorkoutStore(commands, activityStore, scope, io) }
+internal fun rememberWatchWorkoutStore(commands: WatchWorkoutCommands, activityStore: WatchWorkoutActivityStore): WatchWorkoutStore =
+    rememberStore(commands, activityStore) { scope, io -> WatchWorkoutStore(commands, activityStore, scope, io) }
+
+/** The card renders a screen-held [store], so scrolling it out of a lazy list does not cancel the store. */
+@Composable
+internal fun WatchWorkoutCard(store: WatchWorkoutStore) {
     val state by store.state.collectAsState()
     val running = state.activity?.takeIf { it.isRunning(Instant.now()) }
 

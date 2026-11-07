@@ -3,7 +3,13 @@ package org.sand.ticwatch.watch.sensors
 import org.sand.ticwatch.watch.ecg.EcgCapturer
 import org.sand.ticwatch.watch.ecg.NightStripQueue
 import org.sand.ticwatch.watch.ecg.FileNightStripQueue
+import org.sand.ticwatch.watch.ecg.AdaptiveNightStripPolicy
+import org.sand.ticwatch.watch.ecg.HeartRateAlertNightStrips
 import org.sand.ticwatch.watch.ecg.NightPulseStripRecorder
+import org.sand.ticwatch.watch.ecg.NightStripTiming
+import org.sand.ticwatch.watch.sensors.adaptive.MonitoringProfile
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import org.sand.ticwatch.watch.ecg.NightStripSender
 import org.sand.ticwatch.watch.bloodpressure.CompositeAsleepBloodPressureMeasurer
 import org.sand.ticwatch.watch.bloodpressure.AutoBloodPressurePlanner
@@ -353,6 +359,42 @@ class SensorCollectionService : Service() {
 
     private val wakeTimes: WakeTimeHistory by lazy { SharedPreferencesWakeTimeHistory(applicationContext) }
 
+    /** The resting heart-rate trigger is the only one boosting HEART_RATE, so its group profile is that trigger's state. */
+    private val heartRateAlerts: StateFlow<MonitoringProfile> by lazy { adaptiveScheduler.profile(MeasurementGroup.HEART_RATE) }
+
+    /** Adaptive night strips: settled deep sleep at most hourly, or out of turn on a heart-rate alert. */
+    private val nightStripRecorder by lazy {
+        val probe = SensorQualifierProbe(getSystemService(SensorManager::class.java))
+        NightPulseStripRecorder(
+            capturer = ecgCapturer,
+            queue = nightStrips,
+            policy = AdaptiveNightStripPolicy(
+                stages = sleepTracking,
+                heartRateAlert = { heartRateAlerts.value == MonitoringProfile.ALERT },
+                timing = NightStripTiming(
+                    deepSleepSpacing = NIGHT_STRIP_DEEP_SLEEP_SPACING,
+                    alertSpacing = NIGHT_STRIP_ALERT_SPACING,
+                    deepSleepSettle = NIGHT_STRIP_DEEP_SLEEP_SETTLE,
+                ),
+            ),
+            stillness = { probe.accepts(listOf(GyroscopeStillnessQualifier()), NIGHT_STRIP_STILLNESS_PROBE) },
+            awakeRunner = WakeLockAwakeRunner(getSystemService(PowerManager::class.java), NIGHT_STRIP_WAKE_LOCK_TAG),
+            awakeTimeout = NIGHT_STRIP_STILLNESS_PROBE.plus(ECG_WARM_UP).plus(ECG_RECORDING).plus(NIGHT_STRIP_WAKE_SLACK),
+            clock = Clock.systemUTC(),
+            strings = ContextStrings(applicationContext),
+        )
+    }
+
+    private val heartRateAlertNightStrips by lazy {
+        HeartRateAlertNightStrips(
+            alerts = heartRateAlerts.map { it == MonitoringProfile.ALERT },
+            enabled = {
+                currentWatchSettings().nightBloodPressure && sleepState.isAsleep() && offBodyDetector.isWorn() && noWorkoutGate.isOpen()
+            },
+            recorder = nightStripRecorder,
+        )
+    }
+
     private val autoBloodPressure by lazy {
         val settings = SharedPreferencesWatchSettingsStore.get(applicationContext).settings
         AutoBloodPressureController(
@@ -377,7 +419,7 @@ class SensorCollectionService : Service() {
             asleep = CompositeAsleepBloodPressureMeasurer(
                 listOf(
                     LocalAsleepBloodPressureMeasurer(offlineBloodPressure, liveReadings),
-                    NightPulseStripRecorder(ecgCapturer, nightStrips, ContextStrings(applicationContext)),
+                    nightStripRecorder,
                 ),
             ),
             scheduler = alarmScheduler(BLOOD_PRESSURE_ALARM_TAG),
@@ -443,7 +485,8 @@ class SensorCollectionService : Service() {
             sleepWakeMerge = NightAwareWakeMergePolicy(SLEEP_NIGHT_START, SLEEP_NIGHT_END, NIGHT_MAX_WAKE, DAY_MAX_WAKE),
             sleepCheckInterval = SLEEP_CHECK_INTERVAL,
             nightEpoch = NIGHT_EPOCH,
-            nightSnoreSlot = NIGHT_SNORE_SLOT,
+            nightSnore = NightSnoreCadence(NIGHT_SNORE_SLOT, NIGHT_SNORE_EVERY_EPOCHS),
+            nightBatchCheckInterval = NIGHT_BATCH_CHECK_INTERVAL,
             nightIdleCheckInterval = {
                 if (NIGHT_HOURS.contains(Clock.systemUTC().instant())) NIGHT_IDLE_CHECK_INTERVAL else DAY_IDLE_CHECK_INTERVAL
             },
@@ -550,6 +593,9 @@ class SensorCollectionService : Service() {
         serviceScope.launch { recentStepsGate.track() }
         serviceScope.launch { stillEnoughGate.track() }
         serviceScope.launch { autoBloodPressure.run() }
+        serviceScope.launch { heartRateAlertNightStrips.run() }
+        // The night's held-back strips go out in one batch once the session is over.
+        serviceScope.launch { sleepState.sessionChanges.drop(1).filter { !it }.collect { sensorSyncSender.flushNow() } }
     }
 
     private fun currentWatchSettings(): WatchSettings = SharedPreferencesWatchSettingsStore.get(applicationContext).settings.value
@@ -593,7 +639,7 @@ class SensorCollectionService : Service() {
             flushesAtOnce = { it.type == SensorType.SLEEP },
             companions = listOf(
                 WatchBatteryReporter(StickyIntentBatteryStatusReader(applicationContext, Clock.systemUTC()), transport),
-                NightStripSender(nightStrips, transport),
+                NightStripSender(nightStrips, transport, holdBack = sleepState::isAsleep),
             ),
             liveSync = LiveSyncLease.processWide,
             liveLink = liveLink,
@@ -772,7 +818,8 @@ class SensorCollectionService : Service() {
 
         /** Automatic blood pressure: every 5 min while worn, no workout, few steps and a still wrist (gyroscope). */
         private val BLOOD_PRESSURE_INTERVAL: Duration = Duration.ofMinutes(5)
-        private val BLOOD_PRESSURE_SLEEP_INTERVAL: Duration = Duration.ofMinutes(20)
+        /** Clinical ABPM night cadence. */
+        private val BLOOD_PRESSURE_SLEEP_INTERVAL: Duration = Duration.ofMinutes(30)
         /** Denser in the 90 min before the usual wake-up and the 2 h after it: the morning surge. */
         private val BLOOD_PRESSURE_BEFORE_WAKE: Duration = Duration.ofMinutes(90)
         private val BLOOD_PRESSURE_BEFORE_WAKE_INTERVAL: Duration = Duration.ofMinutes(10)
@@ -786,6 +833,12 @@ class SensorCollectionService : Service() {
         private const val BLOOD_PRESSURE_REST_MAX_STEPS = 30L
         private val BLOOD_PRESSURE_STILLNESS_PROBE: Duration = Duration.ofSeconds(20)
         private const val NIGHT_STRIP_DIRECTORY = "night_strips"
+        private const val NIGHT_STRIP_WAKE_LOCK_TAG = "TicWatchConnector:NightStrip"
+        private val NIGHT_STRIP_DEEP_SLEEP_SPACING: Duration = Duration.ofMinutes(60)
+        private val NIGHT_STRIP_ALERT_SPACING: Duration = Duration.ofMinutes(20)
+        private val NIGHT_STRIP_DEEP_SLEEP_SETTLE: Duration = Duration.ofMinutes(5)
+        private val NIGHT_STRIP_STILLNESS_PROBE: Duration = Duration.ofSeconds(10)
+        private val NIGHT_STRIP_WAKE_SLACK: Duration = Duration.ofSeconds(15)
         private const val BLOOD_PRESSURE_ALARM_TAG = "TicWatchConnector:BloodPressureAlarm"
         private const val BLOOD_PRESSURE_WAKE_LOCK_TAG = "TicWatchConnector:BloodPressureProbe"
 
@@ -828,7 +881,11 @@ class SensorCollectionService : Service() {
 
         /** Night epochs: 5 min of SpO2/HRV/breathing each, the first minute of it also listening for snoring. */
         private val NIGHT_EPOCH: Duration = Duration.ofMinutes(5)
-        private val NIGHT_SNORE_SLOT: Duration = Duration.ofMinutes(1)
+        /** 20 s every second 5-min epoch = 20 s every 10 min. */
+        private val NIGHT_SNORE_SLOT: Duration = Duration.ofSeconds(20)
+        private const val NIGHT_SNORE_EVERY_EPOCHS = 2
+        /** FIFO drain + state check while the night sensors are batched. */
+        private val NIGHT_BATCH_CHECK_INTERVAL: Duration = Duration.ofMinutes(1)
 
         /** One heart-rate median per this long while asleep: 60 rows per sync interval, so the night's flushes are the 30 min alarm's. */
         private val SLEEP_HEART_RATE_PERIOD: Duration = Duration.ofSeconds(30)

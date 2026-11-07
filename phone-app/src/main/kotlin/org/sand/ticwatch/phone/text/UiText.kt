@@ -39,6 +39,15 @@ data class LowercaseText(val inner: UiText) : UiText {
     override fun resolve(resources: Resources): String = inner.resolve(resources).lowercase(resources.configuration.locales[0])
 }
 
+/** A moment as wall-clock time in the device zone (HH:mm). */
+data class TimeOfDayText(val at: java.time.Instant) : UiText {
+    override fun resolve(resources: Resources): String = TIME_OF_DAY.format(at.atZone(java.time.ZoneId.systemDefault()))
+
+    private companion object {
+        val TIME_OF_DAY: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+    }
+}
+
 fun uiText(@StringRes id: Int, vararg args: Any): UiText = ResourceText(id, args.toList())
 
 fun pluralText(@PluralsRes id: Int, quantity: Int, vararg args: Any): UiText =

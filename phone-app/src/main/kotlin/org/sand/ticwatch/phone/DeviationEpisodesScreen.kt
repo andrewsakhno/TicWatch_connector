@@ -31,6 +31,7 @@ import org.sand.ticwatch.phone.deviation.DeviationEpisodesStore
 import org.sand.ticwatch.phone.deviation.DeviationIntensity
 import org.sand.ticwatch.phone.deviation.DeviationPeriodFormat
 import org.sand.ticwatch.phone.deviation.DeviationReason
+import org.sand.ticwatch.phone.ui.ConnectedChoiceRow
 
 /** Human in the loop: every deviation episode asks why it happened, and only an answer lets it count for calibration. */
 @Composable
@@ -82,16 +83,12 @@ private fun DeviationEpisodeCard(
                 }
             }
             Text(text = stringResource(R.string.deviation_intensity_title), style = MaterialTheme.typography.bodySmall)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DeviationIntensity.entries.forEach { level ->
-                    val chosen = level == intensity
-                    FilterChip(
-                        selected = chosen,
-                        onClick = { intensity = if (chosen) null else level },
-                        label = { Text(text = stringResource(level.label)) },
-                    )
-                }
-            }
+            ConnectedChoiceRow(
+                options = DeviationIntensity.entries,
+                selected = intensity,
+                onSelect = { level -> intensity = level.takeUnless { it == intensity } },
+                label = { stringResource(it.label) },
+            )
             Button(onClick = { onAnswer(episode.id, selected, intensity) }, enabled = selected.isNotEmpty()) {
                 Text(text = stringResource(R.string.deviation_save))
             }

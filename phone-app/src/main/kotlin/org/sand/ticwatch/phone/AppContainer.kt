@@ -27,6 +27,8 @@ import org.sand.ticwatch.phone.advisor.GeomagneticStormRule
 import org.sand.ticwatch.phone.advisor.AutonomicBalanceCalculator
 import org.sand.ticwatch.phone.advisor.HeartRateDropDetector
 import org.sand.ticwatch.phone.advisor.HistoryAutonomicBalanceSource
+import org.sand.ticwatch.phone.advisor.CalibrationAdvisor
+import org.sand.ticwatch.phone.advisor.HistoryCalibrationAdviceSource
 import org.sand.ticwatch.phone.advisor.HistoryCardioReadinessSource
 import org.sand.ticwatch.phone.advisor.MedicationEffectCurve
 import org.sand.ticwatch.phone.advisor.MedicationProtectionRule
@@ -137,6 +139,10 @@ import org.sand.ticwatch.phone.health.Vo2MaxEstimator
 import org.sand.ticwatch.phone.health.WristSignalsReader
 import org.sand.ticwatch.phone.health.WristCalibrationRestCheck
 import org.sand.ticwatch.phone.health.RestingHeartRateFloor
+import org.sand.ticwatch.phone.health.RestingHeartRateCeiling
+import org.sand.ticwatch.phone.health.RecentPulseWaveBloodPressure
+import org.sand.ticwatch.phone.health.PulseWaveBlender
+import org.sand.ticwatch.phone.ecg.RecentStripPulseBloodPressure
 import org.sand.ticwatch.phone.health.SystolicOffsetSource
 import org.sand.ticwatch.phone.history.AcknowledgingHealthRecordWriter
 import org.sand.ticwatch.phone.history.BodyTemperatureBackfill
@@ -182,6 +188,8 @@ import org.sand.ticwatch.phone.insights.TrainingLoadBalanceCalculator
 import org.sand.ticwatch.phone.insights.TrainingLoadHistory
 import org.sand.ticwatch.phone.insights.WorkoutJournal
 import org.sand.ticwatch.phone.insights.HistoryWorkoutJournal
+import org.sand.ticwatch.phone.insights.HistoryWorkoutPeriodZones
+import org.sand.ticwatch.phone.insights.WorkoutPeriodZones
 import org.sand.ticwatch.phone.language.AppCompatLocaleSelector
 import org.sand.ticwatch.phone.language.AppLanguageSettings
 import org.sand.ticwatch.phone.mcp.McpAgentSettingsStore
@@ -221,7 +229,6 @@ import org.sand.ticwatch.phone.medication.CardioDatabase
 import org.sand.ticwatch.phone.medication.MedicationEffectAnalyzer
 import org.sand.ticwatch.phone.medication.MedicationEffectReader
 import org.sand.ticwatch.phone.medication.MedicationIntakeLog
-import org.sand.ticwatch.phone.medication.MedicationProtectionReader
 import org.sand.ticwatch.phone.medication.MedicationProtectionTracker
 import org.sand.ticwatch.phone.medication.RoomMedicationIntakeLog
 import org.sand.ticwatch.phone.report.AmbulatoryPressureCalculator
@@ -538,13 +545,21 @@ class AppContainer(context: Context) {
         DeviationModule.corridors(context).corridors(at).let { minOf(it.awakeRest.lowBpm, it.sleep.lowBpm) }
     }
 
+    /** The upper edge of the awake resting corridor: the calibration rest limit when no resting heart rate is known. */
+    private val restingHeartRateCeiling = RestingHeartRateCeiling { at -> DeviationModule.corridors(context).corridors(at).awakeRest.highBpm }
+
+    private val calibrationRestCheck = WristCalibrationRestCheck(wristSignals, restingHeartRateCeiling)
+
     val bloodPressureMonitor = BloodPressureMonitor(
         calibrations = profileStore,
         signals = wristSignals,
         estimator = BloodPressureEstimator(),
         systolicOffset = bloodPressureSystolicOffset,
-        restCheck = WristCalibrationRestCheck(wristSignals),
+        restCheck = calibrationRestCheck,
         restingFloor = restingHeartRateFloor,
+        // Lambda: the ECG graph below is built after this monitor.
+        pulseWave = RecentPulseWaveBloodPressure { at -> recentStripPulseBloodPressure.near(at) },
+        blender = PulseWaveBlender(),
         log = bloodPressureLog,
         clock = SensorHistoryModule.clock,
     )
@@ -610,11 +625,7 @@ class AppContainer(context: Context) {
 
     private val medicationProtectionTracker = MedicationProtectionTracker()
 
-    val medicationTracking = MedicationTracking(
-        medicationIntakeLog,
-        medicationEffects,
-        MedicationProtectionReader(medicationIntakeLog, medicationProtectionTracker, SensorHistoryModule.clock),
-    )
+    val medicationTracking = MedicationTracking(medicationIntakeLog, historyRetentionStore)
 
     /** Blood Pressure tab's "Export report for doctor". */
     val cardioReportComposer: CardioReportComposer by lazy {
@@ -661,6 +672,9 @@ class AppContainer(context: Context) {
     /** Workout list behind the "Training load" card. */
     val workoutJournal: WorkoutJournal =
         HistoryWorkoutJournal(sampleWindowReader, sessionRoutePoints, SensorHistoryModule.clock, SensorHistoryModule.zone)
+
+    val workoutPeriodZones: WorkoutPeriodZones =
+        HistoryWorkoutPeriodZones(trainingLoadHistory, SensorHistoryModule.clock, SensorHistoryModule.zone)
 
     /** Sleep score, HRV status, training load, daily stress and morning light, for both dashboards. */
     val healthScores: HealthScoresSource = HistoryHealthScoresSource(
@@ -738,6 +752,9 @@ class AppContainer(context: Context) {
     /** Personal pulse-wave blood pressure: trained on cuff readings paired with a strip recorded around them. */
     private val pulseBloodPressurePairs = cardioDatabase.pulseBloodPressurePairs()
     val pulseBloodPressureEstimator: PulseBloodPressureEstimator = RidgePulseBloodPressureEstimator(pulseBloodPressurePairs)
+    private val recentStripPulseBloodPressure by lazy {
+        RecentStripPulseBloodPressure(ecgRecordingLog, cardiogramAnalyzer, pulseBloodPressureEstimator)
+    }
     private val pulseBloodPressureCalibrator = PulseBloodPressureCalibrator(
         pulseBloodPressurePairs,
         CuffReadingSource.of(bloodPressureMonitor.log::readings),
@@ -805,6 +822,17 @@ class AppContainer(context: Context) {
             autonomic = HistoryAutonomicBalanceSource(
                 historyQueries, circadianNorm, DeviationModule.log(appContext), HeartRateDropDetector(), AutonomicBalanceCalculator(),
                 SensorHistoryModule.zone,
+            ),
+            calibration = HistoryCalibrationAdviceSource(
+                calibrations = profileStore,
+                offsets = profileStore,
+                pairs = pulseBloodPressurePairs,
+                pulseEstimator = pulseBloodPressureEstimator,
+                wrist = wristSignals,
+                restCheck = calibrationRestCheck,
+                log = bloodPressureMonitor.log,
+                accuracy = CalibrationAccuracyCalculator(),
+                advisor = CalibrationAdvisor(),
             ),
         )
     }

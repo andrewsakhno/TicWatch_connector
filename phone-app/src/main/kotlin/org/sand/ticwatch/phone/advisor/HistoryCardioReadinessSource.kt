@@ -88,7 +88,7 @@ class ReadinessSnapshotReader(
     }
 }
 
-/** [CardioReadinessSource] composing the snapshot reader, the engine, the forecaster and the post-stress balance. */
+/** [CardioReadinessSource] composing the snapshot reader, the engine, the forecaster, the post-stress balance and the calibration advice. */
 class HistoryCardioReadinessSource(
     private val reader: ReadinessSnapshotReader,
     private val engine: CardioReadinessEngine,
@@ -96,18 +96,23 @@ class HistoryCardioReadinessSource(
     private val protection: MedicationProtectionTracker,
     private val recovery: VagalRecoverySource,
     private val autonomic: AutonomicBalanceSource,
+    private val calibration: CalibrationAdviceSource? = null,
 ) : CardioReadinessSource {
 
     override suspend fun load(): CardioReadiness {
         val snapshot = reader.read()
+        val forecast = forecaster.forecast(snapshot.inputs, snapshot.context)
+        val medication = protection.protection(snapshot.inputs.lastIntakeAt, snapshot.inputs.at)
+        val balance = autonomic.current(snapshot.inputs)
         return CardioReadiness(
             assessment = engine.assess(snapshot.inputs),
-            forecast = forecaster.forecast(snapshot.inputs, snapshot.context),
+            forecast = forecast,
             vitals = snapshot.vitals,
-            medication = protection.protection(snapshot.inputs.lastIntakeAt, snapshot.inputs.at),
+            medication = medication,
             recovery = recovery.lastNightRecovery(),
             fatigue = snapshot.fatigue,
-            autonomic = autonomic.current(snapshot.inputs),
+            autonomic = balance,
+            calibration = calibration?.advice(CalibrationContext(snapshot.inputs.at, balance, medication, forecast)),
         )
     }
 }

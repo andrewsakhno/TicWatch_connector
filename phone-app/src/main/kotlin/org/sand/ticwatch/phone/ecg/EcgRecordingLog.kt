@@ -37,6 +37,9 @@ interface EcgRecordingDao {
     @Query("SELECT * FROM ecg_recording ORDER BY started_at DESC")
     suspend fun newestFirst(): List<EcgRecordingEntity>
 
+    @Query("SELECT * FROM ecg_recording WHERE started_at >= :fromMs AND started_at < :toMs ORDER BY started_at DESC")
+    suspend fun startedBetween(fromMs: Long, toMs: Long): List<EcgRecordingEntity>
+
     /** Deletes strips started before [beforeMs] the cloud holds, and those it doesn't unless [keepUnsynced]. */
     @Query("DELETE FROM ecg_recording WHERE started_at < :beforeMs AND (cloud_synced = 1 OR :keepUnsynced = 0)")
     suspend fun deleteBefore(beforeMs: Long, keepUnsynced: Boolean): Int
@@ -61,6 +64,9 @@ interface EcgRecordingLog {
 
     suspend fun newestFirst(): List<EcgRecording>
 
+    /** Recordings started in [from] (inclusive) .. [to] (exclusive), newest first. */
+    suspend fun startedBetween(from: Instant, to: Instant): List<EcgRecording>
+
     suspend fun delete(id: Long)
 
     /** Deletes recordings started before [cutoff] the cloud holds, and those it doesn't unless [keepUnsynced]; returns how many. */
@@ -80,7 +86,12 @@ class RoomEcgRecordingLog(private val dao: EcgRecordingDao) : EcgRecordingLog, C
         ),
     )
 
-    override suspend fun newestFirst(): List<EcgRecording> = dao.newestFirst().map { row ->
+    override suspend fun newestFirst(): List<EcgRecording> = dao.newestFirst().map(::toRecording)
+
+    override suspend fun startedBetween(from: Instant, to: Instant): List<EcgRecording> =
+        dao.startedBetween(from.toEpochMilli(), to.toEpochMilli()).map(::toRecording)
+
+    private fun toRecording(row: EcgRecordingEntity): EcgRecording =
         EcgRecording(
             row.id,
             Instant.ofEpochMilli(row.startedAtMs),
@@ -89,7 +100,6 @@ class RoomEcgRecordingLog(private val dao: EcgRecordingDao) : EcgRecordingLog, C
             EcgPayloads.decodeWave(row.waveJson),
             EcgRecordingKind.of(row.kind),
         )
-    }
 
     override suspend fun delete(id: Long) {
         dao.delete(id)

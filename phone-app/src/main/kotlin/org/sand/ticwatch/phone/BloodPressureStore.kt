@@ -18,9 +18,7 @@ import org.sand.ticwatch.phone.health.BloodPressureMonitor
 import org.sand.ticwatch.phone.health.BloodPressureReading
 import org.sand.ticwatch.phone.health.CalibrationResult
 import org.sand.ticwatch.phone.medication.MedicationDose
-import org.sand.ticwatch.phone.medication.MedicationEffect
 import org.sand.ticwatch.phone.medication.MedicationIntake
-import org.sand.ticwatch.phone.medication.MedicationProtection
 import org.sand.ticwatch.phone.text.JoinedText
 import org.sand.ticwatch.phone.text.UiText
 import org.sand.ticwatch.phone.text.uiText
@@ -42,8 +40,8 @@ data class BloodPressureUiState(
     val message: UiText? = null,
     val cuff: CuffStatus? = null,
     val intakes: List<MedicationIntake> = emptyList(),
-    val latestEffect: MedicationEffect? = null,
-    val protection: MedicationProtection? = null,
+    /** Intakes within the "Keep history" retention, newest first - the medication card's list. */
+    val intakeHistory: List<MedicationIntake> = emptyList(),
 )
 
 /** The persisted part of [BloodPressureUiState], read in one pass. */
@@ -53,8 +51,7 @@ private data class BloodPressureSnapshot(
     val historyEnd: Instant,
     val cuff: CuffStatus?,
     val intakes: List<MedicationIntake>,
-    val latestEffect: MedicationEffect?,
-    val protection: MedicationProtection?,
+    val intakeHistory: List<MedicationIntake>,
 )
 
 /**
@@ -83,6 +80,7 @@ class BloodPressureStore(
             CalibrationResult.Implausible -> uiText(R.string.calibration_implausible)
             CalibrationResult.NoHeartRate -> uiText(R.string.calibration_no_hr)
             CalibrationResult.Outdated -> uiText(R.string.calibration_outdated)
+            CalibrationResult.BaselineKept -> uiText(R.string.calibration_baseline_kept)
             is CalibrationResult.NotAtRest -> uiText(R.string.calibration_not_at_rest, it.violation.heartRate.roundToInt())
         }
     }
@@ -140,8 +138,7 @@ class BloodPressureStore(
                 setState {
                     it.copy(
                         calibration = read.calibration, recent = read.recent, historyEnd = read.historyEnd,
-                        cuff = read.cuff, intakes = read.intakes, latestEffect = read.latestEffect,
-                        protection = read.protection,
+                        cuff = read.cuff, intakes = read.intakes, intakeHistory = read.intakeHistory,
                     )
                 }
             }
@@ -150,15 +147,16 @@ class BloodPressureStore(
 
     private suspend fun read(): BloodPressureSnapshot {
         val end = Instant.now()
-        val intakes = medication.intakes.intakes(end.minus(HISTORY_WINDOW), end.plusMillis(1))
+        val historyStart = end.minus(Duration.ofDays(medication.retention.get().days))
+        val intakeHistory = medication.intakes.intakes(historyStart, end.plusMillis(1))
+        val chartStart = end.minus(HISTORY_WINDOW)
         return BloodPressureSnapshot(
             calibration = monitor.calibration(),
             recent = monitor.since(end.minus(HISTORY_WINDOW)),
             historyEnd = end,
             cuff = cuffStatus.cuffStatus(),
-            intakes = intakes,
-            latestEffect = intakes.lastOrNull()?.let { medication.effects.effect(it) },
-            protection = medication.protection.current(),
+            intakes = intakeHistory.filter { !it.takenAt.isBefore(chartStart) },
+            intakeHistory = intakeHistory.asReversed(),
         )
     }
 }

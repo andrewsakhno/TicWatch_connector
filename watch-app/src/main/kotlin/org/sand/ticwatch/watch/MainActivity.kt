@@ -11,23 +11,23 @@ import android.os.IBinder
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import org.sand.ticwatch.watch.screenshot.DashboardPageNavigator
-import org.sand.ticwatch.watch.screenshot.VisibleScreen
-import org.sand.ticwatch.watch.screenshot.WindowScreenCapturer
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
-import androidx.wear.compose.material.MaterialTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import org.sand.ticwatch.watch.autoworkout.SharedPreferencesAutoWorkoutSettings
 import org.sand.ticwatch.watch.phonedata.PhonePayloadStores
+import org.sand.ticwatch.watch.screenshot.DashboardPageNavigator
+import org.sand.ticwatch.watch.screenshot.VisibleScreen
+import org.sand.ticwatch.watch.screenshot.WindowScreenCapturer
 import org.sand.ticwatch.watch.sensors.SensorCollectionService
 import org.sand.ticwatch.watch.settings.SharedPreferencesWatchSettingsStore
 import org.sand.ticwatch.watch.settings.WatchSettings
 import org.sand.ticwatch.watch.settings.WatchSettingsSync
 import org.sand.ticwatch.watch.transport.BluetoothLinkServerService
+import org.sand.ticwatch.watch.ui.TicWatchTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme {
+            TicWatchTheme {
                 val state by dashboard.state.collectAsState()
                 val stores = state.phonePayloads
                 val watchSettings = state.settings

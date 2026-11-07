@@ -1,6 +1,7 @@
 package org.sand.ticwatch.phone.transport
 
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -14,6 +15,7 @@ import java.io.DataOutputStream
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.time.Duration
 
 /** Where the watch's Wi-Fi link listens and the key sealing it; good for one short session. */
 class WifiLinkEndpoint(val host: String, val port: Int, val key: ByteArray)
@@ -25,7 +27,7 @@ fun interface WifiNetworkSource {
 
 /** Asks the watch to open its Wi-Fi link; null when it can't (no Wi-Fi, older watch-app). */
 fun interface WifiEndpointRequester {
-    fun request(): WifiLinkEndpoint?
+    suspend fun request(): WifiLinkEndpoint?
 }
 
 class ConnectivityWifiNetworkSource(context: Context) : WifiNetworkSource {
@@ -44,23 +46,32 @@ class ConnectivityWifiNetworkSource(context: Context) : WifiNetworkSource {
 /** Negotiates over the bonded RFCOMM link, so only the paired watch can hand out an endpoint. */
 class RfcommWifiEndpointRequester(private val context: Context) : WifiEndpointRequester {
 
-    override fun request(): WifiLinkEndpoint? {
+    override suspend fun request(): WifiLinkEndpoint? {
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
             ?: error("Bluetooth not supported on this device")
         val watch = TransportProtocol.findBondedWatch(adapter) ?: error("No bonded watch found")
-        return watch.connectLinkSocket().use { socket ->
-            val output = DataOutputStream(socket.outputStream)
-            output.writeUTF(TransportProtocol.WIFI_OFFER_FRAME_PATH)
-            output.writeLong(TransportProtocol.WIFI_OFFER_FRAME_LENGTH)
-            output.flush()
-            val input = DataInputStream(socket.inputStream)
-            if (input.read() != TransportProtocol.WIFI_READY) return@use null
-            WifiLinkEndpoint(
-                host = input.readUTF(),
-                port = input.readInt(),
-                key = ByteArray(TransportProtocol.WIFI_KEY_BYTES).also(input::readFully),
-            )
+        return watch.connectLinkSocket().use { linkSocket ->
+            linkSocket.withDeadline(OFFER_DEADLINE, "Waiting for the watch's Wi-Fi offer") { socket -> readOffer(socket) }
         }
+    }
+
+    private fun readOffer(socket: BluetoothSocket): WifiLinkEndpoint? {
+        val output = DataOutputStream(socket.outputStream)
+        output.writeUTF(TransportProtocol.WIFI_OFFER_FRAME_PATH)
+        output.writeLong(TransportProtocol.WIFI_OFFER_FRAME_LENGTH)
+        output.flush()
+        val input = DataInputStream(socket.inputStream)
+        if (input.read() != TransportProtocol.WIFI_READY) return null
+        return WifiLinkEndpoint(
+            host = input.readUTF(),
+            port = input.readInt(),
+            key = ByteArray(TransportProtocol.WIFI_KEY_BYTES).also(input::readFully),
+        )
+    }
+
+    private companion object {
+        /** The watch's own Wi-Fi bring-up wait (20 s) plus RFCOMM round trips; past it Bluetooth takes over. */
+        val OFFER_DEADLINE: Duration = Duration.ofSeconds(30)
     }
 }
 

@@ -27,6 +27,7 @@ import java.time.format.DateTimeFormatter
 import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.spaceweather.GeomagneticLevel
 import org.sand.ticwatch.phone.spaceweather.SpaceWeatherDay
+import org.sand.ticwatch.phone.text.inCurrentLocale
 
 private val CHART_HEIGHT = 140.dp
 private val BAR_CORNER = 4.dp
@@ -108,7 +109,7 @@ private fun DayDetails(day: SpaceWeatherDay) {
     val origin = stringResource(if (day.forecast) R.string.day_forecast else R.string.day_observed)
     Text(text = stringResource(day.level.label), style = MaterialTheme.typography.titleSmall, color = GaugeScales.kpColor(day.level))
     Text(
-        text = stringResource(R.string.day_details, DETAIL_DATE_FORMAT.format(day.date), day.maxKp, flux, origin),
+        text = stringResource(R.string.day_details, DETAIL_DATE_FORMAT.inCurrentLocale().format(day.date), day.maxKp, flux, origin),
         style = MaterialTheme.typography.bodySmall,
     )
 }
@@ -118,7 +119,7 @@ private fun DayLabel(day: SpaceWeatherDay, modifier: Modifier) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text = "%.1f".format(day.maxKp), style = MaterialTheme.typography.labelLarge, color = GaugeScales.kpColor(day.level))
-        Text(text = WEEKDAY_FORMAT.format(day.date), style = MaterialTheme.typography.labelSmall)
+        Text(text = WEEKDAY_FORMAT.inCurrentLocale().format(day.date), style = MaterialTheme.typography.labelSmall)
         Text(text = DATE_FORMAT.format(day.date), style = MaterialTheme.typography.labelSmall, color = muted)
         Text(text = day.radioFlux?.let { "☀$it" } ?: "☀-", style = MaterialTheme.typography.labelSmall, color = muted)
     }

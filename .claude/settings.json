@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./**/build/**)",
+      "Read(./**/target/**)",
+      "Read(./**/node_modules/**)",
+      "Read(./**/logs/**)",
+      "Read(./**/.gradle/**)",
+      "Read(./**/dist/**)"
+    ]
+  }
+}

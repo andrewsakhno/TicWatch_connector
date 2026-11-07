@@ -1,14 +1,15 @@
 package org.sand.ticwatch.phone
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
@@ -46,11 +47,9 @@ import org.sand.ticwatch.phone.health.CalibrationResult
 import org.sand.ticwatch.phone.health.WristSignalsReader
 import org.sand.ticwatch.phone.medication.MedicationDose
 import org.sand.ticwatch.phone.medication.MedicationEffect
-import org.sand.ticwatch.phone.medication.MedicationEffectReader
+import org.sand.ticwatch.phone.history.HistoryRetentionStore
 import org.sand.ticwatch.phone.medication.MedicationIntake
 import org.sand.ticwatch.phone.medication.MedicationIntakeLog
-import org.sand.ticwatch.phone.medication.MedicationProtection
-import org.sand.ticwatch.phone.medication.MedicationProtectionReader
 import org.sand.ticwatch.phone.report.CardioReportComposer
 import org.sand.ticwatch.phone.text.asString
 import org.sand.ticwatch.phone.ui.rememberStore
@@ -71,30 +70,38 @@ fun BloodPressureScreen(
 ) {
     val store = rememberStore(monitor) { scope, io -> BloodPressureStore(monitor, watchSync, cuffStatus, medication, changes, scope, io) }
     val state by store.state.collectAsState()
+    val ecgStore = rememberEcgStore(ecg)
 
-    Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+    // Lazy: a data push recomposes only the visible cards, not every chart of the tab mid-scroll.
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(CARD_SPACING.dp),
     ) {
-        CalibrationCard(state.calibration, monitor, store::calibrate)
-        MeasurementCard(measurement = state.measurement, onMeasure = store::measure)
-        state.message?.let { Text(text = it.asString(), style = MaterialTheme.typography.bodyMedium) }
-        EcgCard(ecg)
-        MedicationCard(state.latestEffect, state.protection, state.historyEnd, store::logIntake)
-        state.cuff?.let { CuffCard(it) }
-        HistoryCard(
-            state.recent, state.historyEnd.minus(HISTORY_WINDOW), state.historyEnd, state.intakes.map { it.takenAt },
-            store::delete,
-        )
-        ReportExportCard(reports)
+        item(key = BloodPressureItem.CALIBRATION) { CalibrationCard(state.calibration, monitor, store::calibrate) }
+        item(key = BloodPressureItem.MEASUREMENT) { MeasurementCard(measurement = state.measurement, onMeasure = store::measure) }
+        state.message?.let { message ->
+            item(key = BloodPressureItem.MESSAGE) { Text(text = message.asString(), style = MaterialTheme.typography.bodyMedium) }
+        }
+        item(key = BloodPressureItem.ECG) { EcgCard(ecgStore) }
+        item(key = BloodPressureItem.MEDICATION) { MedicationCard(state.intakeHistory, store::logIntake) }
+        state.cuff?.let { cuff -> item(key = BloodPressureItem.CUFF) { CuffCard(cuff) } }
+        item(key = BloodPressureItem.HISTORY) {
+            HistoryCard(
+                state.recent, state.historyEnd.minus(HISTORY_WINDOW), state.historyEnd, state.intakes.map { it.takenAt },
+                store::delete,
+            )
+        }
+        item(key = BloodPressureItem.REPORT) { ReportExportCard(reports) }
     }
 }
 
-/** What the medication card needs: the intake log and the effect reader. */
+/** Stable keys of the tab's lazy list items. */
+private enum class BloodPressureItem { CALIBRATION, MEASUREMENT, MESSAGE, ECG, MEDICATION, CUFF, HISTORY, REPORT }
+
+/** What the medication card needs: the intake log and the history retention that bounds the listed intakes. */
 class MedicationTracking(
     val intakes: MedicationIntakeLog,
-    val effects: MedicationEffectReader,
-    val protection: MedicationProtectionReader,
+    val retention: HistoryRetentionStore,
 )
 
 @Composable
@@ -103,8 +110,8 @@ private fun CalibrationCard(
     monitor: BloodPressureMonitor,
     onSave: (Double, Double) -> Unit,
 ) = SectionCard(stringResource(R.string.card_calibration)) {
-    var systolicText by remember { mutableStateOf("") }
-    var diastolicText by remember { mutableStateOf("") }
+    var systolicText by rememberSaveable { mutableStateOf("") }
+    var diastolicText by rememberSaveable { mutableStateOf("") }
     Text(
         text = stringResource(R.string.calibration_hint),
         style = MaterialTheme.typography.bodySmall,

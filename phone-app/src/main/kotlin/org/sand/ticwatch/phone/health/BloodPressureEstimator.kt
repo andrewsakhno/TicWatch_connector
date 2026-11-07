@@ -44,7 +44,7 @@ enum class BloodPressureCategory(@StringRes val label: Int, val systolicFrom: Do
 
 /**
  * Tuning of [BloodPressureEstimator]: [systolicPerBpm]/[diastolicPerBpm] in mmHg per bpm of heart-rate change,
- * [systolicPerAutonomicShift] in mmHg per unit of `1 - RMSSD/RMSSD_base`, [systolicPerSkinDegree]/[diastolicPerSkinDegree]
+ * [systolicPerAutonomicShift]/[diastolicPerAutonomicShift] in mmHg per unit of `1 - RMSSD/RMSSD_base`, [systolicPerSkinDegree]/[diastolicPerSkinDegree]
  * in mmHg per °C of skin warming (peripheral vasodilation lowers both, vasoconstriction raises them). Not fitted to this user.
  */
 data class BloodPressureCoefficients(
@@ -52,18 +52,25 @@ data class BloodPressureCoefficients(
     val systolicPerAutonomicShift: Double = 14.0,
     val systolicPerSkinDegree: Double = 1.2,
     val diastolicPerBpm: Double = 0.3,
+    val diastolicPerAutonomicShift: Double = 5.0,
     val diastolicPerSkinDegree: Double = 1.5,
     val maxSystolicShift: Double = 35.0,
     val maxDiastolicShift: Double = 15.0,
     val minPulsePressure: Double = 20.0,
     /** Deepest systolic fall below the calibration while the pulse is still inside the personal resting corridor. */
     val maxRestingSystolicDrop: Double = 15.0,
+    /**
+     * The resting floor is measured from at most this systolic: a calibration taken during a hypertensive spike
+     * mustn't hold every later resting estimate at `calibration - maxRestingSystolicDrop`.
+     */
+    val normotensiveSystolicReference: Double = 135.0,
 )
 
 /**
  * Calibrated cuffless estimate: shifts the calibration cuff reading by how the wrist signals moved since then.
  *
- * `SYS = SYS_base + k1 * dHR + k2 * (1 - RMSSD / RMSSD_base) - k5 * dT_skin + offset`, `DIA = DIA_base + k3 * dHR - k4 * dT_skin`,
+ * `SYS = SYS_base + k1 * dHR + k2 * A - k5 * dT_skin + offset`, `DIA = DIA_base + k3 * dHR + k6 * A - k4 * dT_skin`
+ * with `A = 1 - RMSSD / RMSSD_base`,
  * each shift clamped to a physiological band around the baseline. A missing RMSSD or skin temperature (now or
  * at calibration) drops its term. [systolicOffset] comes from [SystolicOffsetSource] and is outside the clamp.
  * An approximation for trends only, not a substitute for a cuff.
@@ -79,13 +86,15 @@ class BloodPressureEstimator(private val coefficients: BloodPressureCoefficients
     ): BloodPressureReading {
         val heartRateShift = current.heartRate - calibration.heartRate
         val skinShift = skinShift(calibration.skinTemperatureCelsius, current.skinTemperatureCelsius)
+        val autonomicShift = autonomicShift(calibration.rmssdMs, current.rmssdMs)
         val systolicShift = (
             coefficients.systolicPerBpm * heartRateShift +
-                coefficients.systolicPerAutonomicShift * autonomicShift(calibration.rmssdMs, current.rmssdMs) -
+                coefficients.systolicPerAutonomicShift * autonomicShift -
                 coefficients.systolicPerSkinDegree * skinShift
-            ).coerceIn(minSystolicShift(current.heartRate, restingHeartRateLow), coefficients.maxSystolicShift)
+            ).coerceIn(minSystolicShift(calibration.systolic, current.heartRate, restingHeartRateLow), coefficients.maxSystolicShift)
         val diastolicShift = (
-            coefficients.diastolicPerBpm * heartRateShift -
+            coefficients.diastolicPerBpm * heartRateShift +
+                coefficients.diastolicPerAutonomicShift * autonomicShift -
                 coefficients.diastolicPerSkinDegree * skinShift
             ).coerceIn(-coefficients.maxDiastolicShift, coefficients.maxDiastolicShift)
         val systolic = calibration.systolic + systolicShift + systolicOffset
@@ -95,12 +104,15 @@ class BloodPressureEstimator(private val coefficients: BloodPressureCoefficients
 
     /**
      * A pulse still inside the resting corridor (at or above its [restingHeartRateLow]) is ordinary rest, which can't
-     * justify a systolic collapse: the fall is capped at [BloodPressureCoefficients.maxRestingSystolicDrop]. Only below
-     * the corridor (deep sleep, bradycardia) does the full band apply.
+     * justify a systolic collapse: the floor is [BloodPressureCoefficients.maxRestingSystolicDrop] below the calibration,
+     * or below [BloodPressureCoefficients.normotensiveSystolicReference] for a hypertensive calibration. Only below the
+     * corridor (deep sleep, bradycardia) does the full band apply; the floor never goes past it.
      */
-    private fun minSystolicShift(heartRate: Double, restingHeartRateLow: Double?): Double =
-        if (restingHeartRateLow != null && heartRate >= restingHeartRateLow) -coefficients.maxRestingSystolicDrop
-        else -coefficients.maxSystolicShift
+    private fun minSystolicShift(calibrationSystolic: Double, heartRate: Double, restingHeartRateLow: Double?): Double {
+        if (restingHeartRateLow == null || heartRate < restingHeartRateLow) return -coefficients.maxSystolicShift
+        val excess = (calibrationSystolic - coefficients.normotensiveSystolicReference).coerceAtLeast(0.0)
+        return -(coefficients.maxRestingSystolicDrop + excess).coerceAtMost(coefficients.maxSystolicShift)
+    }
 
     /** `1 - current / baseline`, bounded so one noisy RMSSD can't dominate; 0 without both values. */
     private fun autonomicShift(baseline: Double?, current: Double?): Double =

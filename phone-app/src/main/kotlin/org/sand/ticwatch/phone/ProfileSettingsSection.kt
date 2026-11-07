@@ -2,23 +2,19 @@ package org.sand.ticwatch.phone
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import java.time.Year
 import org.sand.ticwatch.phone.health.BiologicalSex
+import org.sand.ticwatch.phone.ui.ConnectedChoiceRow
 import org.sand.ticwatch.phone.ui.rememberStore
 
 /**
@@ -54,17 +50,12 @@ fun ProfileSettingsSection(appContainer: AppContainer) {
             onTextChange = { store.edit(ProfileTextField.BIRTH_YEAR, it) },
             onValueChange = { year -> store.save { setBirthYear(year) } },
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(FIELD_SPACING.dp)) {
-            BiologicalSex.entries.forEach { option ->
-                FilterChip(
-                    selected = sex == option,
-                    onClick = {
-                        store.setSex(option.takeUnless { sex == option })
-                    },
-                    label = { Text(text = stringResource(SEX_LABELS.getValue(option))) },
-                )
-            }
-        }
+        ConnectedChoiceRow(
+            options = BiologicalSex.entries,
+            selected = sex,
+            onSelect = { option -> store.setSex(option.takeUnless { it == sex }) },
+            label = { stringResource(SEX_LABELS.getValue(it)) },
+        )
         ProfileNumberField(
             text = state.text(ProfileTextField.HEIGHT),
             label = stringResource(R.string.profile_height),

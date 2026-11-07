@@ -4,15 +4,13 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -40,12 +38,12 @@ import org.sand.ticwatch.phone.insights.FATIGUE_INDEX_SCALE
 import org.sand.ticwatch.phone.insights.FatigueDayChart
 import org.sand.ticwatch.phone.insights.FatigueHistory
 import org.sand.ticwatch.phone.insights.FatigueHistorySpan
+import org.sand.ticwatch.phone.ui.ConnectedChoiceRow
 import org.sand.ticwatch.phone.ui.ReloadingStore
 import org.sand.ticwatch.phone.ui.rememberStore
 
 private val SHEET_PADDING = 16.dp
 private val ITEM_SPACING = 12.dp
-private val CHIP_SPACING = 6.dp
 private val CHART_TITLE_SPACING = 4.dp
 private val CHART_HEIGHT = 120.dp
 private const val CHART_TITLE_SKELETON = "EEEEdMMMM"
@@ -74,7 +72,7 @@ internal fun FatigueHistorySheet(history: FatigueHistory, changes: Flow<*>, onDi
             item { Text(text = stringResource(R.string.fatigue_history_title), style = MaterialTheme.typography.titleLarge) }
             item { SpanChooser(span) { span = it } }
             if (loaded == null) {
-                item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                item { LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth()) }
             } else {
                 items(charts, key = { it.lines.first().date.toEpochDay() }) { FatigueDayCard(it) }
             }
@@ -86,11 +84,7 @@ internal fun FatigueHistorySheet(history: FatigueHistory, changes: Flow<*>, onDi
 private fun SpanChooser(selected: FatigueHistorySpan, onSelect: (FatigueHistorySpan) -> Unit) {
     Column {
         Text(text = stringResource(R.string.report_period_days), style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(CHIP_SPACING)) {
-            FatigueHistorySpan.entries.forEach { option ->
-                FilterChip(selected = option == selected, onClick = { onSelect(option) }, label = { Text(text = "${option.days}") })
-            }
-        }
+        ConnectedChoiceRow(options = FatigueHistorySpan.entries, selected = selected, onSelect = onSelect, label = { "${it.days}" })
     }
 }
 

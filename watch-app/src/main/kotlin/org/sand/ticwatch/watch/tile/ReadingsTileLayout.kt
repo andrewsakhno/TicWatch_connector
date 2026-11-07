@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.wear.protolayout.ColorBuilders.argb
 import androidx.wear.protolayout.DeviceParametersBuilders.DeviceParameters
 import androidx.wear.protolayout.DimensionBuilders.dp
-import androidx.wear.protolayout.DimensionBuilders.expand
 import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.LayoutElementBuilders.LayoutElement
 import androidx.wear.protolayout.ModifiersBuilders
@@ -50,15 +49,10 @@ class ReadingsTileLayout(private val context: Context) {
             .build()
 
         // The whole tile opens the app, not only the chip.
-        return LayoutElementBuilders.Box.Builder()
-            .setWidth(expand())
-            .setHeight(expand())
-            .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(onClick).build())
-            .addContent(layout)
-            .build()
+        return DomedTileBackdrop.around(layout, onClick)
     }
 
-    fun resources(version: String): ResourceBuilders.Resources = ResourceBuilders.Resources.Builder()
+    fun resources(version: String): ResourceBuilders.Resources = DomedTileBackdrop.addTo(ResourceBuilders.Resources.Builder())
         .setVersion(version)
         .addIdToImageMapping(ICON_HEART, image(R.drawable.ic_tile_heart))
         .addIdToImageMapping(ICON_THERMOMETER, image(R.drawable.ic_tile_thermometer))

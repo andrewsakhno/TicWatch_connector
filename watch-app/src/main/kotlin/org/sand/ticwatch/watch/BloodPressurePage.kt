@@ -18,12 +18,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Switch
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.ToggleChip
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.SwitchButton
+import androidx.wear.compose.material3.Text
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -92,25 +91,25 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
     val latest = readings.firstOrNull()
     ScalingLazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
-            Text(stringResource(R.string.blood_pressure), style = MaterialTheme.typography.caption1, color = MaterialTheme.colors.onSurfaceVariant)
+            Text(stringResource(R.string.blood_pressure), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
-            Text(latest?.let { "${it.systolic}/${it.diastolic}" } ?: MISSING, style = MaterialTheme.typography.display2)
+            Text(latest?.let { "${it.systolic}/${it.diastolic}" } ?: MISSING, style = MaterialTheme.typography.displayMedium)
         }
         item {
             Text(
                 latest?.let { entry ->
                     listOfNotNull(stringResource(R.string.mmhg), entry.pulse?.let { stringResource(R.string.pulse_value, it) }).joinToString(" · ")
                 } ?: stringResource(R.string.mmhg),
-                style = MaterialTheme.typography.caption2,
+                style = MaterialTheme.typography.bodySmall,
             )
         }
         latest?.let { entry ->
             item {
                 Text(
                     "${entry.category}\n${entry.source} · ${formatTime(entry.measuredAt)}",
-                    style = MaterialTheme.typography.caption3,
-                    color = MaterialTheme.colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyExtraSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -128,22 +127,22 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(LEGEND_SPACING)) {
-                Text(stringResource(R.string.bp_sys), style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.SYSTOLIC)
-                Text(stringResource(R.string.bp_dia), style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.DIASTOLIC)
-                Text(stringResource(R.string.bp_cuff), style = MaterialTheme.typography.caption3, color = BloodPressureChartColors.CUFF)
-                Text(stringResource(R.string.last_24h), style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+                Text(stringResource(R.string.bp_sys), style = MaterialTheme.typography.bodyExtraSmall, color = BloodPressureChartColors.SYSTOLIC)
+                Text(stringResource(R.string.bp_dia), style = MaterialTheme.typography.bodyExtraSmall, color = BloodPressureChartColors.DIASTOLIC)
+                Text(stringResource(R.string.bp_cuff), style = MaterialTheme.typography.bodyExtraSmall, color = BloodPressureChartColors.CUFF)
+                Text(stringResource(R.string.last_24h), style = MaterialTheme.typography.bodyExtraSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { SelectedReading(selected) }
         item {
-            Chip(
+            Button(
                 onClick = {
                     measuring = true
                     state.onMeasure?.invoke()
                 },
                 enabled = state.onMeasure != null && !measuring,
                 label = { Text(stringResource(if (measuring) R.string.measuring else R.string.measure)) },
-                colors = ChipDefaults.primaryChipColors(),
+                colors = ButtonDefaults.buttonColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -151,20 +150,19 @@ internal fun BloodPressurePage(state: BloodPressurePageState) {
             item {
                 Text(
                     "${last.status} · ${formatTime(last.at)}",
-                    style = MaterialTheme.typography.caption3,
-                    color = if (last.success) SUCCESS_COLOR else MaterialTheme.colors.error,
+                    style = MaterialTheme.typography.bodyExtraSmall,
+                    color = if (last.success) SUCCESS_COLOR else MaterialTheme.colorScheme.error,
                     textAlign = TextAlign.Center,
                 )
             }
         }
         item {
-            ToggleChip(
+            SwitchButton(
                 checked = state.autoMeasure == true,
                 onCheckedChange = state.onAutoMeasureChange,
                 enabled = state.autoMeasure != null,
                 label = { Text(stringResource(R.string.auto_at_rest)) },
                 secondaryLabel = { Text(stringResource(R.string.every_5_min)) },
-                toggleControl = { Switch(checked = state.autoMeasure == true) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -181,8 +179,8 @@ private fun SelectedReading(entry: BloodPressureEntry?) {
                 reading.source,
             ).joinToString(" · ") + "\n${reading.category}"
         } ?: stringResource(R.string.tap_chart),
-        style = MaterialTheme.typography.caption3,
-        color = MaterialTheme.colors.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyExtraSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
     )

@@ -9,6 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import org.sand.ticwatch.phone.datalayer.WatchSyncOutcome
 import org.sand.ticwatch.phone.datalayer.WatchSyncRequester
+import org.sand.ticwatch.phone.health.BloodPressureCalibration
 import org.sand.ticwatch.phone.health.BloodPressureTestFixture
 import org.sand.ticwatch.phone.health.HeartRateReading
 import java.time.Duration
@@ -75,6 +76,21 @@ class CuffReadingRecorderTest {
 
         assertEquals(140.0, fixture.calibrations.current!!.systolic, DELTA)
         assertEquals(cuffAt, fixture.calibrations.current!!.calibratedAt)
+    }
+
+    @Test
+    fun `hypertensive cuff reading is logged but keeps the normotensive calibration`() = runTest {
+        val baseline = BloodPressureCalibration(125.0, 84.0, 70.0, null, null, cuffAt.minus(Duration.ofDays(1)))
+        fixture.calibrations.current = baseline
+        fixture.watchHeartRate(96.0, cuffAt.minus(Duration.ofMinutes(1)))
+        val watchSync = FakeWatchSync(WatchSyncOutcome.DELIVERED)
+
+        recorder(watchSync).onReading(CuffReading(149, 99, 96, LocalDateTime.ofInstant(cuffAt, ZoneOffset.UTC)), live = true)
+        advanceUntilIdle()
+
+        assertEquals(baseline, fixture.calibrations.current)
+        assertEquals(149.0, fixture.monitor.log.readings(cuffAt, cuffAt.plusMillis(1)).single().systolic, DELTA)
+        assertEquals(0, watchSync.requests)
     }
 
     private companion object {

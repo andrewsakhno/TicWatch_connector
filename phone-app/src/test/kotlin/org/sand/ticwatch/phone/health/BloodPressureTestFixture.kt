@@ -85,6 +85,9 @@ class BloodPressureTestFixture(start: Instant) {
     val clock = MutableClock(start)
     val history = InMemoryHistory()
     val calibrations = InMemoryCalibrations()
+
+    /** What the pulse-wave model reads from a strip recorded just before a measurement; null = no strip. */
+    var recentPulseWave: PulseWaveBloodPressure? = null
     val monitor = BloodPressureMonitor(
         calibrations = calibrations,
         signals = WristSignalsReader(SampleWindowReader(history)),
@@ -92,6 +95,8 @@ class BloodPressureTestFixture(start: Instant) {
         systolicOffset = { 0.0 },
         restCheck = { _, _ -> null },
         restingFloor = { null },
+        pulseWave = { recentPulseWave },
+        blender = PulseWaveBlender(),
         log = BloodPressureLog(history, SampleWindowReader(history), history, {}, {}),
         clock = clock,
     )

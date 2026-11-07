@@ -2,7 +2,6 @@ package org.sand.ticwatch.watch
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -10,9 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -27,19 +23,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.pager.HorizontalPager
+import androidx.wear.compose.foundation.pager.rememberPagerState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.HorizontalPageIndicator
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.PageIndicatorState
-import androidx.wear.compose.material.PositionIndicator
-import androidx.wear.compose.material.Scaffold
-import androidx.wear.compose.material.Switch
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.TimeText
-import androidx.wear.compose.material.ToggleChip
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.HorizontalPageIndicator
+import androidx.wear.compose.material3.HorizontalPagerScaffold
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.SwitchButton
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.TimeText
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,6 +55,8 @@ import org.sand.ticwatch.watch.sensors.TimedReading
 import org.sand.ticwatch.watch.settings.SnoreMicrophone
 import org.sand.ticwatch.watch.spaceweather.SpaceWeatherDaySnapshot
 import org.sand.ticwatch.watch.spaceweather.SpaceWeatherSnapshot
+import org.sand.ticwatch.watch.text.inCurrentLocale
+import org.sand.ticwatch.watch.ui.DomedDialSurface
 
 private const val MISSING = "--"
 private val NO_READING: StateFlow<Double?> = MutableStateFlow(null)
@@ -128,19 +127,17 @@ fun WatchDashboardScreen(
             pageNavigator.requests.collect { pagerState.scrollToPage(it) }
         }
     }
-    Scaffold(
-        timeText = { TimeText() },
-        pageIndicator = { HorizontalPageIndicator(pageIndicatorState = pagerState.asIndicatorState()) },
-    ) {
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page -> pages[page](page == pagerState.currentPage) }
+    DomedDialSurface {
+        AppScaffold(
+            timeText = { TimeText() },
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+        ) {
+            HorizontalPagerScaffold(pagerState = pagerState, pageIndicator = { HorizontalPageIndicator(pagerState = pagerState) }) {
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page -> pages[page](page == pagerState.currentPage) }
+            }
+        }
     }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-private fun PagerState.asIndicatorState(): PageIndicatorState = object : PageIndicatorState {
-    override val pageOffset: Float get() = currentPageOffsetFraction
-    override val selectedPage: Int get() = currentPage
-    override val pageCount: Int get() = this@asIndicatorState.pageCount
 }
 
 @Composable
@@ -191,12 +188,12 @@ private fun SleepScorePage(healthScores: StateFlow<HealthScoresSnapshot?>?) {
     val score = snapshot?.sleepScore?.toDouble()
     PageColumn {
         Caption(stringResource(R.string.sleep_score))
-        Text(format(score, "%.0f"), style = MaterialTheme.typography.display3)
+        Text(format(score, "%.0f"), style = MaterialTheme.typography.numeralSmall)
         BandLabel(GaugeScales.SLEEP_SCORE, score)
         Spacer(Modifier.height(SECTION_GAP))
         ColorScaleBar(GaugeScales.SLEEP_SCORE, score, Modifier.fillMaxWidth(SCALE_WIDTH_FRACTION))
         Spacer(Modifier.height(SECTION_GAP))
-        Text(snapshot?.date ?: MISSING, style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+        Text(snapshot?.date ?: MISSING, style = MaterialTheme.typography.bodyExtraSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -206,12 +203,12 @@ private fun FatiguePage(healthScores: StateFlow<HealthScoresSnapshot?>?) {
     val percent = snapshot?.fatiguePercent?.toDouble()
     PageColumn {
         Caption(stringResource(R.string.fatigue_index))
-        Text(format(percent, "%.0f%%"), style = MaterialTheme.typography.display3)
+        Text(format(percent, "%.0f%%"), style = MaterialTheme.typography.numeralSmall)
         BandLabel(GaugeScales.FATIGUE_INDEX, percent)
         Spacer(Modifier.height(SECTION_GAP))
         ColorScaleBar(GaugeScales.FATIGUE_INDEX, percent, Modifier.fillMaxWidth(SCALE_WIDTH_FRACTION))
         Spacer(Modifier.height(SECTION_GAP))
-        Text(snapshot?.date ?: MISSING, style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+        Text(snapshot?.date ?: MISSING, style = MaterialTheme.typography.bodyExtraSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -221,25 +218,25 @@ private fun RecoveryPage(healthScores: StateFlow<HealthScoresSnapshot?>?) {
     val ratio = snapshot?.loadRatio
     PageColumn {
         Caption(stringResource(R.string.training_load))
-        Text(format(ratio, "%.2f"), style = MaterialTheme.typography.title1)
+        Text(format(ratio, "%.2f"), style = MaterialTheme.typography.displaySmall)
         BandLabel(GaugeScales.LOAD_RATIO, snapshot?.loadGaugeRatio)
         ColorScaleBar(GaugeScales.LOAD_RATIO, snapshot?.loadGaugeRatio, Modifier.fillMaxWidth(SCALE_WIDTH_FRACTION))
         Spacer(Modifier.height(SECTION_GAP))
         Text(
             stringResource(R.string.hrv_line, snapshot?.hrvStatus ?: MISSING, format(snapshot?.hrvWeeklyMs, stringResource(R.string.pattern_ms))),
-            style = MaterialTheme.typography.caption2,
+            style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
         )
         Text(
             snapshot?.stressShares?.takeIf { it.isNotEmpty() }
                 ?.map { (label, share) -> "${stringResource(label)} ${(share * PERCENT).toInt()}%" }?.joinToString(" ")
                 ?: stringResource(R.string.stress_missing, MISSING),
-            style = MaterialTheme.typography.caption3,
+            style = MaterialTheme.typography.bodyExtraSmall,
             textAlign = TextAlign.Center,
         )
         Text(
             stringResource(R.string.daylight_line, snapshot?.lightMinutes?.toString() ?: MISSING, snapshot?.lightGoalMinutes?.toString() ?: MISSING),
-            style = MaterialTheme.typography.caption2,
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }
@@ -251,37 +248,37 @@ private fun SpaceWeatherPage(spaceWeather: StateFlow<SpaceWeatherSnapshot?>?) {
     val today = snapshot?.days?.firstOrNull()
     PageColumn {
         Caption(stringResource(R.string.geomagnetic))
-        Text(format(kp, "Kp %.1f"), style = MaterialTheme.typography.title1)
+        Text(format(kp, "Kp %.1f"), style = MaterialTheme.typography.displaySmall)
         Text(
             snapshot?.currentLevel ?: MISSING,
-            style = MaterialTheme.typography.caption2,
-            color = kp?.let { GaugeScales.KP.bandOf(it).color } ?: MaterialTheme.colors.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            color = kp?.let { GaugeScales.KP.bandOf(it).color } ?: MaterialTheme.colorScheme.onSurfaceVariant,
         )
         ColorScaleBar(GaugeScales.KP, kp, Modifier.fillMaxWidth(SCALE_WIDTH_FRACTION))
         Spacer(Modifier.height(SECTION_GAP))
         Text(
             today?.radioFlux?.let { stringResource(R.string.sun_flux, it, today.solarActivity ?: MISSING) } ?: stringResource(R.string.sun_missing, MISSING),
-            style = MaterialTheme.typography.caption2,
+            style = MaterialTheme.typography.bodySmall,
         )
         snapshot?.days.orEmpty().chunked(FORECAST_DAYS_PER_LINE).forEach { line ->
-            Text(line.joinToString("  ", transform = ::forecastLabel), style = MaterialTheme.typography.caption3, textAlign = TextAlign.Center)
+            Text(line.joinToString("  ", transform = ::forecastLabel), style = MaterialTheme.typography.bodyExtraSmall, textAlign = TextAlign.Center)
         }
     }
 }
 
 /** `Tue 4.7`: the day's maximum Kp. */
 private fun forecastLabel(day: SpaceWeatherDaySnapshot): String =
-    "${runCatching { DAY_FORMAT.format(LocalDate.parse(day.date)) }.getOrDefault(day.date)} %.1f".format(day.maxKp)
+    "${runCatching { DAY_FORMAT.inCurrentLocale().format(LocalDate.parse(day.date)) }.getOrDefault(day.date)} %.1f".format(day.maxKp)
 
 @Composable
 internal fun Caption(text: String) {
-    Text(text, style = MaterialTheme.typography.caption1, color = MaterialTheme.colors.onSurfaceVariant)
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
 private fun BandLabel(scale: GaugeScale, value: Double?) {
     val band = value?.let(scale::bandOf)
-    Text(band?.let { stringResource(it.label) } ?: MISSING, style = MaterialTheme.typography.caption2, color = band?.color ?: MaterialTheme.colors.onSurfaceVariant)
+    Text(band?.let { stringResource(it.label) } ?: MISSING, style = MaterialTheme.typography.bodySmall, color = band?.color ?: MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -332,7 +329,7 @@ private fun SettingsPage(
     val listState = rememberScalingLazyListState()
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(active) { if (active) focusRequester.requestFocus() }
-    Box(Modifier.fillMaxSize()) {
+    ScreenScaffold(scrollState = listState) {
         ScalingLazyColumn(
             state = listState,
             modifier = Modifier
@@ -344,48 +341,45 @@ private fun SettingsPage(
         ) {
             item { Caption(stringResource(R.string.settings)) }
             item {
-                Chip(
+                Button(
                     onClick = onAutoWorkoutModeClick,
                     label = { Text(stringResource(R.string.auto_walk_workout)) },
                     secondaryLabel = { Text(autoWorkoutMode?.let { stringResource(it.label) } ?: MISSING) },
-                    colors = ChipDefaults.secondaryChipColors(),
+                    colors = ButtonDefaults.filledTonalButtonColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
-                ToggleChip(
+                SwitchButton(
                     checked = logCapture == true,
                     onCheckedChange = onLogCaptureChange,
                     enabled = logCapture != null,
                     label = { Text(stringResource(R.string.log_capture)) },
                     secondaryLabel = { Text(stringResource(R.string.log_capture_hint)) },
-                    toggleControl = { Switch(checked = logCapture == true) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
-                ToggleChip(
+                SwitchButton(
                     checked = snoreAnalysis.enabled == true,
                     onCheckedChange = snoreAnalysis.onEnabledChange,
                     enabled = snoreAnalysis.enabled != null,
                     label = { Text(stringResource(R.string.snore_analysis)) },
                     secondaryLabel = { Text(stringResource(R.string.snore_analysis_hint)) },
-                    toggleControl = { Switch(checked = snoreAnalysis.enabled == true) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             item {
-                Chip(
+                Button(
                     onClick = snoreAnalysis.onMicrophoneClick,
                     enabled = snoreAnalysis.microphone != null,
                     label = { Text(stringResource(R.string.snore_microphone)) },
                     secondaryLabel = { Text(snoreAnalysis.microphone?.let { stringResource(it.label) } ?: MISSING) },
-                    colors = ChipDefaults.secondaryChipColors(),
+                    colors = ButtonDefaults.filledTonalButtonColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
-        PositionIndicator(scalingLazyListState = listState)
     }
 }
 
@@ -410,7 +404,7 @@ private fun MetricPage(
 ) {
     PageColumn {
         Caption(title)
-        Text(format(value, pattern), style = MaterialTheme.typography.display3)
+        Text(format(value, pattern), style = MaterialTheme.typography.numeralSmall)
         if (scale != null) {
             BandLabel(scale, value)
             Spacer(Modifier.height(SECTION_GAP))
@@ -423,10 +417,10 @@ private fun MetricPage(
             window = LiveReadings.DEFAULT_HISTORY_WINDOW,
             modifier = Modifier.fillMaxWidth().height(SPARKLINE_HEIGHT),
         )
-        Text(stringResource(R.string.last_6h), style = MaterialTheme.typography.caption3, color = MaterialTheme.colors.onSurfaceVariant)
+        Text(stringResource(R.string.last_6h), style = MaterialTheme.typography.bodyExtraSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (footer != null) {
             Spacer(Modifier.height(SECTION_GAP))
-            Text(footer, style = MaterialTheme.typography.caption2, textAlign = TextAlign.Center)
+            Text(footer, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         }
     }
 }

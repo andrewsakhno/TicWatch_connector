@@ -1,5 +1,7 @@
 package org.sand.ticwatch.phone
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,10 +10,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -141,36 +141,45 @@ fun HealthInsightsScreen(appContainer: AppContainer) {
     if (workoutJournalOpen) {
         WorkoutJournalSheet(
             appContainer.workoutJournal,
+            appContainer.workoutPeriodZones,
             anyChangeOf(appContainer.historyChanges, appContainer.cloudHistoryArrivals),
             onDismiss = { workoutJournalOpen = false },
         )
     }
 
-    Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+    val workoutStore = rememberWatchWorkoutStore(appContainer.watchWorkoutCommands, appContainer.watchWorkoutActivity)
+
+    // Lazy: a data push recomposes only the visible cards, not every chart of the tab mid-scroll.
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        WatchSnapshotCard(appContainer.watchSnapshotRequester, appContainer.snapshotResults)
-        WatchWorkoutCard(appContainer.watchWorkoutCommands, appContainer.watchWorkoutActivity)
+        item(key = MetricsItem.SNAPSHOT) { WatchSnapshotCard(appContainer.watchSnapshotRequester, appContainer.snapshotResults) }
+        item(key = MetricsItem.WORKOUT) { WatchWorkoutCard(workoutStore) }
         val loaded = insights
         if (loaded == null) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            item(key = MetricsItem.LOADING) { LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth()) }
         } else {
             val trends = loaded.trends
             val derived = scores
-            ReadinessCard(loaded.readiness, trends.readiness)
-            FatigueIndexCard(derived?.fatigue, onClick = { fatigueHistoryOpen = true })
-            SleepScoreCard(derived?.sleepScore, loaded.sleep, trends.sleep, onClick = { sleepJournalOpen = true })
-            HrvStatusCard(derived?.hrvStatus)
-            TrainingLoadCard(derived?.trainingLoad, derived?.weeklyZoneMinutes.orEmpty(), onClick = { workoutJournalOpen = true })
-            StressCard(loaded.stress, derived?.stress, trends.stress)
-            BloodPressureCard(bloodPressure, bloodPressureEnd.minus(BLOOD_PRESSURE_WINDOW), bloodPressureEnd)
-            BarometerCard(loaded.barometer, trends.barometer)
-            LightCard(loaded.light, derived?.morningLight, trends.light)
-            SpaceWeatherCard(spaceWeather)
+            item(key = MetricsItem.READINESS) { ReadinessCard(loaded.readiness, trends.readiness) }
+            item(key = MetricsItem.FATIGUE) { FatigueIndexCard(derived?.fatigue, onClick = { fatigueHistoryOpen = true }) }
+            item(key = MetricsItem.SLEEP) { SleepScoreCard(derived?.sleepScore, loaded.sleep, trends.sleep, onClick = { sleepJournalOpen = true }) }
+            item(key = MetricsItem.HRV) { HrvStatusCard(derived?.hrvStatus) }
+            item(key = MetricsItem.TRAINING_LOAD) {
+                TrainingLoadCard(derived?.trainingLoad, derived?.weeklyZoneMinutes.orEmpty(), onClick = { workoutJournalOpen = true })
+            }
+            item(key = MetricsItem.STRESS) { StressCard(loaded.stress, derived?.stress, trends.stress) }
+            item(key = MetricsItem.BLOOD_PRESSURE) { BloodPressureCard(bloodPressure, bloodPressureEnd.minus(BLOOD_PRESSURE_WINDOW), bloodPressureEnd) }
+            item(key = MetricsItem.BAROMETER) { BarometerCard(loaded.barometer, trends.barometer) }
+            item(key = MetricsItem.LIGHT) { LightCard(loaded.light, derived?.morningLight, trends.light) }
+            item(key = MetricsItem.SPACE_WEATHER) { SpaceWeatherCard(spaceWeather) }
         }
     }
 }
+
+/** Stable keys of the Metrics tab's lazy list items. */
+private enum class MetricsItem { SNAPSHOT, WORKOUT, LOADING, READINESS, FATIGUE, SLEEP, HRV, TRAINING_LOAD, STRESS, BLOOD_PRESSURE, BAROMETER, LIGHT, SPACE_WEATHER }
 
 @Composable
 private fun ReadinessCard(readiness: Readiness?, trend: Trend) =

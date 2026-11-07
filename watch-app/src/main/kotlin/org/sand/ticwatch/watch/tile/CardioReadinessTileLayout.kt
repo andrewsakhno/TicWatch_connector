@@ -2,7 +2,6 @@ package org.sand.ticwatch.watch.tile
 
 import android.content.Context
 import androidx.wear.protolayout.DimensionBuilders.dp
-import androidx.wear.protolayout.DimensionBuilders.expand
 import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.LayoutElementBuilders.LayoutElement
 import androidx.wear.protolayout.ModifiersBuilders
@@ -30,14 +29,7 @@ class CardioReadinessTileLayout(context: Context) {
             .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(ROW_GAP_DP)).build())
             .addContent(bottomRow)
             .build()
-        return LayoutElementBuilders.Box.Builder()
-            .setWidth(expand())
-            .setHeight(expand())
-            .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-            .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
-            .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(onClick).build())
-            .addContent(triangle)
-            .build()
+        return DomedTileBackdrop.around(triangle, onClick)
     }
 
     private companion object {

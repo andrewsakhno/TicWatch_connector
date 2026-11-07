@@ -80,7 +80,7 @@ class TrainingLoadHistory(
     private val calculator: TrainingLoadBalanceCalculator,
     private val zone: ZoneId,
     private val lookbackDays: Long = CHRONIC_LOOKBACK_DAYS,
-) {
+) : ZoneMinutesHistory {
     suspend fun dailyLoads(from: LocalDate, to: LocalDate): Map<LocalDate, Double> = daily(SensorType.TRAINING_LOAD, from, to)
 
     suspend fun balances(from: LocalDate, to: LocalDate): List<TrainingLoadBalance> {
@@ -89,11 +89,10 @@ class TrainingLoadHistory(
         return generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }.map { calculator.balance(it, loads, zoneMinutes) }.toList()
     }
 
-    /** Minutes per zone summed over [from]..[to]; zones never reached are left out. */
-    suspend fun zoneMinutes(from: LocalDate, to: LocalDate): Map<HeartRateZone, Double> =
+    override suspend fun zoneMinutes(from: LocalDate, to: LocalDate): Map<HeartRateZone, Double> =
         HeartRateZone.entries.associateWith { daily(it.sensorType, from, to).values.sum() }.filterValues { it > 0 }
 
-    suspend fun dailyZoneMinutes(from: LocalDate, to: LocalDate): Map<LocalDate, Map<HeartRateZone, Double>> {
+    override suspend fun dailyZoneMinutes(from: LocalDate, to: LocalDate): Map<LocalDate, Map<HeartRateZone, Double>> {
         val perZone = HeartRateZone.entries.associateWith { daily(it.sensorType, from, to) }
         return perZone.values.flatMap { it.keys }.toSortedSet().associateWith { date ->
             perZone.mapValues { (_, days) -> days[date] ?: 0.0 }.filterValues { it > 0 }
