@@ -186,12 +186,13 @@ class CalibrationAccuracyCalculator {
 }
 
 /**
- * Corrects a systematic systolic under-estimate from the last [COMPARISON_WINDOW] cuff comparisons.
+ * Corrects a systematic systolic under- or over-estimate from the last [COMPARISON_WINDOW] cuff comparisons.
  *
  * Saved estimates already include the offset of their time, so their delta is what remains to correct: the offset
  * moves by the mean delta and only comparisons made under the current offset count, otherwise a removed bias would
  * read as no bias and the correction would switch itself off again. The first call starts the count, which also
- * leaves out estimates from before this correction existed. Never below 0, so it can only raise an estimate.
+ * leaves out estimates from before this correction existed. Bounded by [MAX_OFFSET] both ways, so a systematic
+ * over-estimate is corrected downward too.
  */
 class CuffBiasSystolicOffset(
     private val log: BloodPressureLog,
@@ -205,7 +206,7 @@ class CuffBiasSystolicOffset(
         val comparisons = calculator.comparisonsBeforeCuff(readings)
         if (comparisons.size < COMPARISON_WINDOW) return current.mmHg
         val bias = comparisons.takeLast(COMPARISON_WINDOW).map { it.systolicDelta }.average()
-        val updated = SystolicOffset((current.mmHg - bias).coerceIn(NO_OFFSET, MAX_OFFSET), now)
+        val updated = SystolicOffset((current.mmHg - bias).coerceIn(-MAX_OFFSET, MAX_OFFSET), now)
         store.setSystolicOffset(updated)
         return updated.mmHg
     }

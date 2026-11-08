@@ -30,20 +30,25 @@ data class LogQueryResult(val lines: List<String>, val truncated: Boolean)
 class RotatingLogStore(
     private val directory: File,
     private val retention: Duration = DEFAULT_RETENTION,
+    private val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
+    private val maxHourBytes: Long = DEFAULT_MAX_HOUR_BYTES,
     private val zone: ZoneId = ZoneId.systemDefault(),
 ) {
     private val lock = Any()
     private var openHour: LocalDateTime? = null
     private var writer: Writer? = null
+    private var openHourBytes = 0L
 
     fun append(line: String, now: Instant = Instant.now()) = synchronized(lock) {
         val hour = LocalDateTime.ofInstant(now, zone).truncatedTo(ChronoUnit.HOURS)
         if (hour != openHour) rotate(hour, now)
+        if (openHourBytes >= maxHourBytes) return@synchronized
+        val entry = if (openHourBytes + line.length < maxHourBytes) line + LINE_SEPARATOR else HOUR_FULL_MARKER
         writer?.run {
-            write(line)
-            write(LINE_SEPARATOR)
+            write(entry)
             flush()
         }
+        openHourBytes = if (entry == HOUR_FULL_MARKER) maxHourBytes else openHourBytes + entry.length
     }
 
     fun query(query: LogQuery): LogQueryResult {
@@ -73,17 +78,32 @@ class RotatingLogStore(
 
     fun totalBytes(): Long = logFiles().sumOf { (_, file) -> file.length() }
 
+    /** Applies retention and the byte budget without writing: logs left by a capture that is now off still go. */
+    fun trim(now: Instant = Instant.now()) = synchronized(lock) {
+        prune(now, LocalDateTime.ofInstant(now, zone).truncatedTo(ChronoUnit.HOURS))
+    }
+
     private fun rotate(hour: LocalDateTime, now: Instant) {
         runCatching { writer?.close() }
         directory.mkdirs()
-        writer = File(directory, FILE_PREFIX + FILE_HOUR.format(hour) + FILE_SUFFIX).let { FileWriter(it, true) }
+        val file = File(directory, FILE_PREFIX + FILE_HOUR.format(hour) + FILE_SUFFIX)
+        writer = FileWriter(file, true)
         openHour = hour
-        prune(now)
+        openHourBytes = file.length()
+        prune(now, hour)
     }
 
-    private fun prune(now: Instant) {
+    /** Drops hours past [retention], then the oldest hours until the closed ones leave room for a full open hour. */
+    private fun prune(now: Instant, openHour: LocalDateTime) {
         val oldestKept = LocalDateTime.ofInstant(now.minus(retention), zone).truncatedTo(ChronoUnit.HOURS)
-        logFiles().filter { (hour, _) -> hour.isBefore(oldestKept) }.forEach { (_, file) -> file.delete() }
+        val (expired, kept) = logFiles().filter { (hour, _) -> hour != openHour }.partition { (hour, _) -> hour.isBefore(oldestKept) }
+        expired.forEach { (_, file) -> file.delete() }
+        var closedBytes = kept.sumOf { (_, file) -> file.length() }
+        val closedBudget = maxTotalBytes - maxHourBytes
+        kept.asSequence().takeWhile { closedBytes > closedBudget }.forEach { (_, file) ->
+            closedBytes -= file.length()
+            file.delete()
+        }
     }
 
     private fun logFiles(): List<Pair<LocalDateTime, File>> =
@@ -112,6 +132,9 @@ class RotatingLogStore(
         fun inFilesDir(filesDir: File) = RotatingLogStore(File(filesDir, DIRECTORY_NAME))
 
         val DEFAULT_RETENTION: Duration = Duration.ofDays(3)
+        const val DEFAULT_MAX_TOTAL_BYTES = 64L * 1024 * 1024
+        const val DEFAULT_MAX_HOUR_BYTES = 8L * 1024 * 1024
+        private const val HOUR_FULL_MARKER = "--- hourly log budget reached, dropping lines until the next hour ---\n"
         private const val FILE_PREFIX = "app-"
         private const val FILE_SUFFIX = ".log"
         private const val LINE_SEPARATOR = "\n"

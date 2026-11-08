@@ -90,6 +90,9 @@ enum class SensorType {
 
     // Phone-derived, history only: workout minutes below Karvonen zone 1 (< 50% HR reserve), see HEART_RATE_ZONE_1..5.
     HEART_RATE_ZONE_0,
+
+    // Watch battery charge, percent, history only (WatchBatteryHistoryRecorder): explains drain after the fact.
+    WATCH_BATTERY_LEVEL,
 }
 
 /**

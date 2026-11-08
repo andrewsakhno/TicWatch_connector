@@ -1,5 +1,7 @@
 package org.sand.ticwatch.phone.advisor
 
+import org.sand.ticwatch.phone.health.WorkoutActivity
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -14,10 +16,12 @@ import org.sand.ticwatch.phone.insights.CircadianNorm
 /**
  * Gathers [AutonomicBalanceInputs] from the rollups and the deviation episodes. Current heart rate and RMSSD are short
  * windows ([HEART_RATE_SPAN], [RMSSD_SPAN]) so the tail shows while it lasts; stress events are looked for over the
- * longest window the calculator can open. The sleep score and fatigue index come from the readiness snapshot.
+ * longest window the calculator can open. The sleep score and fatigue index come from the readiness snapshot. A heart
+ * rate window touching a workout or its [WorkoutActivity.RECOVERY] is flagged as exercise recovery.
  */
 class HistoryAutonomicBalanceSource(
     private val queries: SensorHistoryQueries,
+    private val activity: WorkoutActivitySource,
     private val norm: CircadianNorm,
     private val episodes: RecentDeviationEpisodes,
     private val dropDetector: HeartRateDropDetector,
@@ -30,16 +34,18 @@ class HistoryAutonomicBalanceSource(
         val hour = now.atZone(zone).hour
         val restingHeartRate = queries.rollups(SensorType.RESTING_HEART_RATE, RollupResolution.DAY, now.minus(RESTING_LOOKBACK), now)
             .lastOrNull()?.average
+        val heartRateFrom = now.minus(HEART_RATE_SPAN)
         return calculator.calculate(
             AutonomicBalanceInputs(
                 at = now,
                 lastStressEnd = lastStressEnd(now, restingHeartRate ?: readiness.heartRateNormBpm),
                 rmssdMs = queries.summary(SensorType.HRV_RMSSD, RollupResolution.FIVE_MINUTES, now.minus(RMSSD_SPAN), now)?.average,
                 rmssdBaselineMs = norm.byHour(SensorType.HRV_RMSSD, now)[hour],
-                heartRateBpm = queries.summary(SensorType.HEART_RATE, RollupResolution.FIVE_MINUTES, now.minus(HEART_RATE_SPAN), now)?.average,
+                heartRateBpm = queries.summary(SensorType.HEART_RATE, RollupResolution.FIVE_MINUTES, heartRateFrom, now)?.average,
                 restingHeartRateBpm = restingHeartRate,
                 sleepScore = readiness.sleepScore,
                 fatiguePercent = readiness.fatiguePercent,
+                exerciseRecovery = activity.activity(heartRateFrom, now).overlaps(heartRateFrom, now),
             ),
         )
     }
@@ -56,9 +62,10 @@ class HistoryAutonomicBalanceSource(
     }
 
     private suspend fun restingBuckets(from: Instant, to: Instant): List<RestingHeartRateBucket> {
-        val steps = queries.rollups(SensorType.STEPS, RollupResolution.FIVE_MINUTES, from, to).associate { it.bucketStart to it.sum }
-        return queries.rollups(SensorType.HEART_RATE, RollupResolution.FIVE_MINUTES, from, to)
-            .map { RestingHeartRateBucket(it.bucketStart, it.average, steps[it.bucketStart] ?: 0.0) }
+        val active = activity.activity(from, to)
+        return queries.rollups(SensorType.HEART_RATE, RollupResolution.FIVE_MINUTES, from, to).map {
+            RestingHeartRateBucket(it.bucketStart, it.average, active.overlaps(it.bucketStart, it.bucketStart.plus(RollupResolution.FIVE_MINUTES.bucket)))
+        }
     }
 
     private companion object {

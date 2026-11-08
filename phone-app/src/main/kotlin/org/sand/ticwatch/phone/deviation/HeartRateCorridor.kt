@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.deviation
 
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.sand.ticwatch.phone.health.SensorType
@@ -104,21 +105,21 @@ class CachingHeartRateCorridorSource(
 
 /**
  * Builds the corridors from the 5-minute rollups (kept 90 days, unlike raw rows) of the last [WINDOW]: a bucket is rest
- * at <= [REST_STEPS_PER_BUCKET] steps, asleep when its middle lies in a stored sleep session. Workouts aren't excluded:
- * their buckets have steps, and the median shrugs off the rest.
+ * outside every stored workout and its recovery, asleep when its middle lies in a stored sleep session.
  */
 class RollupHeartRateCorridorSource(
     private val queries: SensorHistoryQueries,
+    private val activity: WorkoutActivitySource,
     private val calculator: PersonalCorridorCalculator,
 ) : HeartRateCorridorSource {
 
     override suspend fun corridors(at: Instant): HeartRateCorridors {
         val from = at.minus(WINDOW)
         val heartRate = queries.rollups(SensorType.HEART_RATE, RollupResolution.FIVE_MINUTES, from, at)
-        val steps = queries.rollups(SensorType.STEPS, RollupResolution.FIVE_MINUTES, from, at).associate { it.bucketStart to it.sum }
+        val active = activity.activity(from, at)
         val sleep = sleepSessions(from, at)
         val (asleep, awake) = heartRate
-            .filter { (steps[it.bucketStart] ?: 0.0) <= REST_STEPS_PER_BUCKET }
+            .filter { !active.overlaps(it.bucketStart, it.bucketStart.plus(RollupResolution.FIVE_MINUTES.bucket)) }
             .partition { bucket -> bucket.bucketStart.plus(HALF_BUCKET).let { mid -> sleep.any { !mid.isBefore(it.start) && mid.isBefore(it.end) } } }
         return HeartRateCorridors(
             awakeRest = calculator.corridor(RestState.AWAKE_REST, awake.map { it.average }),
@@ -139,7 +140,6 @@ class RollupHeartRateCorridorSource(
     private companion object {
         val WINDOW: Duration = Duration.ofDays(14)
         val HALF_BUCKET: Duration = Duration.ofSeconds(150)
-        const val REST_STEPS_PER_BUCKET = 30.0
         const val SLEEP_PAGE = 100
     }
 }

@@ -1,5 +1,10 @@
 package org.sand.ticwatch.phone
 
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
@@ -23,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.sand.ticwatch.phone.ui.ConnectedChoiceRow
+import org.sand.ticwatch.phone.watchsettings.AutoWorkoutDelay
 import org.sand.ticwatch.phone.watchsettings.DaytimeHrvInterval
 import org.sand.ticwatch.phone.watchsettings.SnoreMicrophone
 import org.sand.ticwatch.phone.watchsettings.WatchSettings
@@ -89,6 +95,33 @@ fun WatchSettingsSection(appContainer: AppContainer) {
             selected = settings?.daytimeHrvInterval,
             onSelect = { interval -> change { it.copy(daytimeHrvInterval = interval) } },
         )
+        AutoWorkoutDelayStepper(
+            minutes = settings?.autoWorkoutMinutes,
+            onChange = { minutes -> change { it.copy(autoWorkoutMinutes = minutes) } },
+        )
+    }
+}
+
+/** Brisk walking this long becomes a workout on the watch and in the phone's detection; rest calculations exclude only workouts. */
+@Composable
+private fun AutoWorkoutDelayStepper(minutes: Int?, onChange: (Int) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = stringResource(R.string.setting_auto_workout_delay))
+            Text(text = stringResource(R.string.setting_auto_workout_delay_hint), style = MaterialTheme.typography.bodySmall)
+        }
+        IconButton(
+            onClick = { minutes?.let { onChange(it - 1) } },
+            enabled = minutes != null && minutes > AutoWorkoutDelay.MIN_MINUTES,
+        ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.setting_auto_workout_delay_less)) }
+        Text(
+            text = minutes?.let { stringResource(R.string.setting_daytime_hrv_interval_minutes, it) }.orEmpty(),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        IconButton(
+            onClick = { minutes?.let { onChange(it + 1) } },
+            enabled = minutes != null && minutes < AutoWorkoutDelay.MAX_MINUTES,
+        ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.setting_auto_workout_delay_more)) }
     }
 }
 

@@ -7,6 +7,7 @@ import org.sand.ticwatch.phone.health.SampleSource
 import org.sand.ticwatch.phone.health.SampleWindowReader
 import org.sand.ticwatch.phone.health.SensorSample
 import org.sand.ticwatch.phone.health.SensorType
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import org.sand.ticwatch.phone.history.NewHistoryRows
 import org.sand.ticwatch.phone.history.StoredRowsRange
 import java.time.Clock
@@ -46,6 +47,7 @@ class DeviationEpisodeScanner(
     private val newRows: NewHistoryRows,
     private val reader: SampleWindowReader,
     private val detector: RestingDeviationDetector,
+    private val activity: WorkoutActivitySource,
     private val corridors: HeartRateCorridorSource,
     private val context: DeviationContextSource,
     private val sink: DeviationEpisodeSink,
@@ -72,8 +74,8 @@ class DeviationEpisodeScanner(
         val candidates = detector.detect(
             // From a wear gap earlier, so a put-on just before the range is still recognised.
             heartRate = read(setOf(SensorType.HEART_RATE), from.minus(RestingDeviationDetector.WEAR_GAP), to).filter { it.isWatchHeartRate() },
-            steps = read(setOf(SensorType.STEPS), from.minus(RestingDeviationDetector.RECOVERY_WINDOW).minus(LONGEST_STEP_INTERVAL), to),
-            workouts = workouts,
+            // Stored workouts outlive the raw rows; the raw ones cover a workout whose row is in this very range.
+            activity = activity.activity(from, to).withSamples(workouts),
             sleep = intervals.filter { it.type in SLEEP_TYPES },
             corridors = corridors.corridors(now),
         )
@@ -109,9 +111,6 @@ class DeviationEpisodeScanner(
 
         /** Workouts and nights are found by their start, which can lie this far before the readings. */
         val LONGEST_INTERVAL: Duration = Duration.ofHours(16)
-
-        /** Step intervals are found by their start too; one begun before the detector's window still counts for its overlap. */
-        val LONGEST_STEP_INTERVAL: Duration = Duration.ofMinutes(20)
 
         /** Without a cursor (first run) every stored row looks new; older ones were never meant to be asked about. */
         val FIRST_SCAN_BACK: Duration = Duration.ofHours(24)

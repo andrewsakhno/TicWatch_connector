@@ -45,6 +45,10 @@
     <string name="setting_daytime_hrv_interval">Interwał HRV w dzień</string>
     <string name="setting_daytime_hrv_interval_hint">Jak często w dzień mierzone są RMSSD i częstość oddechu, gdy nic nie włączyło częstszych pomiarów. Każdy pomiar trzyma czujnik optyczny włączony przez 3 minuty, więc każde skrócenie interwału o połowę mniej więcej podwaja jego zużycie baterii.</string>
     <string name="setting_daytime_hrv_interval_minutes">%1$d min</string>
+    <string name="setting_auto_workout_delay">Wykrywanie treningu po</string>
+    <string name="setting_auto_workout_delay_hint">Szybki marsz tak długi staje się treningiem: zegarek go rozpoczyna lub proponuje, telefon zapisuje pominięty po fakcie. W obliczeniach tętna spoczynkowego aktywnością są tylko treningi i 30 minut po nich.</string>
+    <string name="setting_auto_workout_delay_less">Krócej</string>
+    <string name="setting_auto_workout_delay_more">Dłużej</string>
     <string name="history_title">Historia przesyłania</string>
     <string name="history_keep">Przechowuj historię przez</string>
     <string name="history_keep_sleep">Przechowuj sesje snu przez</string>
@@ -95,8 +99,8 @@
     <string name="detail_bpm_no_norm">%1$d uderzeń/min (brak jeszcze normy)</string>
     <string name="detail_bpm_vs_norm">%1$+d wzgl. normy (%2$d uderzeń/min)</string>
     <string name="detail_ms">%1$d ms</string>
-    <string name="detail_steps">%1$.1f tys. kroków w 24 h</string>
-    <string name="detail_steps_sleep">%1$.1f tys. kroków w 24 h, sen %2$d</string>
+    <string name="detail_steps">%1$.1f tys. kroków w 24 h, z tego %2$.1f tys. na treningach</string>
+    <string name="detail_steps_sleep">%1$.1f tys. kroków w 24 h, z tego %2$.1f tys. na treningach, sen %3$d</string>
     <string name="detail_kp">Kp %1$.1f</string>
     <string name="detail_sleep">sen %1$d</string>
     <string name="detail_dip">spadek %1$.0f%%</string>
@@ -208,6 +212,7 @@
     <string name="unit_ms">%1$.0f ms</string>
     <string name="unit_bpm">%1$.0f ud./min</string>
     <string name="unit_celsius_delta">%1$+.1f °C</string>
+    <string name="unit_celsius">%1$.1f °C</string>
     <string name="unit_hpa">%1$.1f hPa</string>
     <string name="unit_hpa_delta">%1$+.1f hPa</string>
     <string name="unit_lux">%1$.0f lx</string>
@@ -227,6 +232,13 @@
     <string name="stress_today">Dziś (czuwanie, bezruch)</string>
     <string name="card_sleep_score">Ocena snu</string>
     <string name="card_fatigue_index">Indeks zmęczenia</string>
+    <string name="card_temperature">Temperatura</string>
+    <string name="temperature_body">Ciało</string>
+    <string name="temperature_wrist">Na nadgarstku</string>
+    <string name="temperature_outdoor">Na zewnątrz</string>
+    <string name="temperature_span_day">Ostatnie 24 godziny</string>
+    <string name="temperature_span_three_days">Ostatnie 3 dni</string>
+    <string name="temperature_span_week">Ostatnie 7 dni</string>
     <string name="fatigue_history_open">Wykres dzienny</string>
     <string name="fatigue_history_title">Indeks zmęczenia dzień po dniu</string>
     <string name="fatigue_level_fresh">Wypoczęty</string>
@@ -694,6 +706,7 @@
     <string name="deviation_calibration_waiting">Czeka na odpowiedź, poza kalibracją</string>
     <string name="deviation_calibration_included">Uwzględniony w kalibracji</string>
     <string name="deviation_calibration_excluded">Wyjaśniony, poza kalibracją</string>
+    <string name="deviation_discard">Usuń odchylenie: zniknie z listy i nie będzie użyte do kalibracji</string>
     <string name="deviation_save">Zapisz odpowiedź</string>
     <string name="deviation_notif_channel">Pytania o odchylenia tętna</string>
     <string name="deviation_notif_title">Dlaczego zmieniło się tętno?</string>

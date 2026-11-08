@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -52,12 +53,20 @@ private val AXIS_TEXT_SIZE = 10.sp
 private const val VERTICAL_PADDING_FRACTION = 0.1f
 private const val GRID_ALPHA = 0.3f
 private const val NO_SCRUB_VALUE = "–"
+private const val DAY_MARKER_ALPHA = 0.6f
+private val DAY_MARKER_WIDTH = 1.dp
+private val DAY_MARKER_DASH = 4.dp
+private val DAY_MARKER_LABEL_GAP = 2.dp
+
+/** The default value-axis label: the value rounded to a whole number. */
+private val WHOLE_NUMBER: (Double) -> String = { it.roundToInt().toString() }
 
 /**
  * Several [series] over their shared start..end on one value axis ([valueRange], else min..max of all points, labelled
  * at the left), a dot per value since the points are sparse, the time span below and a legend when there is more than one line.
  * With [formatScrubValue], a tap or a horizontal drag places a vertical line and shows its time and each line's value there;
- * a vertical drag stays with the surrounding list.
+ * a vertical drag stays with the surrounding list. Each of [dayMarkers] gets a dashed vertical line, labelled at its top by
+ * [formatDayMarker] when given. [showPoints] off draws the bare line, for dense series.
  */
 @Composable
 fun TrendChart(
@@ -66,6 +75,10 @@ fun TrendChart(
     modifier: Modifier = Modifier,
     valueRange: ClosedFloatingPointRange<Double>? = null,
     formatScrubValue: ((Double) -> String)? = null,
+    formatAxisValue: (Double) -> String = WHOLE_NUMBER,
+    dayMarkers: List<Instant> = emptyList(),
+    formatDayMarker: ((Instant) -> String)? = null,
+    showPoints: Boolean = true,
 ) {
     val points = series.flatMap { it.trend.points }
     if (points.isEmpty()) {
@@ -98,8 +111,17 @@ fun TrendChart(
 
             listOf(high, low).distinct().forEach { value ->
                 drawLine(axisColor.copy(alpha = GRID_ALPHA), Offset(gutter, y(value)), Offset(size.width, y(value)), GRID_WIDTH.toPx())
-                val label = measurer.measure(value.roundToInt().toString(), axisStyle)
+                val label = measurer.measure(formatAxisValue(value), axisStyle)
                 drawText(label, topLeft = Offset(0f, y(value) - label.size.height / 2))
+            }
+            val dash = PathEffect.dashPathEffect(floatArrayOf(DAY_MARKER_DASH.toPx(), DAY_MARKER_DASH.toPx()))
+            dayMarkers.filter { it in start..end }.forEach { at ->
+                drawLine(axisColor.copy(alpha = DAY_MARKER_ALPHA), Offset(x(at), 0f), Offset(x(at), size.height), DAY_MARKER_WIDTH.toPx(), pathEffect = dash)
+                formatDayMarker?.let { format ->
+                    val label = measurer.measure(format(at), axisStyle)
+                    val left = (x(at) + DAY_MARKER_LABEL_GAP.toPx()).coerceAtMost(size.width - label.size.width)
+                    drawText(label, topLeft = Offset(left, 0f))
+                }
             }
             series.forEach { line ->
                 val linePoints = line.trend.points
@@ -108,7 +130,7 @@ fun TrendChart(
                     if (index == 0) path.moveTo(x(point.at), y(point.value)) else path.lineTo(x(point.at), y(point.value))
                 }
                 drawPath(path, line.color, style = Stroke(LINE_WIDTH.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-                linePoints.forEach { drawCircle(line.color, POINT_RADIUS.toPx(), Offset(x(it.at), y(it.value))) }
+                if (showPoints) linePoints.forEach { drawCircle(line.color, POINT_RADIUS.toPx(), Offset(x(it.at), y(it.value))) }
             }
             scrubbedAt?.let { at -> drawLine(scrubColor, Offset(x(at), 0f), Offset(x(at), size.height), SCRUB_LINE_WIDTH.toPx()) }
         }

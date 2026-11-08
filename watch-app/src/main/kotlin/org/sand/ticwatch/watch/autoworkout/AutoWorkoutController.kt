@@ -28,7 +28,7 @@ class AutoWorkoutController(
     private val prompt: AutoWorkoutPrompt,
     private val ledger: AutoWorkoutStartLedger,
     private val scheduler: WindowScheduler,
-    private val minWalk: Duration,
+    private val minWalk: () -> Duration,
     private val stopAfter: Duration,
     private val checkInterval: Duration,
     private val clock: () -> Instant = Instant::now,
@@ -111,7 +111,7 @@ class AutoWorkoutController(
             asking = false
             return
         }
-        if (stretchStart == handledStretch || detector.briskDuration() < minWalk) return
+        if (stretchStart == handledStretch || detector.briskDuration() < minWalk()) return
         handledStretch = stretchStart
         when (settings.mode()) {
             AutoWorkoutMode.OFF -> Unit

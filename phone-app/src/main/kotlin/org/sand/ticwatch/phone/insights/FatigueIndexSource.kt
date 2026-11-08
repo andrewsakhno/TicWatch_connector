@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.insights
 
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import org.sand.ticwatch.phone.health.SensorSample
 import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.history.RollupResolution
@@ -31,11 +32,13 @@ class CircadianNorm(
 
 /**
  * Gathers [FatigueInputs] from the rollups. Current RMSSD = the last [RMSSD_SPAN]; resting heart rate = the lowest
- * 5-minute mean of the last [RESTING_SPAN] among buckets of at most [MAX_RESTING_STEPS] steps, null while walking
- * the whole time. A night in [push] counts through its sleep score; its vagal recovery follows once it is stored.
+ * 5-minute mean of the last [RESTING_SPAN] outside workouts and their recovery, null when the whole span was active;
+ * steps = the stored workouts' counted steps (a workout in [push] counts as activity, its steps once stored).
+ * A night in [push] counts through its sleep score; its vagal recovery follows once it is stored.
  */
 class HistoryFatigueIndexSource(
     private val queries: SensorHistoryQueries,
+    private val activity: WorkoutActivitySource,
     private val norm: CircadianNorm,
     private val recovery: VagalRecoverySource,
     private val calculator: FatigueIndexCalculator,
@@ -48,7 +51,7 @@ class HistoryFatigueIndexSource(
         val hour = now.atZone(zone).hour
         return calculator.calculate(
             FatigueInputs(
-                steps24h = window(SensorType.STEPS, RollupResolution.HOUR, now.minus(LOAD_SPAN), now, push)?.sum,
+                steps24h = activity.activity(now.minus(LOAD_SPAN), now).stepsIn(now.minus(LOAD_SPAN), now),
                 trainingLoad24h = window(SensorType.TRAINING_LOAD, RollupResolution.FIVE_MINUTES, now.minus(LOAD_SPAN), now, push)?.sum,
                 rmssdMs = window(SensorType.HRV_RMSSD, RollupResolution.FIVE_MINUTES, now.minus(RMSSD_SPAN), now, push)?.mean,
                 rmssdBaselineMs = norm.byHour(SensorType.HRV_RMSSD, now)[hour],
@@ -67,8 +70,9 @@ class HistoryFatigueIndexSource(
     private suspend fun restingHeartRate(now: Instant, push: List<SensorSample>): Double? {
         val from = now.minus(RESTING_SPAN)
         val heartRate = buckets(SensorType.HEART_RATE, from, now, push)
-        val steps = buckets(SensorType.STEPS, from, now, push)
-        return heartRate.filterKeys { bucket -> (steps[bucket]?.sum ?: 0.0) <= MAX_RESTING_STEPS }.values.minOfOrNull { it.mean }
+        val active = activity.activity(from, now).withSamples(push)
+        return heartRate.filterKeys { bucket -> !active.overlaps(bucket, bucket.plus(RollupResolution.FIVE_MINUTES.bucket)) }
+            .values.minOfOrNull { it.mean }
     }
 
     private suspend fun window(type: SensorType, resolution: RollupResolution, from: Instant, to: Instant, push: List<SensorSample>): Totals? {
@@ -106,8 +110,5 @@ class HistoryFatigueIndexSource(
         val RMSSD_SPAN: Duration = Duration.ofHours(2)
         val RESTING_SPAN: Duration = Duration.ofHours(1)
         val SLEEP_LOOKBACK: Duration = Duration.ofHours(36)
-
-        /** 40 steps/min over a 5-minute bucket, the walking threshold of the blood pressure estimate. */
-        const val MAX_RESTING_STEPS = 200.0
     }
 }

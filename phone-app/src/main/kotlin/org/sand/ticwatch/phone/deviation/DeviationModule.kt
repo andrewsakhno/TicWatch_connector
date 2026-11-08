@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.deviation
 
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import android.content.Context
 import org.sand.ticwatch.phone.health.SampleWindowReader
 import org.sand.ticwatch.phone.history.SensorHistoryModule
@@ -25,7 +26,9 @@ object DeviationModule {
     /** One per process, local store only; shared by the scanner and the watch publisher. */
     fun corridors(context: Context): HeartRateCorridorSource = corridorSource ?: synchronized(this) {
         corridorSource ?: CachingHeartRateCorridorSource(
-            RollupHeartRateCorridorSource(SensorHistoryModule.store(context), PersonalCorridorCalculator()),
+            SensorHistoryModule.store(context).let { store ->
+                RollupHeartRateCorridorSource(store, WorkoutActivitySource(store), PersonalCorridorCalculator())
+            },
             CORRIDOR_MAX_AGE,
         ).also { corridorSource = it }
     }
@@ -37,9 +40,11 @@ object DeviationModule {
             newRows = history,
             reader = SampleWindowReader(history),
             detector = RestingDeviationDetector(),
+            activity = WorkoutActivitySource(history),
             corridors = corridors(context),
             context = HistoryDeviationContextSource(
                 SampleWindowReader(history),
+                WorkoutActivitySource(history),
                 RoomMedicationIntakeLog(CardioDatabase.getInstance(context).medicationIntakes(), SensorHistoryModule.clock),
             ),
             sink = log(context),

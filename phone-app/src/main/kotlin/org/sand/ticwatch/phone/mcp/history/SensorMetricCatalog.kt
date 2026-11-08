@@ -153,6 +153,9 @@ class SensorMetricCatalog {
                 "systolic from the pulse shape (rise time, half-width, perfusion, HR) of a 30 s pulse strip recorded at each " +
                     "sleep measurement, personal ridge model on cuff-paired strips (needs >= 5 pairs); experimental, independent of the HR estimate",
             ),
+            SensorType.WATCH_BATTERY_LEVEL to MetricDescriptor(
+                "%", MetricKind.INSTANTANEOUS, "watch battery charge as reported with its sync flushes, at most every 5 min; read the slope to find drain",
+            ),
             SensorType.PULSE_WAVE_DIASTOLIC to MetricDescriptor(
                 "mmHg", MetricKind.INSTANTANEOUS, "diastolic of the same pulse-shape model, paired with PULSE_WAVE_SYSTOLIC",
             ),

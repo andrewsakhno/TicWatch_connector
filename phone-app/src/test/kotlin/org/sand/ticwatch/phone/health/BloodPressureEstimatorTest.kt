@@ -41,7 +41,48 @@ class BloodPressureEstimatorTest {
         assertEquals(82.5, estimate.diastolic, DELTA)
     }
 
+    @Test
+    fun `skin cooling into cold air after an outdoor walk is ignored`() {
+        val calibration = BloodPressureCalibration(120.0, 80.0, 60.0, null, SKIN_BASELINE, at)
+
+        val estimate = estimator.estimate(calibration, WristSignals(60.0, at, null, 24.7, 24.7), at)
+
+        assertEquals(120.0, estimate.systolic, DELTA)
+        assertEquals(80.0, estimate.diastolic, DELTA)
+    }
+
+    @Test
+    fun `skin warming saturates at the effective delta`() {
+        val calibration = BloodPressureCalibration(120.0, 80.0, 60.0, null, SKIN_BASELINE, at)
+
+        val estimate = estimator.estimate(calibration, WristSignals(60.0, at, null, 38.2, null), at)
+
+        assertEquals(117.10791725977255, estimate.systolic, DELTA)
+        assertEquals(76.38489657471568, estimate.diastolic, DELTA)
+    }
+
+    @Test
+    fun `cold skin attenuates the cooling shift`() {
+        val calibration = BloodPressureCalibration(120.0, 80.0, 60.0, null, SKIN_BASELINE, at)
+
+        val estimate = estimator.estimate(calibration, WristSignals(60.0, at, null, 28.5, null), at)
+
+        assertEquals(122.22714826384025, estimate.systolic, DELTA)
+        assertEquals(82.78393532980031, estimate.diastolic, DELTA)
+    }
+
+    @Test
+    fun `warm skin and air keep the saturated cooling shift`() {
+        val calibration = BloodPressureCalibration(120.0, 80.0, 60.0, null, SKIN_BASELINE, at)
+
+        val estimate = estimator.estimate(calibration, WristSignals(60.0, at, null, 30.0, 30.0), at)
+
+        assertEquals(122.56945474641749, estimate.systolic, DELTA)
+        assertEquals(83.21181843302186, estimate.diastolic, DELTA)
+    }
+
     private companion object {
         const val DELTA = 1e-6
+        const val SKIN_BASELINE = 33.2
     }
 }

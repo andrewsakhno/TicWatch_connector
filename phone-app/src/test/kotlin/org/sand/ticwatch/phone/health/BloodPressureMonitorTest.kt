@@ -111,7 +111,42 @@ class BloodPressureMonitorTest {
         assertEquals(85.0, estimate.reading.diastolic, DELTA)
     }
 
+    @Test
+    fun `measurement right after an auto-workout cooldown is not at rest`() = runTest {
+        fixture.calibrations.current = oldCalibration
+        fixture.history.add(workout(SensorType.AUTO_EXERCISE, endedMinutesAgo = 6))
+
+        val result = fixture.monitor.measure(HeartRateReading(60.0, cuffAt))
+
+        assertTrue(result is BloodPressureMeasurement.NotAtRest)
+    }
+
+    @Test
+    fun `walking 5 to 15 minutes ago is not settled rest`() = runTest {
+        fixture.calibrations.current = oldCalibration
+        fixture.history.add(SensorSample(SensorType.STEPS, 900.0, cuffAt.minus(Duration.ofMinutes(15)), cuffAt.minus(Duration.ofMinutes(5))))
+
+        val result = fixture.monitor.measure(HeartRateReading(60.0, cuffAt))
+
+        assertTrue(result is BloodPressureMeasurement.NotAtRest)
+    }
+
+    @Test
+    fun `workout ended over 10 minutes ago allows a measurement`() = runTest {
+        fixture.calibrations.current = oldCalibration
+        fixture.history.add(workout(SensorType.EXERCISE, endedMinutesAgo = 11))
+
+        val result = fixture.monitor.measure(HeartRateReading(60.0, cuffAt))
+
+        assertTrue(result is BloodPressureMeasurement.Estimated)
+    }
+
+    private fun workout(type: SensorType, endedMinutesAgo: Long) =
+        SensorSample(type, WORKOUT_ACTIVITY, cuffAt.minus(Duration.ofMinutes(endedMinutesAgo + WORKOUT_MINUTES)), cuffAt.minus(Duration.ofMinutes(endedMinutesAgo)))
+
     private companion object {
+        const val WORKOUT_ACTIVITY = 1.0
+        const val WORKOUT_MINUTES = 30L
         const val DELTA = 1e-9
     }
 }

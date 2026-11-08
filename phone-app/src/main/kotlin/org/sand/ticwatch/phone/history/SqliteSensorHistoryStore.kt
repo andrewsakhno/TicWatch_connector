@@ -12,6 +12,7 @@ import org.sand.ticwatch.phone.history.SensorHistoryDatabase.RollupTable
 import org.sand.ticwatch.phone.history.SensorHistoryDatabase.SleepSessionTable
 import org.sand.ticwatch.phone.history.SensorHistoryDatabase.SleepStageTable
 import org.sand.ticwatch.phone.history.SensorHistoryDatabase.Table
+import org.sand.ticwatch.phone.history.SensorHistoryDatabase.WorkoutSessionTable
 import java.time.Instant
 import java.time.ZoneId
 
@@ -24,7 +25,7 @@ class SqliteSensorHistoryStore(
     private val projections: List<HistoryProjection>,
     private val zone: ZoneId,
 ) : SensorHistoryLog, SensorHistoryMaintenance, SensorHistoryQueries, SleepStageQueries, SleepHistoryEraser,
-    SampleEraser, CloudOutbox<SensorHistoryRow>, RawHistoryHorizon, NewHistoryRows {
+    SampleEraser, CloudOutbox<SensorHistoryRow>, RawHistoryHorizon, NewHistoryRows, WorkoutSessionQueries {
 
     override suspend fun recordPending(samples: List<SensorSample>, receivedAt: Instant): List<Long> =
         withContext(Dispatchers.IO) {
@@ -190,6 +191,33 @@ class SqliteSensorHistoryStore(
         }
     }
 
+    override suspend fun purgeWorkoutSessionsBefore(cutoff: Instant): Int = withContext(Dispatchers.IO) {
+        database.writableDatabase.delete(WorkoutSessionTable.NAME, "${WorkoutSessionTable.START} < ?", arrayOf(cutoff.toEpochMilli().toString()))
+    }
+
+    override suspend fun workoutSessions(from: Instant, to: Instant): List<WorkoutSession> = withContext(Dispatchers.IO) {
+        database.readableDatabase.query(
+            WorkoutSessionTable.NAME,
+            WORKOUT_SESSION_COLUMNS,
+            // An unfinished workout (no end yet) overlaps whatever comes after its start.
+            "${WorkoutSessionTable.START} < ? AND (${WorkoutSessionTable.END} IS NULL OR ${WorkoutSessionTable.END} > ?)",
+            arrayOf(to.toEpochMilli().toString(), from.toEpochMilli().toString()),
+            null,
+            null,
+            "${WorkoutSessionTable.START} ASC",
+        ).use { cursor ->
+            cursor.readAll {
+                WorkoutSession(
+                    start = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow(WorkoutSessionTable.START))),
+                    end = getColumnIndexOrThrow(WorkoutSessionTable.END).let { if (isNull(it)) null else Instant.ofEpochMilli(getLong(it)) },
+                    exerciseTypeId = getInt(getColumnIndexOrThrow(WorkoutSessionTable.EXERCISE_TYPE)),
+                    automatic = getLong(getColumnIndexOrThrow(WorkoutSessionTable.AUTOMATIC)) == WorkoutSessionTable.AUTOMATIC_WORKOUT,
+                    steps = getColumnIndexOrThrow(WorkoutSessionTable.STEPS).let { if (isNull(it)) null else getDouble(it) },
+                )
+            }
+        }
+    }
+
     override suspend fun eraseSleep(from: Instant, to: Instant): Int = withContext(Dispatchers.IO) {
         val db = database.writableDatabase
         val range = arrayOf(from.toEpochMilli().toString(), to.toEpochMilli().toString())
@@ -218,6 +246,7 @@ class SqliteSensorHistoryStore(
         db.delete(RollupTable.NAME, null, null)
         db.delete(SleepSessionTable.NAME, null, null)
         db.delete(SleepStageTable.NAME, null, null)
+        db.delete(WorkoutSessionTable.NAME, null, null)
         db.delete(SensorHistoryDatabase.RoutePointTable.NAME, null, null)
         compactNow()
     }
@@ -411,6 +440,10 @@ class SqliteSensorHistoryStore(
 
     private companion object {
         const val MAX_BOUND_IDS = 500
+        val WORKOUT_SESSION_COLUMNS = arrayOf(
+            WorkoutSessionTable.START, WorkoutSessionTable.END, WorkoutSessionTable.EXERCISE_TYPE,
+            WorkoutSessionTable.AUTOMATIC, WorkoutSessionTable.STEPS,
+        )
         val ROLLUP_RANGE_CLAUSE =
             "${RollupTable.TYPE} = ? AND ${RollupTable.RESOLUTION} = ? " +
                 "AND ${RollupTable.BUCKET_START} >= ? AND ${RollupTable.BUCKET_START} < ?"

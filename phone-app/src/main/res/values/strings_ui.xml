@@ -45,6 +45,10 @@
     <string name="setting_daytime_hrv_interval">Daytime HRV interval</string>
     <string name="setting_daytime_hrv_interval_hint">How often RMSSD and breathing rate are measured by day while nothing triggered more frequent checks. Each measurement keeps the optical sensor on for 3 minutes, so every halving of the interval roughly doubles its battery cost.</string>
     <string name="setting_daytime_hrv_interval_minutes">%1$d min</string>
+    <string name="setting_auto_workout_delay">Auto-detect a workout after</string>
+    <string name="setting_auto_workout_delay_hint">Brisk walking this long becomes a workout: the watch starts or offers one, the phone records a missed one afterwards. Only workouts and the 30 minutes after them count as activity for the resting heart rate calculations.</string>
+    <string name="setting_auto_workout_delay_less">Shorter</string>
+    <string name="setting_auto_workout_delay_more">Longer</string>
     <string name="history_title">Transfer history</string>
     <string name="history_keep">Keep history for</string>
     <string name="history_keep_sleep">Keep sleep sessions for</string>
@@ -95,8 +99,8 @@
     <string name="detail_bpm_no_norm">%1$d bpm (no norm yet)</string>
     <string name="detail_bpm_vs_norm">%1$+d vs norm (%2$d bpm)</string>
     <string name="detail_ms">%1$d ms</string>
-    <string name="detail_steps">%1$.1fk steps in 24 h</string>
-    <string name="detail_steps_sleep">%1$.1fk steps in 24 h, sleep %2$d</string>
+    <string name="detail_steps">%1$.1fk steps in 24 h, %2$.1fk of them in workouts</string>
+    <string name="detail_steps_sleep">%1$.1fk steps in 24 h, %2$.1fk of them in workouts, sleep %3$d</string>
     <string name="detail_kp">Kp %1$.1f</string>
     <string name="detail_sleep">sleep %1$d</string>
     <string name="detail_dip">dip %1$.0f%%</string>
@@ -208,6 +212,7 @@
     <string name="unit_ms">%1$.0f ms</string>
     <string name="unit_bpm">%1$.0f bpm</string>
     <string name="unit_celsius_delta">%1$+.1f °C</string>
+    <string name="unit_celsius">%1$.1f °C</string>
     <string name="unit_hpa">%1$.1f hPa</string>
     <string name="unit_hpa_delta">%1$+.1f hPa</string>
     <string name="unit_lux">%1$.0f lux</string>
@@ -227,6 +232,13 @@
     <string name="stress_today">Today (awake, still)</string>
     <string name="card_sleep_score">Sleep score</string>
     <string name="card_fatigue_index">Fatigue index</string>
+    <string name="card_temperature">Temperature</string>
+    <string name="temperature_body">Body</string>
+    <string name="temperature_wrist">Wrist</string>
+    <string name="temperature_outdoor">Outdoor</string>
+    <string name="temperature_span_day">Last 24 hours</string>
+    <string name="temperature_span_three_days">Last 3 days</string>
+    <string name="temperature_span_week">Last 7 days</string>
     <string name="fatigue_history_open">Chart by day</string>
     <string name="fatigue_history_title">Fatigue index by day</string>
     <string name="fatigue_level_fresh">Fresh</string>
@@ -694,6 +706,7 @@
     <string name="deviation_calibration_waiting">Waiting for your answer, not used for calibration</string>
     <string name="deviation_calibration_included">Used for calibration</string>
     <string name="deviation_calibration_excluded">Explained, not used for calibration</string>
+    <string name="deviation_discard">Remove this deviation: it leaves the list and is not used for calibration</string>
     <string name="deviation_save">Save answer</string>
     <string name="deviation_notif_channel">Heart rate deviation questions</string>
     <string name="deviation_notif_title">Why did your heart rate change?</string>

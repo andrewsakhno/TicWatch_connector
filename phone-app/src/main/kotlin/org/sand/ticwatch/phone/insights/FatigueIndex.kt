@@ -38,6 +38,7 @@ data class FatigueIndex(val percent: Int, val components: Map<FatigueComponent, 
 
 /** The signals behind the index, null where the history has none. */
 data class FatigueInputs(
+    /** Workout steps only; the rest are reference, never load. */
     val steps24h: Double?,
     val trainingLoad24h: Double?,
     val rmssdMs: Double?,

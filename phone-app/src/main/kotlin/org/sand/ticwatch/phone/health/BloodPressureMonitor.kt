@@ -41,6 +41,7 @@ class WristSignalsReader(private val samples: SampleWindowReader) {
             heartRateAt = heartRate.at,
             rmssdMs = latestValue(SensorType.HRV_RMSSD, now),
             skinTemperatureCelsius = latestValue(SensorType.SKIN_TEMPERATURE, now),
+            ambientTemperatureCelsius = latestValue(SensorType.AMBIENT_TEMPERATURE, now, AMBIENT_LOOKBACK),
         )
     }
 
@@ -61,13 +62,26 @@ class WristSignalsReader(private val samples: SampleWindowReader) {
     suspend fun restingHeartRate(now: Instant): Double? = latestValue(SensorType.RESTING_HEART_RATE, now, RESTING_LOOKBACK)
 
     /** Steps per minute over the last [REST_WINDOW]: the higher of stored cadence and steps spread over the window. */
-    suspend fun recentStepRate(now: Instant): Double {
-        val windowStart = now.minus(REST_WINDOW)
-        val cadence = samples.samples(setOf(SensorType.STEPS_CADENCE), windowStart, now, emptyList()).maxOfOrNull { it.value } ?: 0.0
+    suspend fun recentStepRate(now: Instant): Double = stepRate(now.minus(REST_WINDOW), now)
+
+    /**
+     * True while the body is still recovering from activity that the last [REST_WINDOW] alone misses: a workout ended
+     * within [WORKOUT_COOLDOWN], or more than [RECOVERY_MAX_STEPS_PER_MINUTE] in the [REST_WINDOW]..[RECOVERY_WINDOW]
+     * before [now] (an auto-workout's cooldown tail would otherwise pass as settled rest with walking heart rate).
+     */
+    suspend fun isRecoveringFromActivity(now: Instant): Boolean {
+        val cooldownStart = now.minus(WORKOUT_COOLDOWN)
+        val recentWorkout = samples.samples(WORKOUT_TYPES, now.minus(MAX_WORKOUT_LENGTH), now, emptyList())
+            .any { !(it.endedAt ?: it.recordedAt).isBefore(cooldownStart) }
+        return recentWorkout || stepRate(now.minus(RECOVERY_WINDOW), now.minus(REST_WINDOW)) > RECOVERY_MAX_STEPS_PER_MINUTE
+    }
+
+    private suspend fun stepRate(from: Instant, to: Instant): Double {
+        val cadence = samples.samples(setOf(SensorType.STEPS_CADENCE), from, to, emptyList()).maxOfOrNull { it.value } ?: 0.0
         // Step intervals that began before the window still count for their overlapping part.
-        val steps = samples.samples(setOf(SensorType.STEPS), windowStart.minus(MAX_STEP_INTERVAL), now, emptyList())
-            .sumOf { sample -> sample.value * sample.overlapFraction(windowStart, now) }
-        return maxOf(cadence, steps / REST_WINDOW.toMinutes())
+        val steps = samples.samples(setOf(SensorType.STEPS), from.minus(MAX_STEP_INTERVAL), to, emptyList())
+            .sumOf { sample -> sample.value * sample.overlapFraction(from, to) }
+        return maxOf(cadence, steps / Duration.between(from, to).toMinutes())
     }
 
     private suspend fun latestValue(type: SensorType, now: Instant, lookback: Duration = SIGNAL_LOOKBACK): Double? =
@@ -76,9 +90,17 @@ class WristSignalsReader(private val samples: SampleWindowReader) {
     companion object {
         val REST_WINDOW: Duration = Duration.ofMinutes(5)
         val HEART_RATE_LOOKBACK: Duration = Duration.ofMinutes(30)
-        private val HEART_RATE_SPAN = Duration.ofMinutes(5)
+        /** Short enough that a fast post-walk recovery isn't held up by walking heart rate minutes earlier. */
+        private val HEART_RATE_SPAN = Duration.ofMinutes(2)
         private val LIVE_HEART_RATE_MAX_AGE = Duration.ofMinutes(2)
-        private val SIGNAL_LOOKBACK = Duration.ofHours(3)
+        /** RMSSD and skin temperature older than this belong to a different state (e.g. before a workout). */
+        val SIGNAL_LOOKBACK: Duration = Duration.ofMinutes(45)
+        private val AMBIENT_LOOKBACK = Duration.ofMinutes(30)
+        private val WORKOUT_COOLDOWN = Duration.ofMinutes(10)
+        private val RECOVERY_WINDOW = Duration.ofMinutes(15)
+        private val MAX_WORKOUT_LENGTH = Duration.ofHours(6)
+        private const val RECOVERY_MAX_STEPS_PER_MINUTE = 60.0
+        private val WORKOUT_TYPES = setOf(SensorType.EXERCISE, SensorType.AUTO_EXERCISE)
         private val RESTING_LOOKBACK = Duration.ofDays(2)
         private val MAX_STEP_INTERVAL = Duration.ofMinutes(15)
         private val VALID_HEART_RATE = 30.0..220.0
@@ -281,7 +303,7 @@ class BloodPressureMonitor(
         val calibration = calibration() ?: return BloodPressureMeasurement.NotCalibrated
         val now = clock.instant()
         val stepRate = signals.recentStepRate(now)
-        if (stepRate > REST_MAX_STEPS_PER_MINUTE) return BloodPressureMeasurement.NotAtRest(stepRate)
+        if (stepRate > REST_MAX_STEPS_PER_MINUTE || signals.isRecoveringFromActivity(now)) return BloodPressureMeasurement.NotAtRest(stepRate)
         val current = signals.current(now, liveHeartRate) ?: return BloodPressureMeasurement.NoHeartRate
         val wrist = estimator.estimate(calibration, current, now, systolicOffset.offsetAt(now), restingFloor.lowBpm(now))
         val reading = pulseWave.near(now)?.let { blender.blend(wrist, it) } ?: wrist

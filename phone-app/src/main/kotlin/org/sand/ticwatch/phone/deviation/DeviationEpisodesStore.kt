@@ -34,6 +34,10 @@ class DeviationEpisodesStore(
         launchIo({ answers.answer(id, reasons, intensity) }) { result -> result.onFailure { Log.w(TAG, "Storing the answer failed", it) } }
     }
 
+    fun discard(id: Long) {
+        launchIo({ answers.discard(id) }) { result -> result.onFailure { Log.w(TAG, "Discarding the episode failed", it) } }
+    }
+
     private companion object {
         const val TAG = "DeviationStore"
     }

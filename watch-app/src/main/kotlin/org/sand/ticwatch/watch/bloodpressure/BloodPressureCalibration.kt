@@ -3,6 +3,7 @@ package org.sand.ticwatch.watch.bloodpressure
 import org.json.JSONObject
 import java.time.Duration
 import java.time.Instant
+import kotlin.math.tanh
 
 /**
  * The phone's active cuff calibration plus the systolic offset in force when it was sent, cached so the watch can
@@ -49,8 +50,13 @@ object BloodPressureCalibrationPayload {
     }
 }
 
-/** Wrist signals the watch has at hand for a local estimate; RMSSD/skin temperature are null without a recent reading. */
-data class LocalWristSignals(val heartRate: Double, val rmssdMs: Double?, val skinTemperatureCelsius: Double?)
+/** Wrist signals the watch has at hand for a local estimate; RMSSD/skin/ambient temperature are null without a recent reading. */
+data class LocalWristSignals(
+    val heartRate: Double,
+    val rmssdMs: Double?,
+    val skinTemperatureCelsius: Double?,
+    val ambientTemperatureCelsius: Double? = null,
+)
 
 /** A systolic/diastolic pair in mmHg. */
 data class LocalBloodPressure(val systolic: Double, val diastolic: Double)
@@ -65,7 +71,7 @@ class LocalBloodPressureEstimator {
 
     fun estimate(calibration: WatchBloodPressureCalibration, current: LocalWristSignals, restingHeartRateLow: Double?): LocalBloodPressure {
         val heartRateShift = current.heartRate - calibration.heartRate
-        val skinShift = shift(calibration.skinTemperatureCelsius, current.skinTemperatureCelsius)
+        val skinShift = skinShift(calibration.skinTemperatureCelsius, current.skinTemperatureCelsius, current.ambientTemperatureCelsius)
         val autonomicShift = autonomicShift(calibration.rmssdMs, current.rmssdMs)
         val systolicShift = (
             SYSTOLIC_PER_BPM * heartRateShift +
@@ -93,8 +99,16 @@ class LocalBloodPressureEstimator {
         if (baseline == null || current == null || baseline <= 0.0) 0.0
         else (1.0 - current / baseline).coerceIn(-MAX_AUTONOMIC_SHIFT, MAX_AUTONOMIC_SHIFT)
 
-    private fun shift(baseline: Double?, current: Double?): Double =
-        if (baseline == null || current == null) 0.0 else current - baseline
+    /** Saturated, cold-exposure-attenuated skin temperature change, as phone-app's `BloodPressureEstimator.skinShift`. */
+    private fun skinShift(baseline: Double?, current: Double?, ambient: Double?): Double {
+        if (baseline == null || current == null) return 0.0
+        val rawDelta = current - baseline
+        val saturated = MAX_EFFECTIVE_SKIN_DELTA * tanh(rawDelta / MAX_EFFECTIVE_SKIN_DELTA)
+        val coldExposure = current < COLD_SKIN_THRESHOLD_CELSIUS || (ambient != null && ambient < COLD_AMBIENT_THRESHOLD_CELSIUS)
+        if (rawDelta >= 0.0 || !coldExposure) return saturated
+        val attenuation = ((current - COLD_SKIN_FLOOR_CELSIUS) / (COLD_SKIN_THRESHOLD_CELSIUS - COLD_SKIN_FLOOR_CELSIUS)).coerceIn(0.0, 1.0)
+        return saturated * attenuation
+    }
 
     private companion object {
         const val SYSTOLIC_PER_BPM = 0.85
@@ -109,5 +123,9 @@ class LocalBloodPressureEstimator {
         const val MAX_RESTING_SYSTOLIC_DROP = 15.0
         const val NORMOTENSIVE_SYSTOLIC_REFERENCE = 135.0
         const val MAX_AUTONOMIC_SHIFT = 1.0
+        const val MAX_EFFECTIVE_SKIN_DELTA = 2.5
+        const val COLD_SKIN_THRESHOLD_CELSIUS = 29.5
+        const val COLD_AMBIENT_THRESHOLD_CELSIUS = 28.5
+        const val COLD_SKIN_FLOOR_CELSIUS = 25.0
     }
 }

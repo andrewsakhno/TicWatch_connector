@@ -19,8 +19,9 @@ enum class PostStressTrigger(@StringRes val label: Int) {
 }
 
 /**
- * Nervous tone: [POST_STRESS] and [RECOVERING] only inside a post-stress window, [STRAINED] is the same low balance
- * without a stress event behind it. [maxPercent] is the exclusive upper limit of the band.
+ * Nervous tone: [POST_STRESS] only inside a post-stress window, [RECOVERING] inside one or in a workout's recovery
+ * (a raised pulse there is exercise, not strain), [STRAINED] is the same low balance without either behind it.
+ * [maxPercent] is the exclusive upper limit of the band.
  */
 enum class AutonomicTone(@StringRes val label: Int, val maxPercent: Int) {
     POST_STRESS(R.string.autonomic_tone_post_stress, 40),
@@ -29,9 +30,9 @@ enum class AutonomicTone(@StringRes val label: Int, val maxPercent: Int) {
     CALM(R.string.autonomic_tone_calm, PERCENT + 1);
 
     companion object {
-        fun of(percent: Int, inWindow: Boolean): AutonomicTone = when {
+        fun of(percent: Int, inWindow: Boolean, exerciseRecovery: Boolean): AutonomicTone = when {
             inWindow && percent < POST_STRESS.maxPercent -> POST_STRESS
-            inWindow && percent < RECOVERING.maxPercent -> RECOVERING
+            (inWindow || exerciseRecovery) && percent < RECOVERING.maxPercent -> RECOVERING
             !inWindow && percent < STRAINED.maxPercent -> STRAINED
             else -> CALM
         }
@@ -49,15 +50,17 @@ data class PostStressWindow(val trigger: PostStressTrigger, val triggerEndedAt: 
 
 /**
  * Autonomic balance 0..100 (100 = full calm) with each [AutonomicComponent] as strain 0..1. [vulnerability] >= 1
- * stretches the window after poor sleep or high fatigue; [window] is null outside one.
+ * stretches the window after poor sleep or high fatigue; [window] is null outside one. [exerciseRecovery] = the inputs
+ * fall in a workout or its recovery.
  */
 data class AutonomicBalance(
     val percent: Int,
     val components: Map<AutonomicComponent, Double>,
     val vulnerability: Double,
     val window: PostStressWindow?,
+    val exerciseRecovery: Boolean = false,
 ) {
-    val tone: AutonomicTone get() = AutonomicTone.of(percent, window != null)
+    val tone: AutonomicTone get() = AutonomicTone.of(percent, window != null, exerciseRecovery)
 
     /** Sympathetic tone while outwardly at rest: the case the breathing advice is for. */
     val postStressActive: Boolean get() = tone == AutonomicTone.POST_STRESS
@@ -75,6 +78,8 @@ data class AutonomicBalanceInputs(
     val restingHeartRateBpm: Double?,
     val sleepScore: Int?,
     val fatiguePercent: Int?,
+    /** The heart rate window touches a workout or its recovery. */
+    val exerciseRecovery: Boolean = false,
 )
 
 /**
@@ -82,7 +87,9 @@ data class AutonomicBalanceInputs(
  * - Vagal withdrawal: RMSSD below the hour's baseline, 0 at the baseline, full at [VAGAL_OFF_RATIO] of it (parasympathetic
  *   braking off).
  * - Heart rate excess: above the resting heart rate, full at [FULL_HEART_RATE_EXCESS_BPM].
- * Weighted mean of the components with data, null with none. A stress event opens a window of [BASE_WINDOW] x the
+ * Weighted mean of the components with data, null with none; a lone component is capped at
+ * [MAX_SINGLE_COMPONENT_STRAIN] (e.g. RMSSD suppressed by motion leaves the pulse alone, which can't show full strain
+ * by itself). A stress event opens a window of [BASE_WINDOW] x the
  * vulnerability: up to [MAX_EXTRA_VULNERABILITY] more, half from the sleep score below
  * [SleepThresholds.GOOD_SLEEP_SCORE] (full at [FULL_DEFICIT_SLEEP_SCORE]) and half from the fatigue index above
  * [FATIGUE_VULNERABLE_FROM] (full at [PERCENT]) - depleted frontal inhibition lets the sympathetic tail run longer.
@@ -95,13 +102,14 @@ class AutonomicBalanceCalculator {
             .toMap()
         if (components.isEmpty()) return null
         val knownWeight = components.keys.sumOf { it.weight }
-        val strain = components.entries.sumOf { (component, value) -> component.weight * value } / knownWeight
+        val mean = components.entries.sumOf { (component, value) -> component.weight * value } / knownWeight
+        val strain = if (components.size < AutonomicComponent.entries.size) mean.coerceAtMost(MAX_SINGLE_COMPONENT_STRAIN) else mean
         val vulnerability = vulnerability(inputs.sleepScore, inputs.fatiguePercent)
         val window = inputs.lastStressEnd?.let { (trigger, endedAt) ->
             val endsAt = endedAt.plus(windowLength(vulnerability))
             PostStressWindow(trigger, endedAt, endsAt).takeIf { inputs.at.isBefore(endsAt) }
         }
-        return AutonomicBalance(((1 - strain) * PERCENT).roundToInt(), components, vulnerability, window)
+        return AutonomicBalance(((1 - strain) * PERCENT).roundToInt(), components, vulnerability, window, inputs.exerciseRecovery)
     }
 
     private fun strain(component: AutonomicComponent, inputs: AutonomicBalanceInputs): Double? = when (component) {
@@ -134,6 +142,7 @@ class AutonomicBalanceCalculator {
         /** The longest window: what a reader must look back over for stress events. */
         val MAX_WINDOW: Duration = Duration.ofSeconds((BASE_WINDOW.seconds * (1 + MAX_EXTRA_VULNERABILITY)).toLong())
 
+        const val MAX_SINGLE_COMPONENT_STRAIN = 0.6
         private const val VAGAL_OFF_RATIO = 0.6
         private const val FULL_HEART_RATE_EXCESS_BPM = 20.0
         private const val FULL_DEFICIT_SLEEP_SCORE = 40
@@ -141,12 +150,12 @@ class AutonomicBalanceCalculator {
     }
 }
 
-/** One 5-minute bucket of the heart rate trend with the steps taken in it. */
-data class RestingHeartRateBucket(val start: Instant, val heartRateBpm: Double, val steps: Double)
+/** One 5-minute bucket of the heart rate trend; [active] = it touches a workout or its recovery. */
+data class RestingHeartRateBucket(val start: Instant, val heartRateBpm: Double, val active: Boolean)
 
 /**
  * Finds the latest sharp fall of heart rate at rest: a bucket at least [RISE_BPM] over [baselineBpm] followed by one
- * back within [SETTLED_BPM] of it, with no bucket over [MAX_RESTING_STEPS] steps from the rise to the fall (a walk
+ * back within [SETTLED_BPM] of it, with no active bucket from the rise to the fall (a workout
  * ending isn't a stress tail). Returns where the settled bucket starts.
  */
 class HeartRateDropDetector {
@@ -156,7 +165,7 @@ class HeartRateDropDetector {
         var lastEnd: Instant? = null
         buckets.sortedBy { it.start }.forEach { bucket ->
             when {
-                bucket.steps > MAX_RESTING_STEPS -> raised = false
+                bucket.active -> raised = false
                 bucket.heartRateBpm >= baselineBpm + RISE_BPM -> raised = true
                 raised && bucket.heartRateBpm <= baselineBpm + SETTLED_BPM -> {
                     lastEnd = bucket.start
@@ -170,9 +179,6 @@ class HeartRateDropDetector {
     private companion object {
         const val RISE_BPM = 20.0
         const val SETTLED_BPM = 8.0
-
-        /** 40 steps/min over a 5-minute bucket, as the fatigue index's resting buckets. */
-        const val MAX_RESTING_STEPS = 200.0
     }
 }
 

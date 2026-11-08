@@ -42,7 +42,12 @@ class CachedCalibrationOfflineEstimator(
         val cached = calibration.value?.takeUnless { it.isStale(now) } ?: return null
         val pulse = heartRate?.takeIf { Duration.between(it.at, now) <= MAX_HEART_RATE_AGE } ?: return null
         if (!rest.isOpen()) return null
-        val signals = LocalWristSignals(pulse.value, recent(SensorType.HRV_RMSSD, now), recent(SensorType.SKIN_TEMPERATURE, now))
+        val signals = LocalWristSignals(
+            heartRate = pulse.value,
+            rmssdMs = recent(SensorType.HRV_RMSSD, now),
+            skinTemperatureCelsius = recent(SensorType.SKIN_TEMPERATURE, now),
+            ambientTemperatureCelsius = recent(SensorType.AMBIENT_TEMPERATURE, now, AMBIENT_MAX_AGE),
+        )
         val estimate = estimator.estimate(cached, signals, restingFloor())
         buffer.enqueue(SensorSample(SensorType.BLOOD_PRESSURE_DIASTOLIC, estimate.diastolic, now))
         buffer.enqueue(SensorSample(SensorType.BLOOD_PRESSURE_SYSTOLIC, estimate.systolic, now))
@@ -53,15 +58,18 @@ class CachedCalibrationOfflineEstimator(
     private fun restingFloor(): Double? =
         if (sleepState.isAsleep()) null else corridor.value?.let { minOf(it.awakeRest.lowBpm, it.sleep.lowBpm) }
 
-    private fun recent(type: SensorType, now: Instant): Double? =
-        readings.history(type).value.lastOrNull()?.takeIf { Duration.between(it.at, now) <= SIGNAL_MAX_AGE }?.value
+    private fun recent(type: SensorType, now: Instant, maxAge: Duration = SIGNAL_MAX_AGE): Double? =
+        readings.history(type).value.lastOrNull()?.takeIf { Duration.between(it.at, now) <= maxAge }?.value
 
     private companion object {
         /** Passive heart rate arrives in batches (2 a minute at night), so allow a little more than the phone's live limit. */
         val MAX_HEART_RATE_AGE: Duration = Duration.ofMinutes(5)
 
         /** Same lookback as the phone's `WristSignalsReader` uses for RMSSD and skin temperature. */
-        val SIGNAL_MAX_AGE: Duration = Duration.ofHours(3)
+        val SIGNAL_MAX_AGE: Duration = Duration.ofMinutes(45)
+
+        /** Same lookback as the phone's `WristSignalsReader` uses for the case (ambient) temperature. */
+        val AMBIENT_MAX_AGE: Duration = Duration.ofMinutes(30)
     }
 }
 

@@ -176,6 +176,15 @@ Schema v5 adds `sleep_stage` (start PK, end, `SleepStageType` code, `session_sta
 `sleep_session` key; `SleepStageWriter`, linked on insert or later by `SleepSessionWriter`), purged with the
 sleep-session retention. The SLEEP mapper puts the stored stages (`SleepStageFactory`, clipped/non-overlapping)
 on the `SleepSessionRecord`.
+Schema v10 adds `workout_session` (start PK, end, exercise type, automatic flag, steps; `WorkoutSessionWriter`):
+each EXERCISE/AUTO_EXERCISE, its steps counted once when the finished workout arrives (an unfinished one is only stored,
+end/steps null, until its finished version replaces it; later step rows re-count nothing), seeded from the retained
+workout rows, purged with the sleep-session retention. It is the only activity the rest
+calculations know (`WorkoutActivity`: a workout plus 30 min recovery): deviation detection, heart rate corridors,
+autonomic balance, the fatigue index and the readiness `steps24h` never read raw steps; all steps of the day are shown
+beside the workout steps for reference only. A brisk walk becomes a workout after `WatchSettings.autoWorkoutMinutes`
+(1..99, default 10, a stepper in the watch settings), used by the watch's `AutoWorkoutController` and the phone's
+`AutoExerciseDeriver` alike.
 
 Sleep stages: Health Services has no ASLEEP state on this watch, so `VendorSleepStageSource` (watch) listens to
 `mobvoi_sleep` (33171123, preferred) and TicMotion sleep (33171126), decodes values[0] as 7 awake/8 rem/9 light/
@@ -330,7 +339,7 @@ Microphone needs RECORD_AUDIO and the FGS `microphone` type, which `SensorCollec
 `onStartCommand` - only granted when started from `MainActivity`; after a boot start snoring is skipped.
 Sensors and wake lock stop within 15 s of waking up or taking the watch off (an epoch that ends off the wrist reports nothing about the body).
 
-Night sync: the night monitor makes passive HR arrive at 1 Hz (day: ~1 per 10 s), which alone hit the 400-sample flush threshold every ~6 min. `SleepHeartRateThinner` (after `onCollected`, so the watch's own consumers still get every reading) sends one 30 s median instead while asleep with no workout and no live sync, so night flushes fall back to the 30 min alarm, and a finished SLEEP session flushes at once (`SensorSyncSender.flushesAtOnce`). Phone readers of HR must cope with 2 readings/min at night: `RestingHeartRateEstimator` wants 15 per 10 min, `ActivityIntensityDeriver` skips such minutes.
+HR thinning: passive HR arrives at ~1 Hz day and night, which alone hit the 400-sample flush threshold every ~6.6 min. `PhaseAwareHeartRateThinner` (after `onCollected`, so the watch's own consumers still get every reading) sends one 30 s median awake in zones 1-2 (`NORMAL_DAY_HEART_RATE_PERIOD`) and asleep (`SLEEP_HEART_RATE_PERIOD`); `ZoneHeartRatePhasePolicy` opens the full stream during a workout, live sync or a non-IDLE HEART_RATE profile (resting alert), and awake above the phone's `zone2_ceiling` (top of Karvonen zone 2, sent with `/insights/hr-corridor`; awake corridor top until known) until 3 min after the last reading above it. So flushes fall back to the 30 min alarm, and a finished SLEEP session flushes at once (`SensorSyncSender.flushesAtOnce`). Phone readers of HR must cope with 2 readings/min at rest: `RestingHeartRateEstimator` wants 15 per 10 min, `ActivityIntensityDeriver` needs 2 per minute, `ExerciseLoadCalculator` spans each reading up to 30 s.
 
 ### phone-app derived Health Connect metrics
 

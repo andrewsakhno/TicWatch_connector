@@ -65,7 +65,7 @@ class DeviationQuestionAsker(
     }
 }
 
-/** The one way an answer gets stored, from the screen or the notification's buttons. */
+/** The one way an answer or a dismissal gets stored, from the screen or the notification's buttons. */
 class DeviationAnswers(
     private val log: DeviationEpisodeLog,
     private val asker: DeviationQuestionAsker,
@@ -74,6 +74,15 @@ class DeviationAnswers(
 ) {
     suspend fun answer(id: Long, reasons: Set<DeviationReason>, intensity: DeviationIntensity? = null) {
         log.answer(id, reasons, intensity, clock.instant())
+        afterChange()
+    }
+
+    suspend fun discard(id: Long) {
+        log.discard(id, clock.instant())
+        afterChange()
+    }
+
+    private suspend fun afterChange() {
         onAnswered()
         asker.dismissIfNoneWaiting()
     }

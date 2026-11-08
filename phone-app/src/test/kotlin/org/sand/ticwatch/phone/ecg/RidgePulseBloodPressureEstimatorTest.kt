@@ -2,6 +2,7 @@ package org.sand.ticwatch.phone.ecg
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,9 +45,18 @@ class RidgePulseBloodPressureEstimatorTest {
         assertTrue(wide.diastolic > narrow.diastolic)
     }
 
+    @Test
+    fun `cold-vasoconstricted strip is not well perfused enough to calibrate`() {
+        assertFalse(features(halfWidthMs = 150.0, perfusionIndex = COLD_PERFUSION).isWellPerfused)
+        assertTrue(features(halfWidthMs = 150.0, perfusionIndex = PulseFeatures.MIN_CALIBRATION_PERFUSION_PERCENT).isWellPerfused)
+    }
+
     private fun features(halfWidthMs: Double, perfusionIndex: Double) = PulseFeatures(90.5, 125.0, halfWidthMs, perfusionIndex)
 
     private companion object {
         const val HOUR_MS = 3_600_000L
+
+        /** Perfusion index of a strip after a walk at 1 °C. */
+        const val COLD_PERFUSION = 0.15
     }
 }

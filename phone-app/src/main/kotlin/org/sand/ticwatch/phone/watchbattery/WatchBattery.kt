@@ -5,11 +5,16 @@ import android.content.SharedPreferences
 import android.util.Log
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.sand.ticwatch.phone.R
 import org.sand.ticwatch.phone.datalayer.WatchStatePublisher
+import org.sand.ticwatch.phone.health.HealthRecordWriter
+import org.sand.ticwatch.phone.health.SensorSample
+import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.text.UiText
 import org.sand.ticwatch.phone.text.uiText
 
@@ -107,15 +112,36 @@ fun interface WatchBatteryReceiver {
     fun onWatchBattery(payload: ByteArray)
 }
 
-/** Stores the reported level and re-renders [onChanged] (the advisor widget). */
+/** Appends the reported level to the sensor history, at most one point per [minInterval] (flushes come every few seconds live). */
+class WatchBatteryHistoryRecorder(
+    private val writer: HealthRecordWriter,
+    private val scope: CoroutineScope,
+    private val minInterval: Duration = Duration.ofMinutes(5),
+) {
+    private var lastRecordedAt: Instant? = null
+
+    @Synchronized
+    fun record(status: WatchBatteryStatus) {
+        val last = lastRecordedAt
+        if (last != null && Duration.between(last, status.reportedAt) < minInterval) return
+        lastRecordedAt = status.reportedAt
+        scope.launch {
+            writer.write(listOf(SensorSample(SensorType.WATCH_BATTERY_LEVEL, status.percent.toDouble(), status.reportedAt)))
+        }
+    }
+}
+
+/** Stores the reported level, keeps its history and re-renders [onChanged] (the advisor widget). */
 class StoringWatchBatteryReceiver(
     private val store: WatchBatteryStore,
+    private val history: WatchBatteryHistoryRecorder,
     private val onChanged: WatchStatePublisher,
 ) : WatchBatteryReceiver {
     override fun onWatchBattery(payload: ByteArray) {
         runCatching { WatchBatteryPayload.decode(payload) }
             .onSuccess { status ->
                 store.save(status)
+                history.record(status)
                 onChanged.publish()
             }
             .onFailure { Log.w(TAG, "Malformed watch battery status: ${String(payload, Charsets.UTF_8)}", it) }

@@ -1,5 +1,6 @@
 package org.sand.ticwatch.phone.advisor
 
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import org.sand.ticwatch.phone.health.BloodPressureLog
 import org.sand.ticwatch.phone.health.SensorType
 import org.sand.ticwatch.phone.history.RollupResolution
@@ -27,6 +28,7 @@ data class ReadinessSnapshot(val inputs: CardioReadinessInputs, val context: For
  */
 class ReadinessSnapshotReader(
     private val queries: SensorHistoryQueries,
+    private val activity: WorkoutActivitySource,
     private val norm: CircadianNorm,
     private val pressureLog: BloodPressureLog,
     private val pressureCalculator: AmbulatoryPressureCalculator,
@@ -58,7 +60,9 @@ class ReadinessSnapshotReader(
             rmssdMs = average(SensorType.HRV_RMSSD, now.minus(RMSSD_SPAN), now),
             dippingPercent = pressureCalculator.summarize(readings).dippingPercent,
             sleepScore = latest(SensorType.SLEEP_SCORE, RollupResolution.FIVE_MINUTES, now.minus(SLEEP_LOOKBACK), now)?.roundToInt(),
-            steps24h = queries.summary(SensorType.STEPS, RollupResolution.HOUR, now.minus(DAY), now)?.sum,
+            // Workout steps only: the rest calculations' one notion of activity.
+            steps24h = activity.activity(now.minus(DAY), now).stepsIn(now.minus(DAY), now),
+            totalSteps24h = queries.summary(SensorType.STEPS, RollupResolution.HOUR, now.minus(DAY), now)?.sum,
             trainingLoad48h = queries.summary(SensorType.TRAINING_LOAD, RollupResolution.FIVE_MINUTES, now.minus(TWO_DAYS), now)?.sum,
             lastIntakeAt = intakes.intakes(now.minus(MedicationProtectionTracker.INTAKE_LOOKBACK), now).lastOrNull()?.takenAt,
             kp = kp,

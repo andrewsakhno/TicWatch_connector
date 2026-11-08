@@ -45,6 +45,10 @@
     <string name="setting_daytime_hrv_interval">Интервал HRV днём</string>
     <string name="setting_daytime_hrv_interval_hint">Как часто днём измеряются RMSSD и частота дыхания, пока ничто не включило учащённые замеры. Каждый замер держит оптический датчик включённым 3 минуты, поэтому каждое сокращение интервала вдвое примерно удваивает его расход батареи.</string>
     <string name="setting_daytime_hrv_interval_minutes">%1$d мин</string>
+    <string name="setting_auto_workout_delay">Автодетект тренировки через</string>
+    <string name="setting_auto_workout_delay_hint">Быстрая ходьба такой длительности становится тренировкой: часы запускают или предлагают её, телефон записывает пропущенную задним числом. В расчётах пульса в покое активностью считаются только тренировки и 30 минут после них.</string>
+    <string name="setting_auto_workout_delay_less">Меньше</string>
+    <string name="setting_auto_workout_delay_more">Больше</string>
     <string name="history_title">История передачи</string>
     <string name="history_keep">Хранить историю</string>
     <string name="history_keep_sleep">Хранить сессии сна</string>
@@ -95,8 +99,8 @@
     <string name="detail_bpm_no_norm">%1$d уд/мин (нормы пока нет)</string>
     <string name="detail_bpm_vs_norm">%1$+d к норме (%2$d уд/мин)</string>
     <string name="detail_ms">%1$d мс</string>
-    <string name="detail_steps">%1$.1f тыс. шагов за 24 ч</string>
-    <string name="detail_steps_sleep">%1$.1f тыс. шагов за 24 ч, сон %2$d</string>
+    <string name="detail_steps">%1$.1f тыс. шагов за 24 ч, из них %2$.1f тыс. на тренировках</string>
+    <string name="detail_steps_sleep">%1$.1f тыс. шагов за 24 ч, из них %2$.1f тыс. на тренировках, сон %3$d</string>
     <string name="detail_kp">Kp %1$.1f</string>
     <string name="detail_sleep">сон %1$d</string>
     <string name="detail_dip">снижение %1$.0f%%</string>
@@ -208,6 +212,7 @@
     <string name="unit_ms">%1$.0f мс</string>
     <string name="unit_bpm">%1$.0f уд/мин</string>
     <string name="unit_celsius_delta">%1$+.1f °C</string>
+    <string name="unit_celsius">%1$.1f °C</string>
     <string name="unit_hpa">%1$.1f гПа</string>
     <string name="unit_hpa_delta">%1$+.1f гПа</string>
     <string name="unit_lux">%1$.0f лк</string>
@@ -227,6 +232,13 @@
     <string name="stress_today">Сегодня (бодрствование, покой)</string>
     <string name="card_sleep_score">Оценка сна</string>
     <string name="card_fatigue_index">Индекс утомленности</string>
+    <string name="card_temperature">Температура</string>
+    <string name="temperature_body">Тело</string>
+    <string name="temperature_wrist">На руке</string>
+    <string name="temperature_outdoor">На улице</string>
+    <string name="temperature_span_day">За сутки</string>
+    <string name="temperature_span_three_days">За 3 дня</string>
+    <string name="temperature_span_week">За 7 дней</string>
     <string name="fatigue_history_open">График по дням</string>
     <string name="fatigue_history_title">Индекс утомленности по дням</string>
     <string name="fatigue_level_fresh">Свежий</string>
@@ -694,6 +706,7 @@
     <string name="deviation_calibration_waiting">Ждёт ответа, в калибровке не участвует</string>
     <string name="deviation_calibration_included">Участвует в калибровке</string>
     <string name="deviation_calibration_excluded">Объяснено, в калибровке не участвует</string>
+    <string name="deviation_discard">Удалить отклонение: оно исчезнет из списка и не будет участвовать в калибровке</string>
     <string name="deviation_save">Сохранить ответ</string>
     <string name="deviation_notif_channel">Вопросы об отклонениях пульса</string>
     <string name="deviation_notif_title">Почему изменился пульс?</string>

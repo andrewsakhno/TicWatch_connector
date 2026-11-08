@@ -1,5 +1,6 @@
 package org.sand.ticwatch.watch.sensors
 
+import org.sand.ticwatch.watch.settings.autoWorkoutDelay
 import org.sand.ticwatch.watch.ecg.EcgCapturer
 import org.sand.ticwatch.watch.ecg.NightStripQueue
 import org.sand.ticwatch.watch.ecg.FileNightStripQueue
@@ -563,7 +564,7 @@ class SensorCollectionService : Service() {
             ),
             ledger = autoWorkoutStartLedger,
             scheduler = alarmScheduler(AUTO_WORKOUT_ALARM_TAG),
-            minWalk = MIN_AUTO_WALK,
+            minWalk = { currentWatchSettings().autoWorkoutDelay },
             stopAfter = AUTO_WORKOUT_STOP_AFTER,
             checkInterval = AUTO_WORKOUT_CHECK_INTERVAL,
         )
@@ -586,7 +587,7 @@ class SensorCollectionService : Service() {
             listOf(buildPassiveSampleSource(), buildVendorWindowSampleSource(), buildBoostedHeartRateSampleSource()) +
                 metricsProvider.sampleSources()
         val collected = merge(*backgroundSources.map { source -> source.samples().onEach(::onCollected) }.toTypedArray())
-        serviceScope.launch { sensorSyncSender.sync(merge(sleepHeartRateThinner.thin(collected), snapshotFallback.samples())) }
+        serviceScope.launch { sensorSyncSender.sync(merge(heartRateThinner.thin(collected), snapshotFallback.samples())) }
         serviceScope.launch { noStepsGate.track() }
         serviceScope.launch { sleepWalkingGate.track() }
         serviceScope.launch { autoWorkout.run() }
@@ -619,10 +620,24 @@ class SensorCollectionService : Service() {
         liveSpacing = LIVE_HEART_RATE_SPACING,
     )
 
-    private val sleepHeartRateThinner by lazy {
-        SleepHeartRateThinner(SLEEP_HEART_RATE_PERIOD) {
-            sleepState.isAsleep() && noWorkoutGate.isOpen() && !LiveSyncLease.processWide.isActive()
-        }
+    private val heartRateThinner by lazy {
+        val corridor = PhonePayloadStores.get(applicationContext).heartRateCorridor.latest
+        PhaseAwareHeartRateThinner(
+            periods = mapOf(
+                HeartRateListeningPhase.REST to NORMAL_DAY_HEART_RATE_PERIOD,
+                HeartRateListeningPhase.SLEEP to SLEEP_HEART_RATE_PERIOD,
+            ),
+            policy = ZoneHeartRatePhasePolicy(
+                fullStream = {
+                    !noWorkoutGate.isOpen() || LiveSyncLease.processWide.isActive() ||
+                        adaptiveScheduler.profile(MeasurementGroup.HEART_RATE).value != MonitoringProfile.IDLE
+                },
+                asleep = sleepState::isAsleep,
+                // Until the phone knows the zones, the awake corridor's top: thins less, never more.
+                zone2Ceiling = { corridor.value.let { it?.zone2CeilingBpm ?: it?.awakeRest?.highBpm } ?: FIXED_RESTING_LIMITS.highBpm },
+                stableNormal = ELEVATED_HEART_RATE_STABLE_NORMAL,
+            ),
+        )
     }
 
     /** One durable queue for everything the phone should receive: collected samples and local blood pressure estimates. */
@@ -794,7 +809,6 @@ class SensorCollectionService : Service() {
         private val ECG_PROGRESS_INTERVAL: Duration = Duration.ofSeconds(2)
 
         /** Brisk walking for this long becomes a workout; same cadence as phone-app's AutoExerciseDeriver. */
-        private val MIN_AUTO_WALK: Duration = Duration.ofMinutes(5)
         private const val BRISK_WALK_CADENCE = 90.0
 
         /** Slower steps still keep a started walk going (crowds, stairs). */
@@ -889,6 +903,10 @@ class SensorCollectionService : Service() {
 
         /** One heart-rate median per this long while asleep: 60 rows per sync interval, so the night's flushes are the 30 min alarm's. */
         private val SLEEP_HEART_RATE_PERIOD: Duration = Duration.ofSeconds(30)
+        /** One heart-rate median per this long while awake in zones 1-2, instead of a 400-row flush every ~6.6 min. */
+        private val NORMAL_DAY_HEART_RATE_PERIOD: Duration = Duration.ofSeconds(30)
+        /** The full stream stays open this long after the last reading above zone 2. */
+        private val ELEVATED_HEART_RATE_STABLE_NORMAL: Duration = Duration.ofMinutes(3)
 
         /** The "intermittent night monitor" setting's pause after each epoch: a third of the PPG time. */
         private val NIGHT_REST: Duration = Duration.ofMinutes(10)

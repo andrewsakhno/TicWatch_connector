@@ -2,14 +2,19 @@ package org.sand.ticwatch.phone.health
 
 import androidx.annotation.StringRes
 import java.time.Instant
+import kotlin.math.tanh
 import org.sand.ticwatch.phone.R
 
-/** Wrist signals at the moment of a calibration or estimate; RMSSD/skin temperature are null without recent data. */
+/**
+ * Wrist signals at the moment of a calibration or estimate; RMSSD/skin/ambient temperature are null without recent data.
+ * [ambientTemperatureCelsius] is the watch case sensor, only used to tell environmental cooling from vasoconstriction.
+ */
 data class WristSignals(
     val heartRate: Double,
     val heartRateAt: Instant,
     val rmssdMs: Double?,
     val skinTemperatureCelsius: Double?,
+    val ambientTemperatureCelsius: Double? = null,
 )
 
 /** One systolic/diastolic pair in mmHg, as estimated or as stored in the history. */
@@ -64,6 +69,14 @@ data class BloodPressureCoefficients(
      * mustn't hold every later resting estimate at `calibration - maxRestingSystolicDrop`.
      */
     val normotensiveSystolicReference: Double = 135.0,
+    /** Skin temperature change (°C) the shift saturates towards: `max * tanh(dT / max)`. */
+    val maxEffectiveSkinDelta: Double = 2.5,
+    /** Below this skin temperature (°C) a cooling wrist is losing heat to the environment, not vasoconstricting centrally. */
+    val coldSkinThresholdCelsius: Double = 29.5,
+    /** Below this watch case temperature (°C) the wrist is exposed to cold air. */
+    val coldAmbientThresholdCelsius: Double = 28.5,
+    /** Skin temperature (°C) at which cold-exposure attenuation removes the cooling shift entirely. */
+    val coldSkinFloorCelsius: Double = 25.0,
 )
 
 /**
@@ -85,7 +98,7 @@ class BloodPressureEstimator(private val coefficients: BloodPressureCoefficients
         restingHeartRateLow: Double? = null,
     ): BloodPressureReading {
         val heartRateShift = current.heartRate - calibration.heartRate
-        val skinShift = skinShift(calibration.skinTemperatureCelsius, current.skinTemperatureCelsius)
+        val skinShift = skinShift(calibration.skinTemperatureCelsius, current.skinTemperatureCelsius, current.ambientTemperatureCelsius)
         val autonomicShift = autonomicShift(calibration.rmssdMs, current.rmssdMs)
         val systolicShift = (
             coefficients.systolicPerBpm * heartRateShift +
@@ -119,8 +132,22 @@ class BloodPressureEstimator(private val coefficients: BloodPressureCoefficients
         if (baseline == null || current == null || baseline <= 0.0) 0.0
         else (1.0 - current / baseline).coerceIn(-MAX_AUTONOMIC_SHIFT, MAX_AUTONOMIC_SHIFT)
 
-    private fun skinShift(baseline: Double?, current: Double?): Double =
-        if (baseline == null || current == null) 0.0 else current - baseline
+    /**
+     * Effective skin temperature change: soft-saturated at [BloodPressureCoefficients.maxEffectiveSkinDelta], and a
+     * cooling shift is scaled down towards 0 as the skin nears [BloodPressureCoefficients.coldSkinFloorCelsius] while
+     * the skin or the air is cold, since that cooling is environmental heat loss rather than sympathetic tone.
+     */
+    private fun skinShift(baseline: Double?, current: Double?, ambient: Double?): Double {
+        if (baseline == null || current == null) return 0.0
+        val rawDelta = current - baseline
+        val saturated = coefficients.maxEffectiveSkinDelta * tanh(rawDelta / coefficients.maxEffectiveSkinDelta)
+        val coldExposure = current < coefficients.coldSkinThresholdCelsius ||
+            (ambient != null && ambient < coefficients.coldAmbientThresholdCelsius)
+        if (rawDelta >= 0.0 || !coldExposure) return saturated
+        val attenuation = ((current - coefficients.coldSkinFloorCelsius) /
+            (coefficients.coldSkinThresholdCelsius - coefficients.coldSkinFloorCelsius)).coerceIn(0.0, 1.0)
+        return saturated * attenuation
+    }
 
     private companion object {
         const val MAX_AUTONOMIC_SHIFT = 1.0

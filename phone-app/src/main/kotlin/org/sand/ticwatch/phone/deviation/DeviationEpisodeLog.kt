@@ -26,6 +26,9 @@ interface DeviationEpisodeLog {
 
     /** Replaces the episode's answer; a late answer simply lands here, the corridors recalculate from its start. */
     suspend fun answer(id: Long, reasons: Set<DeviationReason>, intensity: DeviationIntensity?, at: Instant)
+
+    /** The user's dismissal: the episode leaves the list and never counts for calibration; a re-scan does not bring it back. */
+    suspend fun discard(id: Long, at: Instant)
 }
 
 /** A candidate with what surrounded it, as the detector side hands it over. */
@@ -127,7 +130,7 @@ abstract class DeviationEpisodeDao {
     abstract fun observe(limit: Int): Flow<List<DeviationEpisodeWithReasons>>
 
     @Query(
-        "SELECT * FROM deviation_episode WHERE discarded_at IS NULL AND direction = :direction " +
+        "SELECT * FROM deviation_episode WHERE direction = :direction " +
             "AND ended_at >= :fromMs AND started_at <= :toMs ORDER BY started_at",
     )
     abstract suspend fun near(direction: Int, fromMs: Long, toMs: Long): List<DeviationEpisodeEntity>
@@ -149,6 +152,9 @@ abstract class DeviationEpisodeDao {
             "WHERE discarded_at IS NULL AND answered_at IS NULL AND ended_at >= :fromMs AND started_at <= :toMs",
     )
     abstract suspend fun discardUnanswered(fromMs: Long, toMs: Long, atMs: Long)
+
+    @Query("UPDATE deviation_episode SET discarded_at = :atMs, revision = revision + 1 WHERE id = :id AND discarded_at IS NULL")
+    abstract suspend fun discard(id: Long, atMs: Long)
 
     @Query(
         "SELECT * FROM deviation_episode WHERE discarded_at IS NULL AND minor = 0 AND asked_at IS NULL AND answered_at IS NULL " +
@@ -186,8 +192,10 @@ abstract class DeviationEpisodeDao {
     @Transaction
     open suspend fun record(candidate: DeviationEpisodeEntity, mergeGapMs: Long) {
         val nearby = near(candidate.directionCode, candidate.startedAtMs - mergeGapMs, candidate.endedAtMs + mergeGapMs)
-        val target = nearby.firstOrNull { it.endedAtMs >= candidate.startedAtMs && it.startedAtMs <= candidate.endedAtMs }
-            ?: nearby.firstOrNull { it.answeredAtMs == null }
+        val overlapping = nearby.firstOrNull { it.endedAtMs >= candidate.startedAtMs && it.startedAtMs <= candidate.endedAtMs }
+        // A dismissed or workout-discarded stretch stays gone when a re-scan finds it again.
+        if (overlapping?.discardedAtMs != null) return
+        val target = overlapping ?: nearby.firstOrNull { it.answeredAtMs == null && it.discardedAtMs == null }
         if (target == null) {
             insert(candidate)
             return
@@ -258,6 +266,8 @@ class RoomDeviationEpisodeLog(private val dao: DeviationEpisodeDao) :
             MERGE_GAP.toMillis(),
         )
     }
+
+    override suspend fun discard(id: Long, at: Instant) = dao.discard(id, at.toEpochMilli())
 
     override suspend fun discardUnanswered(from: Instant, to: Instant, at: Instant) =
         dao.discardUnanswered(from.toEpochMilli(), to.toEpochMilli(), at.toEpochMilli())

@@ -23,7 +23,10 @@ data class CardioReadinessInputs(
     val rmssdMs: Double?,
     val dippingPercent: Double?,
     val sleepScore: Int?,
+    /** Workout steps of the last 24 h: the only steps the rules weigh. */
     val steps24h: Double?,
+    /** Every step of the last 24 h, for reference only: shown next to [steps24h], never weighed. */
+    val totalSteps24h: Double?,
     val trainingLoad48h: Double?,
     val lastIntakeAt: Instant?,
     val kp: Double?,
@@ -140,14 +143,16 @@ class AutonomicExhaustionRule : ReadinessRule {
     }
 }
 
-/** Many steps in the last 24 h after a poor night. */
+/** Many workout steps in the last 24 h after a poor night; all steps are only shown beside them. */
 class FatigueRule : ReadinessRule {
     override fun evaluate(inputs: CardioReadinessInputs): ReadinessFactor? {
         val steps = inputs.steps24h ?: return null
         val poorSleep = inputs.sleepScore?.let { it < SleepThresholds.GOOD_SLEEP_SCORE } ?: false
         val points = if (steps > HIGH_STEPS && poorSleep) PENALTY else 0
-        val thousands = steps / THOUSAND
-        val detail = inputs.sleepScore?.let { uiText(R.string.detail_steps_sleep, thousands, it) } ?: uiText(R.string.detail_steps, thousands)
+        val workoutThousands = steps / THOUSAND
+        val totalThousands = (inputs.totalSteps24h ?: steps) / THOUSAND
+        val detail = inputs.sleepScore?.let { uiText(R.string.detail_steps_sleep, totalThousands, workoutThousands, it) }
+            ?: uiText(R.string.detail_steps, totalThousands, workoutThousands)
         return ReadinessFactor(ReadinessFactorKind.FATIGUE, detail, points)
     }
 

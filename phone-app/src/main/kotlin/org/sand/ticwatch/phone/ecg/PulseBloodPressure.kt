@@ -25,7 +25,13 @@ import kotlin.math.sqrt
 data class PulseFeatures(val heartRate: Double, val riseTimeMs: Double, val halfWidthMs: Double, val perfusionIndex: Double) {
     fun vector(): DoubleArray = doubleArrayOf(heartRate, riseTimeMs, halfWidthMs, perfusionIndex)
 
+    /** False for a strip under severe (e.g. cold) peripheral vasoconstriction, whose shape doesn't reflect central pressure. */
+    val isWellPerfused: Boolean get() = perfusionIndex >= MIN_CALIBRATION_PERFUSION_PERCENT
+
     companion object {
+        /** Perfusion index (%) below which a strip neither trains nor feeds the personal pulse-wave model. */
+        const val MIN_CALIBRATION_PERFUSION_PERCENT = 0.22
+
         fun of(analysis: EcgAnalysis): PulseFeatures? {
             val pulse = analysis.pulse ?: return null
             return PulseFeatures(analysis.meanHeartRate ?: return null, pulse.riseTimeMs, pulse.halfWidthMs ?: return null, pulse.perfusionIndexPercent)
@@ -87,7 +93,7 @@ class PulseBloodPressureCalibrator(
 ) : EcgRecordingStoredListener {
 
     override suspend fun onStored(recording: EcgRecording) {
-        val features = PulseFeatures.of(analyzer.analyze(recording.beats, recording.wave)) ?: return
+        val features = PulseFeatures.of(analyzer.analyze(recording.beats, recording.wave))?.takeIf { it.isWellPerfused } ?: return
         val reading = cuff.cuffReadings(recording.startedAt.minus(PAIRING_WINDOW), recording.startedAt.plus(AFTER_WINDOW))
             .minByOrNull { abs(Duration.between(it.measuredAt, recording.startedAt).toMillis()) } ?: return
         val id = pairs.insert(
@@ -224,7 +230,7 @@ class RecentStripPulseBloodPressure(
 
     override suspend fun near(at: Instant): PulseWaveBloodPressure? {
         val strip = log.startedBetween(at.minus(STRIP_MAX_AGE), at.plusMillis(1)).firstOrNull() ?: return null
-        val features = PulseFeatures.of(analyzer.analyze(strip.beats, strip.wave)) ?: return null
+        val features = PulseFeatures.of(analyzer.analyze(strip.beats, strip.wave))?.takeIf { it.isWellPerfused } ?: return null
         val estimate = estimator.estimate(features) as? PulseBloodPressure.Estimate ?: return null
         return PulseWaveBloodPressure(estimate.systolic, estimate.diastolic, estimate.systolicErrorMmHg)
     }

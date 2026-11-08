@@ -36,7 +36,10 @@ class SensorHistoryPurger(
             deleted += maintenance.purgeRollupsBefore(resolution, now.minus(tierRetention))
         }
         sleepSessionRetentionStore.get().months?.let { months ->
-            deleted += maintenance.purgeSleepSessionsBefore(now.atZone(zone).minusMonths(months).toInstant(), keepUnsynced)
+            val cutoff = now.atZone(zone).minusMonths(months).toInstant()
+            deleted += maintenance.purgeSleepSessionsBefore(cutoff, keepUnsynced)
+            // Workouts follow the sleep retention: both are the long-lived context of the rest calculations.
+            deleted += maintenance.purgeWorkoutSessionsBefore(cutoff)
         }
         if (deleted > 0) maintenance.compact()
         return deleted

@@ -1,8 +1,6 @@
 package org.sand.ticwatch.phone.route
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 
@@ -15,18 +13,28 @@ interface WorkoutRouteRecorder {
 /**
  * [WorkoutRouteRecorder] driving [WorkoutLocationService]. The start arrives while the phone app
  * is usually in the background, so Android only lets it start a `location` foreground service
- * when "Allow all the time" (ACCESS_BACKGROUND_LOCATION) is granted; without it the start is
- * refused and logged, and the workout is still written - just without a phone route.
+ * when "Allow all the time" (ACCESS_BACKGROUND_LOCATION) is granted. [gate] pre-checks that; any
+ * refusal Android still raises is caught and logged - the workout itself is still tracked and
+ * written, just without a phone route.
  */
-class ServiceWorkoutRouteRecorder(private val context: Context) : WorkoutRouteRecorder {
+class ServiceWorkoutRouteRecorder(
+    private val context: Context,
+    private val gate: RouteTrackingGate,
+) : WorkoutRouteRecorder {
 
     override fun onWorkoutStarted() {
-        if (!hasLocationPermission()) {
-            Log.w(TAG, "Workout started on the watch, but location permission is missing; no phone route")
+        gate.blocker()?.let {
+            Log.w(TAG, "Workout started on the watch, but phone route tracking is blocked ($it); skipping GPS route")
             return
         }
-        runCatching { ContextCompat.startForegroundService(context, WorkoutLocationService.startIntent(context)) }
-            .onFailure { Log.w(TAG, "Android refused to start route tracking from the background", it) }
+        try {
+            ContextCompat.startForegroundService(context, WorkoutLocationService.startIntent(context))
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Missing permission for location route tracking; skipping GPS route", e)
+        } catch (e: IllegalStateException) {
+            // Covers ForegroundServiceStartNotAllowedException (API 31+) and background start limits.
+            Log.w(TAG, "Android refused to start route tracking from the background; skipping GPS route", e)
+        }
     }
 
     override fun onWorkoutEnded() {
@@ -34,9 +42,6 @@ class ServiceWorkoutRouteRecorder(private val context: Context) : WorkoutRouteRe
         runCatching { context.startService(WorkoutLocationService.stopIntent(context)) }
             .onFailure { Log.w(TAG, "Failed to stop route tracking", it) }
     }
-
-    private fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private companion object {
         const val TAG = "WorkoutRouteRecorder"

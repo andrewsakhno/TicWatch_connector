@@ -1,5 +1,7 @@
 package org.sand.ticwatch.phone
 
+import org.sand.ticwatch.phone.watchsettings.autoWorkoutDelay
+import org.sand.ticwatch.phone.health.WorkoutActivitySource
 import android.app.AlarmManager
 import android.content.Context
 import android.content.res.Configuration
@@ -128,6 +130,8 @@ import org.sand.ticwatch.phone.health.SharedPreferencesDailyValueLog
 import org.sand.ticwatch.phone.health.FatigueIndexDeriver
 import org.sand.ticwatch.phone.health.SharedPreferencesInstantLog
 import org.sand.ticwatch.phone.health.SharedPreferencesUserProfileStore
+import org.sand.ticwatch.phone.health.KarvonenZoneCeiling
+import org.sand.ticwatch.phone.health.HeartRateZone
 import org.sand.ticwatch.phone.health.SkinOffsetCoreModel
 import org.sand.ticwatch.phone.health.SleepBreathingSummaryDeriver
 import org.sand.ticwatch.phone.health.SleepNightReplacement
@@ -171,6 +175,8 @@ import org.sand.ticwatch.phone.insights.CircadianNorm
 import org.sand.ticwatch.phone.insights.FatigueHistory
 import org.sand.ticwatch.phone.insights.FatigueIndexCalculator
 import org.sand.ticwatch.phone.insights.RollupFatigueHistory
+import org.sand.ticwatch.phone.insights.RollupTemperatureHistory
+import org.sand.ticwatch.phone.insights.TemperatureHistory
 import org.sand.ticwatch.phone.insights.FatigueIndexSource
 import org.sand.ticwatch.phone.insights.HealthScoresSource
 import org.sand.ticwatch.phone.insights.HistoryFatigueIndexSource
@@ -244,6 +250,7 @@ import org.sand.ticwatch.phone.report.HtmlCardioReportRenderer
 import org.sand.ticwatch.phone.report.MarkdownCardioReportRenderer
 import org.sand.ticwatch.phone.report.SleepReportCalculator
 import org.sand.ticwatch.phone.route.ExerciseRouteLog
+import org.sand.ticwatch.phone.route.PermissionRouteTrackingGate
 import org.sand.ticwatch.phone.route.ServiceWorkoutRouteRecorder
 import org.sand.ticwatch.phone.route.SharedPreferencesWatchWorkoutActivityStore
 import org.sand.ticwatch.phone.route.StateTrackingWorkoutRouteRecorder
@@ -283,6 +290,7 @@ import org.sand.ticwatch.phone.transport.DeviceLinkTransport
 import org.sand.ticwatch.phone.transport.TransportFactory
 import org.sand.ticwatch.phone.ui.DataChangeSignal
 import org.sand.ticwatch.phone.watchbattery.SharedPreferencesWatchBatteryStore
+import org.sand.ticwatch.phone.watchbattery.WatchBatteryHistoryRecorder
 import org.sand.ticwatch.phone.watchbattery.StoringWatchBatteryReceiver
 import org.sand.ticwatch.phone.watchbattery.WatchBatteryReceiver
 import org.sand.ticwatch.phone.watchbattery.WatchBatteryStore
@@ -338,12 +346,18 @@ class AppContainer(context: Context) {
 
     private val sampleWindowReader = SampleWindowReader(historyQueries)
 
+    /** Workouts as the rest calculations' only activity; local store, where `workout_session` lives. */
+    private val workoutActivity = WorkoutActivitySource(sensorHistoryStore)
+
     private val sessionRoutePoints = SessionRoutePoints(exerciseRouteStore)
 
     /** The watch's workout state as last reported; the Metrics card shows it. */
     val watchWorkoutActivity: WatchWorkoutActivityStore by lazy { SharedPreferencesWatchWorkoutActivityStore.get(context) }
     val workoutRouteRecorder: WorkoutRouteRecorder by lazy {
-        StateTrackingWorkoutRouteRecorder(ServiceWorkoutRouteRecorder(context), watchWorkoutActivity)
+        StateTrackingWorkoutRouteRecorder(
+            ServiceWorkoutRouteRecorder(context, PermissionRouteTrackingGate(context)),
+            watchWorkoutActivity,
+        )
     }
 
     private val restingHeartRateState =
@@ -440,11 +454,13 @@ class AppContainer(context: Context) {
 
     /** Stored by [FatigueIndexDeriver], shown on both dashboards through [healthScores]. */
     private val fatigueIndex: FatigueIndexSource = HistoryFatigueIndexSource(
-        historyQueries, circadianNorm, VagalRecoverySource { sleepAdvancedInsights.lastNightRecovery() }, FatigueIndexCalculator(),
+        historyQueries, workoutActivity, circadianNorm, VagalRecoverySource { sleepAdvancedInsights.lastNightRecovery() }, FatigueIndexCalculator(),
         SensorHistoryModule.clock, SensorHistoryModule.zone,
     )
 
     val fatigueHistory: FatigueHistory = RollupFatigueHistory(historyQueries, SensorHistoryModule.clock, SensorHistoryModule.zone)
+
+    val temperatureHistory: TemperatureHistory = RollupTemperatureHistory(historyQueries, SensorHistoryModule.clock, SensorHistoryModule.zone)
 
     /** Deviations screen: episodes and the user's explanations of them, which decide what may feed calibration. */
     val deviationEpisodeLog: DeviationEpisodeLog = DeviationModule.log(context)
@@ -466,7 +482,10 @@ class AppContainer(context: Context) {
                 SensorType.HEIGHT, userProfileStore::heightCm, SharedPreferencesDailyValueLog(context, HEIGHT_STATE_PREFS),
             ),
             ActivityIntensityDeriver(userProfileStore, restingHeartRateBaseline),
-            AutoExerciseDeriver(sampleWindowReader, SharedPreferencesInstantLog(context, AUTO_EXERCISE_STATE_PREFS)),
+            AutoExerciseDeriver(
+                sampleWindowReader, SharedPreferencesInstantLog(context, AUTO_EXERCISE_STATE_PREFS),
+                minDuration = { watchSettingsStore.settings.value.autoWorkoutDelay },
+            ),
             // After the auto-exercise deriver, whose detected walks/runs it also scores.
             CardioLoadDeriver(
                 sampleWindowReader, userProfileStore, restingHeartRateBaseline, ExerciseLoadCalculator(),
@@ -710,7 +729,12 @@ class AppContainer(context: Context) {
     /** Watch battery level, sent with every watch sync flush; shown in the title bar and the advisor widget. */
     val watchBatteryStore: WatchBatteryStore by lazy { SharedPreferencesWatchBatteryStore.get(context) }
 
-    val watchBatteryReceiver: WatchBatteryReceiver by lazy { StoringWatchBatteryReceiver(watchBatteryStore, advisorWidgetRefresher) }
+    val watchBatteryReceiver: WatchBatteryReceiver by lazy { StoringWatchBatteryReceiver(
+            watchBatteryStore,
+            WatchBatteryHistoryRecorder(acknowledgingHealthRecordWriter, CoroutineScope(SupervisorJob() + Dispatchers.IO)),
+            advisorWidgetRefresher,
+        )
+    }
 
     /** Routes the watch's sleep start/end to the link service hosting [phoneSnoreMonitor]. */
     val snoreMonitorControl: SnoreMonitorControl = ServiceSnoreMonitorControl(appContext)
@@ -806,6 +830,7 @@ class AppContainer(context: Context) {
         HistoryCardioReadinessSource(
             reader = ReadinessSnapshotReader(
                 queries = historyQueries,
+                activity = workoutActivity,
                 norm = circadianNorm,
                 pressureLog = bloodPressureMonitor.log,
                 pressureCalculator = AmbulatoryPressureCalculator(DayNightWindow(SensorHistoryModule.zone)),
@@ -820,7 +845,7 @@ class AppContainer(context: Context) {
             protection = medicationProtectionTracker,
             recovery = sleepAdvancedInsights,
             autonomic = HistoryAutonomicBalanceSource(
-                historyQueries, circadianNorm, DeviationModule.log(appContext), HeartRateDropDetector(), AutonomicBalanceCalculator(),
+                historyQueries, workoutActivity, circadianNorm, DeviationModule.log(appContext), HeartRateDropDetector(), AutonomicBalanceCalculator(),
                 SensorHistoryModule.zone,
             ),
             calibration = HistoryCalibrationAdviceSource(
@@ -868,7 +893,9 @@ class AppContainer(context: Context) {
                     bloodPressurePublisher,
                     SpaceWeatherModule.publisher(spaceWeatherStore, deviceLinkTransport, appTextResolver),
                     WatchHeartRateCorridorPublisher(
-                        DeviationModule.corridors(context), SensorHistoryModule.clock, deviceLinkTransport,
+                        DeviationModule.corridors(context),
+                        KarvonenZoneCeiling(HeartRateZone.ZONE_2, userProfileStore, restingHeartRateBaseline, SensorHistoryModule.zone),
+                        SensorHistoryModule.clock, deviceLinkTransport,
                         CoroutineScope(SupervisorJob() + Dispatchers.IO),
                     ),
                     WatchBloodPressureCalibrationPublisher(

@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.google.android.gms.location.LocationServices
 import java.time.Duration
@@ -48,9 +49,10 @@ class WorkoutLocationService : Service() {
         when (intent?.action) {
             ACTION_STOP -> stopTracking()
             else -> {
-                ServiceCompat.startForeground(
-                    this, NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
-                )
+                if (!enterForeground()) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 tracker.start()
                 mainHandler.removeCallbacks(safetyStop)
                 mainHandler.postDelayed(safetyStop, MAX_TRACKING.toMillis())
@@ -58,6 +60,25 @@ class WorkoutLocationService : Service() {
         }
         // A restart after a kill would track a workout that may well have ended.
         return START_NOT_STICKY
+    }
+
+    /**
+     * Promotes the service to a `location` FGS. Android 14 re-checks the permissions and the
+     * app's while-in-use eligibility here and throws instead of refusing quietly; a refusal only
+     * means no phone route for this workout, so it's logged rather than allowed to kill the process.
+     */
+    private fun enterForeground(): Boolean = try {
+        ServiceCompat.startForeground(
+            this, NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+        )
+        true
+    } catch (e: SecurityException) {
+        Log.w(TAG, "Location FGS refused (missing permission or not eligible in background); skipping GPS route", e)
+        false
+    } catch (e: IllegalStateException) {
+        // ForegroundServiceStartNotAllowedException (API 31+) and FGS-type exceptions (API 34+).
+        Log.w(TAG, "Location FGS start not allowed; skipping GPS route", e)
+        false
     }
 
     private fun stopTracking() {
@@ -86,6 +107,7 @@ class WorkoutLocationService : Service() {
     }
 
     companion object {
+        private const val TAG = "WorkoutLocationService"
         private const val NOTIFICATION_ID = 47
         private const val CHANNEL_ID = "workout_route"
         private const val ACTION_STOP = "org.sand.ticwatch.phone.action.STOP_WORKOUT_ROUTE"

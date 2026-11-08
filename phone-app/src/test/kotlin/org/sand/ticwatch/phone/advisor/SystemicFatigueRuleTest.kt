@@ -44,6 +44,7 @@ class SystemicFatigueRuleTest {
         dippingPercent = null,
         sleepScore = null,
         steps24h = null,
+        totalSteps24h = null,
         trainingLoad48h = null,
         lastIntakeAt = null,
         kp = null,

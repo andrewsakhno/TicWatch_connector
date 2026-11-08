@@ -19,13 +19,15 @@ import java.time.Instant
  * acks/retries) plus [HistoryProjection]s that outlive them: per-tier aggregates
  * (`sensor_rollup`, see [RollupResolution]), sleep sessions (`sleep_session`) and their stages
  * (`sleep_stage`, see [SleepStageWriter]), plus workout
- * GPS fixes (`exercise_route_point`, see [SqliteExerciseRouteStore]).
+ * GPS fixes (`exercise_route_point`, see [SqliteExerciseRouteStore]) and workouts with their steps
+ * (`workout_session`, see [WorkoutSessionWriter]).
  * Enum columns hold compact integer codes ([SensorTypeCodes], [DeliveryStatus.code]).
  */
 class SensorHistoryDatabase private constructor(
     context: Context,
     private val rollupWriter: HistoryProjection,
     private val sleepSessionWriter: HistoryProjection,
+    private val workoutSessionWriter: HistoryProjection,
 ) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     init {
@@ -51,6 +53,7 @@ class SensorHistoryDatabase private constructor(
         if (oldVersion in VERSION_EXERCISE_ROUTES until VERSION_CLOUD_SYNC) addRouteCloudSyncColumn(db)
         if (oldVersion in VERSION_SLEEP_SESSIONS until VERSION_SLEEP_CLOUD_SYNC) addSleepCloudSyncColumn(db, SleepSessionTable.NAME)
         if (oldVersion in VERSION_SLEEP_STAGES until VERSION_SLEEP_CLOUD_SYNC) addSleepCloudSyncColumn(db, SleepStageTable.NAME)
+        if (oldVersion < VERSION_WORKOUT_SESSIONS) addWorkoutSessions(db)
     }
 
     /** v9 tracks the sleep tables' upload too; they outlive their raw rows, so every existing row is still to be uploaded. */
@@ -126,6 +129,28 @@ class SensorHistoryDatabase private constructor(
         )
     }
 
+    /** v10 added `workout_session`; seed it from the workout rows the raw retention still holds, steps counted from theirs. */
+    private fun addWorkoutSessions(db: SQLiteDatabase) {
+        createWorkoutSessionTable(db)
+        val workoutTypes = WorkoutSession.SAMPLE_TYPES.joinToString { SensorTypeCodes.code(it).toString() }
+        backfill(db, workoutSessionWriter, "${Table.TYPE} IN ($workoutTypes)")
+    }
+
+    private fun createWorkoutSessionTable(db: SQLiteDatabase) {
+        // Keyed by start like sleep_session; IF NOT EXISTS as a pre-v10 upgrade from v1 runs createSchema first.
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS ${WorkoutSessionTable.NAME} (
+                ${WorkoutSessionTable.START} INTEGER PRIMARY KEY,
+                ${WorkoutSessionTable.END} INTEGER,
+                ${WorkoutSessionTable.EXERCISE_TYPE} INTEGER NOT NULL,
+                ${WorkoutSessionTable.AUTOMATIC} INTEGER NOT NULL,
+                ${WorkoutSessionTable.STEPS} REAL
+            )
+            """.trimIndent(),
+        )
+    }
+
     /** v3 added `sleep_session`; seed it from the SLEEP rows the raw retention still holds. */
     private fun addSleepSessions(db: SQLiteDatabase) {
         createSleepSessionTable(db)
@@ -191,6 +216,7 @@ class SensorHistoryDatabase private constructor(
         createSleepSessionTable(db)
         createRoutePointTable(db)
         createSleepStageTable(db)
+        createWorkoutSessionTable(db)
     }
 
     /** v1 stored enums as TEXT and had no rollups: convert rows in place, then backfill the rollups. */
@@ -292,6 +318,18 @@ class SensorHistoryDatabase private constructor(
         const val SESSION_START = "session_start_epoch_ms"
     }
 
+    /** [EXERCISE_TYPE] = Health Services exercise type id; [AUTOMATIC] = [AUTOMATIC_WORKOUT] or [MANUAL_WORKOUT]; [END], [STEPS] null while unfinished. */
+    object WorkoutSessionTable {
+        const val NAME = "workout_session"
+        const val START = "start_epoch_ms"
+        const val END = "end_epoch_ms"
+        const val EXERCISE_TYPE = "exercise_type"
+        const val AUTOMATIC = "automatic"
+        const val STEPS = "steps"
+        const val AUTOMATIC_WORKOUT = 1L
+        const val MANUAL_WORKOUT = 0L
+    }
+
     object RoutePointTable {
         const val NAME = "exercise_route_point"
         const val RECORDED_AT = "recorded_at_epoch_ms"
@@ -313,7 +351,8 @@ class SensorHistoryDatabase private constructor(
         private const val VERSION_SNAPSHOT_FLAG = 7
         private const val VERSION_CLOUD_SYNC = 8
         private const val VERSION_SLEEP_CLOUD_SYNC = 9
-        private const val DATABASE_VERSION = VERSION_SLEEP_CLOUD_SYNC
+        private const val VERSION_WORKOUT_SESSIONS = 10
+        private const val DATABASE_VERSION = VERSION_WORKOUT_SESSIONS
         const val NOT_SNAPSHOT = 0
         const val SNAPSHOT = 1
         const val NOT_CLOUD_SYNCED = 0
@@ -339,8 +378,9 @@ class SensorHistoryDatabase private constructor(
             context: Context,
             rollupWriter: HistoryProjection,
             sleepSessionWriter: HistoryProjection,
+            workoutSessionWriter: HistoryProjection,
         ): SensorHistoryDatabase = instance ?: synchronized(this) {
-            instance ?: SensorHistoryDatabase(context.applicationContext, rollupWriter, sleepSessionWriter)
+            instance ?: SensorHistoryDatabase(context.applicationContext, rollupWriter, sleepSessionWriter, workoutSessionWriter)
                 .also { instance = it }
         }
     }

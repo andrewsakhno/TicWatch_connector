@@ -24,9 +24,11 @@ class WatchApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        val recorder = LogcatFileRecorder(RotatingLogStore.inFilesDir(filesDir)).apply { recordCrashes() }
+        val logStore = RotatingLogStore.inFilesDir(filesDir)
+        val recorder = LogcatFileRecorder(logStore).apply { recordCrashes() }
         // First settings access reads the preferences file: off the main thread.
         scope.launch {
+            logStore.trim()
             val settings = SharedPreferencesWatchSettingsStore.get(this@WatchApplication).settings
             LogCaptureController(recorder, settings.map { it.logCapture }).bind(scope)
             WatchLanguageFollower(settings.map { it.language }, LocaleManagerAppLocaleApplier(this@WatchApplication)).bind(scope)

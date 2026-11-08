@@ -27,6 +27,8 @@ data class WatchSettings(
     val nightMonitorIntermittent: Boolean = false,
     /** IDLE cadence of the daytime RMSSD + breathing window; shorter costs a 3-minute PPG window each time. */
     val daytimeHrvInterval: DaytimeHrvInterval = DaytimeHrvInterval.DEFAULT,
+    /** Brisk walking this long becomes a workout, on the watch and in the phone's detection alike. */
+    val autoWorkoutMinutes: Int = AutoWorkoutDelay.DEFAULT_MINUTES,
     /** BCP 47 tag of the app language picked on the phone ([LANGUAGE_SYSTEM] = follow the device). */
     val language: String = LANGUAGE_SYSTEM,
     val changedAtEpochMs: Long = 0,
@@ -53,6 +55,22 @@ enum class DaytimeHrvInterval(val minutes: Int) {
     }
 }
 
+/**
+ * How long a brisk walk lasts before it counts as a workout: the watch starts (or offers) one, the phone records a
+ * missed one afterwards. Rest calculations treat only workouts as activity, so this also bounds what "at rest" excludes.
+ */
+object AutoWorkoutDelay {
+    const val MIN_MINUTES = 1
+    const val MAX_MINUTES = 99
+    const val DEFAULT_MINUTES = 10
+
+    /** A stored or received value, clamped to the range the setting offers. */
+    fun of(minutes: Int): Int = minutes.coerceIn(MIN_MINUTES, MAX_MINUTES)
+}
+
+/** [WatchSettings.autoWorkoutMinutes] as a duration. */
+val WatchSettings.autoWorkoutDelay: Duration get() = Duration.ofMinutes(autoWorkoutMinutes.toLong())
+
 /** Which device listens for snoring: the watch costs its battery, the phone must lie next to the bed. */
 enum class SnoreMicrophone(val wireValue: String, @StringRes val label: Int) {
     WATCH("watch", R.string.microphone_watch),
@@ -75,6 +93,7 @@ object WatchSettingsPayload {
     private const val NIGHT_PULSE_WAVE = "night_pulse_wave"
     private const val NIGHT_MONITOR_INTERMITTENT = "night_monitor_intermittent"
     private const val HRV_INTERVAL_MINUTES = "hrv_interval_minutes"
+    private const val AUTO_WORKOUT_MINUTES = "auto_workout_minutes"
     private const val LANGUAGE = "language"
     private const val CHANGED_AT = "changed_at"
 
@@ -87,6 +106,7 @@ object WatchSettingsPayload {
         .put(NIGHT_PULSE_WAVE, settings.nightPulseWave)
         .put(NIGHT_MONITOR_INTERMITTENT, settings.nightMonitorIntermittent)
         .put(HRV_INTERVAL_MINUTES, settings.daytimeHrvInterval.minutes)
+        .put(AUTO_WORKOUT_MINUTES, settings.autoWorkoutMinutes)
         .put(LANGUAGE, settings.language)
         .put(CHANGED_AT, settings.changedAtEpochMs)
         .toString()
@@ -102,6 +122,8 @@ object WatchSettingsPayload {
             nightPulseWave = it.optBoolean(NIGHT_PULSE_WAVE, false),
             nightMonitorIntermittent = it.optBoolean(NIGHT_MONITOR_INTERMITTENT, false),
             daytimeHrvInterval = DaytimeHrvInterval.of(it.optInt(HRV_INTERVAL_MINUTES, DaytimeHrvInterval.DEFAULT.minutes)),
+            // Optional too: a peer built before it sends none.
+            autoWorkoutMinutes = AutoWorkoutDelay.of(it.optInt(AUTO_WORKOUT_MINUTES, AutoWorkoutDelay.DEFAULT_MINUTES)),
             language = it.optString(LANGUAGE, LANGUAGE_SYSTEM),
             changedAtEpochMs = it.getLong(CHANGED_AT),
         )
@@ -133,6 +155,7 @@ class SharedPreferencesWatchSettingsStore private constructor(private val prefs:
             .putBoolean(KEY_NIGHT_PULSE_WAVE, settings.nightPulseWave)
             .putBoolean(KEY_NIGHT_MONITOR_INTERMITTENT, settings.nightMonitorIntermittent)
             .putInt(KEY_HRV_INTERVAL_MINUTES, settings.daytimeHrvInterval.minutes)
+            .putInt(KEY_AUTO_WORKOUT_MINUTES, settings.autoWorkoutMinutes)
             .putString(KEY_LANGUAGE, settings.language)
             .putLong(KEY_CHANGED_AT, settings.changedAtEpochMs)
             .apply()
@@ -148,6 +171,7 @@ class SharedPreferencesWatchSettingsStore private constructor(private val prefs:
         nightPulseWave = prefs.getBoolean(KEY_NIGHT_PULSE_WAVE, DEFAULTS.nightPulseWave),
         nightMonitorIntermittent = prefs.getBoolean(KEY_NIGHT_MONITOR_INTERMITTENT, DEFAULTS.nightMonitorIntermittent),
         daytimeHrvInterval = DaytimeHrvInterval.of(prefs.getInt(KEY_HRV_INTERVAL_MINUTES, DEFAULTS.daytimeHrvInterval.minutes)),
+        autoWorkoutMinutes = AutoWorkoutDelay.of(prefs.getInt(KEY_AUTO_WORKOUT_MINUTES, DEFAULTS.autoWorkoutMinutes)),
         language = prefs.getString(KEY_LANGUAGE, null) ?: DEFAULTS.language,
         changedAtEpochMs = prefs.getLong(KEY_CHANGED_AT, DEFAULTS.changedAtEpochMs),
     )
@@ -162,6 +186,7 @@ class SharedPreferencesWatchSettingsStore private constructor(private val prefs:
         private const val KEY_NIGHT_PULSE_WAVE = "night_pulse_wave"
         private const val KEY_NIGHT_MONITOR_INTERMITTENT = "night_monitor_intermittent"
         private const val KEY_HRV_INTERVAL_MINUTES = "hrv_interval_minutes"
+        private const val KEY_AUTO_WORKOUT_MINUTES = "auto_workout_minutes"
         private const val KEY_LANGUAGE = "language"
         private const val KEY_CHANGED_AT = "changed_at"
         private val DEFAULTS = WatchSettings()

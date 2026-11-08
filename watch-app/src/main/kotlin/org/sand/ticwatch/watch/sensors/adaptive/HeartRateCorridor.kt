@@ -12,8 +12,15 @@ import java.time.Duration
 /** Resting heart rate range of one state: outside it the wearer is in a deviation. */
 data class RestingHeartRateLimits(val lowBpm: Double, val highBpm: Double)
 
-/** The phone's personal corridors (its `deviation/HeartRateCorridor`), awake at rest and asleep. */
-data class HeartRateCorridorSnapshot(val awakeRest: RestingHeartRateLimits, val sleep: RestingHeartRateLimits) {
+/**
+ * The phone's personal corridors (its `deviation/HeartRateCorridor`), awake at rest and asleep, and the top of the
+ * wearer's Karvonen zone 2 ([zone2CeilingBpm], null until the phone knows the birth year and a resting HR).
+ */
+data class HeartRateCorridorSnapshot(
+    val awakeRest: RestingHeartRateLimits,
+    val sleep: RestingHeartRateLimits,
+    val zone2CeilingBpm: Double? = null,
+) {
     fun of(asleep: Boolean): RestingHeartRateLimits = if (asleep) sleep else awakeRest
 }
 
@@ -23,11 +30,13 @@ object HeartRateCorridorPayload {
     private const val AWAKE_HIGH = "awake_high"
     private const val SLEEP_LOW = "sleep_low"
     private const val SLEEP_HIGH = "sleep_high"
+    private const val ZONE2_CEILING = "zone2_ceiling"
 
     fun decode(payload: String): HeartRateCorridorSnapshot = JSONObject(payload).let {
         HeartRateCorridorSnapshot(
             awakeRest = RestingHeartRateLimits(it.getDouble(AWAKE_LOW), it.getDouble(AWAKE_HIGH)),
             sleep = RestingHeartRateLimits(it.getDouble(SLEEP_LOW), it.getDouble(SLEEP_HIGH)),
+            zone2CeilingBpm = if (it.has(ZONE2_CEILING)) it.getDouble(ZONE2_CEILING) else null,
         )
     }
 }

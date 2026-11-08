@@ -35,7 +35,8 @@ class ActivityIntensityDeriver(
     private val restingHeartRate: RestingHeartRateBaseline,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     private val minRun: Int = 2,
-    private val minReadingsPerMinute: Int = 3,
+    // 2: the watch sends one 30 s median at rest (awake in zones 1-2, or asleep), the full ~1 Hz stream above that.
+    private val minReadingsPerMinute: Int = 2,
 ) : SampleDeriver {
 
     private class Minute(val start: Instant, val level: ActivityIntensityLevel)

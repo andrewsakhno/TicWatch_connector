@@ -21,14 +21,15 @@ object SensorHistoryModule {
     private val rollupWriter = SensorRollupWriter(zone)
     private val sleepSessionWriter = SleepSessionWriter()
     private val sleepStageWriter = SleepStageWriter()
+    private val workoutSessionWriter = WorkoutSessionWriter()
 
     private fun database(context: Context): SensorHistoryDatabase =
-        SensorHistoryDatabase.getInstance(context, rollupWriter, sleepSessionWriter)
+        SensorHistoryDatabase.getInstance(context, rollupWriter, sleepSessionWriter, workoutSessionWriter)
 
     fun store(context: Context): SqliteSensorHistoryStore = SqliteSensorHistoryStore(
         database(context),
         // Sessions before stages: a stage arriving with its session links to it on insert.
-        listOf(rollupWriter, sleepSessionWriter, sleepStageWriter),
+        listOf(rollupWriter, sleepSessionWriter, sleepStageWriter, workoutSessionWriter),
         zone,
     )
 

@@ -56,6 +56,9 @@ import org.sand.ticwatch.phone.insights.SleepScore
 import org.sand.ticwatch.phone.insights.SleepScoreComponent
 import org.sand.ticwatch.phone.insights.Stress
 import org.sand.ticwatch.phone.insights.StressLevel
+import org.sand.ticwatch.phone.insights.TemperatureSeries
+import org.sand.ticwatch.phone.insights.TemperatureSpan
+import org.sand.ticwatch.phone.insights.TemperatureWindow
 import org.sand.ticwatch.phone.insights.TrainingLoadBalance
 import org.sand.ticwatch.phone.insights.Trend
 import org.sand.ticwatch.phone.spaceweather.KpOrigin
@@ -70,6 +73,7 @@ private const val PERCENT = 100
 private const val MINUTES_PER_HOUR = 60
 private const val SECONDS_PER_HOUR = 3_600.0
 private val SPARKLINE_HEIGHT = 56.dp
+private val TEMPERATURE_CARD_CHART_HEIGHT = 96.dp
 private val SECTION_GAP = 8.dp
 private val BLOOD_PRESSURE_WINDOW: Duration = Duration.ofDays(3)
 
@@ -97,6 +101,7 @@ private data class MetricsUiState(
     val bloodPressure: List<BloodPressureReading>,
     val bloodPressureEnd: Instant,
     val spaceWeather: SpaceWeather?,
+    val temperature: TemperatureWindow,
 )
 
 private suspend fun loadMetrics(appContainer: AppContainer): MetricsUiState {
@@ -107,6 +112,7 @@ private suspend fun loadMetrics(appContainer: AppContainer): MetricsUiState {
         bloodPressure = appContainer.bloodPressureMonitor.since(bloodPressureEnd.minus(BLOOD_PRESSURE_WINDOW)),
         bloodPressureEnd = bloodPressureEnd,
         spaceWeather = appContainer.spaceWeatherStore.load(),
+        temperature = appContainer.temperatureHistory.window(TemperatureSpan.DAY),
     )
 }
 
@@ -127,6 +133,15 @@ fun HealthInsightsScreen(appContainer: AppContainer) {
     var sleepJournalOpen by remember { mutableStateOf(false) }
     var workoutJournalOpen by remember { mutableStateOf(false) }
     var fatigueHistoryOpen by remember { mutableStateOf(false) }
+    var temperatureHistoryOpen by remember { mutableStateOf(false) }
+
+    if (temperatureHistoryOpen) {
+        TemperatureHistorySheet(
+            appContainer.temperatureHistory,
+            anyChangeOf(appContainer.historyChanges, appContainer.cloudHistoryArrivals),
+            onDismiss = { temperatureHistoryOpen = false },
+        )
+    }
 
     if (fatigueHistoryOpen) {
         FatigueHistorySheet(
@@ -163,6 +178,9 @@ fun HealthInsightsScreen(appContainer: AppContainer) {
             val trends = loaded.trends
             val derived = scores
             item(key = MetricsItem.READINESS) { ReadinessCard(loaded.readiness, trends.readiness) }
+            metrics?.temperature?.let { temperature ->
+                item(key = MetricsItem.TEMPERATURE) { TemperatureCard(temperature, onClick = { temperatureHistoryOpen = true }) }
+            }
             item(key = MetricsItem.FATIGUE) { FatigueIndexCard(derived?.fatigue, onClick = { fatigueHistoryOpen = true }) }
             item(key = MetricsItem.SLEEP) { SleepScoreCard(derived?.sleepScore, loaded.sleep, trends.sleep, onClick = { sleepJournalOpen = true }) }
             item(key = MetricsItem.HRV) { HrvStatusCard(derived?.hrvStatus) }
@@ -179,7 +197,7 @@ fun HealthInsightsScreen(appContainer: AppContainer) {
 }
 
 /** Stable keys of the Metrics tab's lazy list items. */
-private enum class MetricsItem { SNAPSHOT, WORKOUT, LOADING, READINESS, FATIGUE, SLEEP, HRV, TRAINING_LOAD, STRESS, BLOOD_PRESSURE, BAROMETER, LIGHT, SPACE_WEATHER }
+private enum class MetricsItem { SNAPSHOT, WORKOUT, LOADING, READINESS, TEMPERATURE, FATIGUE, SLEEP, HRV, TRAINING_LOAD, STRESS, BLOOD_PRESSURE, BAROMETER, LIGHT, SPACE_WEATHER }
 
 @Composable
 private fun ReadinessCard(readiness: Readiness?, trend: Trend) =
@@ -189,6 +207,21 @@ private fun ReadinessCard(readiness: Readiness?, trend: Trend) =
     Detail(stringResource(R.string.night_rmssd), readiness.nightlyRmssdMs?.let { stringResource(R.string.unit_ms, it) })
     Detail(stringResource(R.string.resting_hr), readiness.restingHeartRateBpm?.let { stringResource(R.string.unit_bpm, it) })
     Detail(stringResource(R.string.skin_temp_delta), readiness.skinTemperatureDeltaCelsius?.let { stringResource(R.string.unit_celsius_delta, it) })
+}
+
+/** Laid out like the readiness card, without its scale: the body temperature large, the others as details, then all three plotted. */
+@Composable
+private fun TemperatureCard(window: TemperatureWindow, onClick: () -> Unit) =
+    InsightCard(stringResource(R.string.card_temperature), trend = null, onClick = onClick) {
+    val body = window.latest(TemperatureSeries.BODY)
+    Text(text = body?.let { stringResource(R.string.unit_celsius, it) } ?: MISSING, style = MaterialTheme.typography.headlineSmall)
+    Text(text = stringResource(TemperatureSeries.BODY.label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(SECTION_GAP))
+    listOf(TemperatureSeries.WRIST, TemperatureSeries.OUTDOOR).forEach { series ->
+        Detail(stringResource(series.label), window.latest(series)?.let { stringResource(R.string.unit_celsius, it) })
+    }
+    Spacer(Modifier.height(SECTION_GAP))
+    TemperatureChart(window, TEMPERATURE_CARD_CHART_HEIGHT)
 }
 
 @Composable

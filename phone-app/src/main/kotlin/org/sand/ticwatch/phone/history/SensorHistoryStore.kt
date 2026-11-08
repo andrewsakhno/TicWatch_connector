@@ -54,6 +54,9 @@ interface SensorHistoryMaintenance : SensorHistoryStorageSize {
      */
     suspend fun purgeSleepSessionsBefore(cutoff: Instant, keepUnsynced: Boolean): Int
 
+    /** Deletes workouts starting before [cutoff]; the raw rows they came from go to the cloud, so nothing is held back. */
+    suspend fun purgeWorkoutSessionsBefore(cutoff: Instant): Int
+
     /** Shrinks the file after deletes (DELETE alone never returns space to the filesystem). */
     suspend fun compact()
     suspend fun clear()

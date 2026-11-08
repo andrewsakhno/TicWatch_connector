@@ -47,6 +47,7 @@ class VendorWindowSampleSource(
                 measurer.measure(due, window).forEach { emit(it) }
                 val finishedAt = clock.instant()
                 due.forEach { lastRun[it.group] = finishedAt }
+                awaitMinimumSpacing(Duration.between(now, finishedAt))
             }
             awaitNextDue(lastRun)
         }
@@ -55,6 +56,14 @@ class VendorWindowSampleSource(
     private fun dueIn(group: AggregatorGroup, lastRun: Map<MeasurementGroup, Instant>, now: Instant): Duration {
         val last = lastRun[group.group] ?: return Duration.ZERO
         return Duration.between(now, last.plus(cadence.intervalFor(group.group)))
+    }
+
+    /**
+     * A zero interval (live sync) with every group gated off makes [WindowMeasurer.measure] return at once; without
+     * this floor the loop spins, flooding the log by gigabytes and keeping the CPU busy all night.
+     */
+    private suspend fun awaitMinimumSpacing(spent: Duration) {
+        if (spent < MIN_WINDOW_SPACING) scheduler.awaitNext(MIN_WINDOW_SPACING.minus(spent))
     }
 
     private suspend fun awaitNextDue(lastRun: Map<MeasurementGroup, Instant>) {
@@ -69,6 +78,9 @@ class VendorWindowSampleSource(
 
         /** Groups due within this long join a window another group started. */
         val PIGGYBACK: Duration = Duration.ofMinutes(5)
+
+        /** Shortest gap from one window's start to the next, whether or not the window actually measured. */
+        val MIN_WINDOW_SPACING: Duration = Duration.ofSeconds(30)
     }
 }
 

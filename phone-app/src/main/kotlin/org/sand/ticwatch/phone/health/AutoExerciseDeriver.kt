@@ -47,7 +47,8 @@ class AutoExerciseDeriver(
     private val minInterval: Duration = Duration.ofSeconds(30),
     private val maxInterval: Duration = Duration.ofMinutes(10),
     private val maxGap: Duration = Duration.ofMinutes(1),
-    private val minDuration: Duration = Duration.ofMinutes(10),
+    /** Read on every run: the auto-workout delay set for the watch, so both detect the same walks. */
+    private val minDuration: () -> Duration,
     private val settle: Duration = Duration.ofMinutes(5),
     private val maxWorkout: Duration = Duration.ofHours(12),
 ) : SampleDeriver {
@@ -60,7 +61,7 @@ class AutoExerciseDeriver(
         val emittedUntil = log.last()
         val workouts = reader.samples(WORKOUTS, from.minus(maxWorkout), newest, samples).mapNotNull { w -> w.endedAt?.let { w.recordedAt to it } }
         val detected = stretches(reader.samples(STEPS, from, newest.plusMillis(1), samples))
-            .filter { Duration.between(it.start, it.end) >= minDuration }
+            .let { stretches -> minDuration().let { min -> stretches.filter { Duration.between(it.start, it.end) >= min } } }
             .filter { !it.end.plus(settle).isAfter(newest) }
             .filter { emittedUntil == null || it.start.isAfter(emittedUntil) }
             .filter { stretch -> workouts.none { (start, end) -> start.isBefore(stretch.end) && end.isAfter(stretch.start) } }
